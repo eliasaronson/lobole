@@ -64,17 +64,23 @@ std::vector<SharedEnd> SharedEnds(const Entity& a, const Entity& b,
                                   double tol = 1e-4);
 
 // The fillet of radius `radius` between curve `c1` at its end `w1` and `c2`
-// at `w2`, the two ends meeting at the corner. Lines and arcs: the centre is
-// where the curves' offsets by the radius toward the inside of the corner
-// meet, nearest the corner (closed form). `trimmed1/2` are the curves cut
-// back to their tangent points t1/t2, and `arc` runs from one tangent point
-// to the other on the side facing the corner (`arcStartsAtT1` says which is
-// its start).
+// at `w2`, the two ends meeting at the corner. The centre is where the
+// curves' offsets by the radius toward the inside of the corner meet,
+// nearest the corner: in closed form for lines and arcs; with an elliptical
+// arc or a spline in the pair, by Newton on the two curve parameters, seeded
+// by the fillet of the two end tangents, and refused as too large where the
+// curve bends tighter than the radius between the corner and its tangent
+// point. `trimmed1/2` are the curves cut back to their tangent points t1/t2
+// -- a spline is returned whole, and `param1/2` is where on it (its
+// parameter) the cut goes -- and `arc` runs from one tangent point to the
+// other on the side facing the corner (`arcStartsAtT1` says which is its
+// start).
 struct FilletGeometry {
   glm::dvec2 corner{0.0}, center{0.0}, t1{0.0}, t2{0.0};
   Arc arc{};
   bool arcStartsAtT1 = true;
   Entity trimmed1, trimmed2;
+  double param1 = 0.0, param2 = 0.0;
 };
 // Why a fillet was refused. `tooLarge`: the curves take a fillet, just not
 // this big one (the caller can search for the largest that fits).

@@ -3,9 +3,12 @@
 
 #include "core/sketch/SketchSplit.h"
 
+#include "core/sketch/SketchSpline.h"
+
 #include <algorithm>
 #include <cmath>
 #include <functional>
+#include <limits>
 
 namespace sketch {
 
@@ -91,11 +94,171 @@ std::optional<Param> ParamOf(const Entity& e) {
   return std::nullopt; // a point or a label: no curve
 }
 
+// The parameter of the point of `c` nearest `p`: the nearest of four
+// samples per step, then a ternary search between its neighbours.
+double NearestParam(const Param& c, glm::dvec2 p) {
+  const int n = 4 * std::max(c.samples, 1);
+  const double step = (c.t1 - c.t0) / n;
+  double best = c.t0, bestD = std::numeric_limits<double>::infinity();
+  for (int i = 0; i <= n; i++) {
+    const double t = c.t0 + step * i;
+    const double d = glm::length(c.at(t) - p);
+    if (d < bestD) {
+      bestD = d;
+      best = t;
+    }
+  }
+  double lo = std::max(c.t0, best - step), hi = std::min(c.t1, best + step);
+  for (int k = 0; k < 200 && hi - lo > 0.0; k++) {
+    const double m1 = lo + (hi - lo) / 3.0, m2 = hi - (hi - lo) / 3.0;
+    if (m1 <= lo || m2 >= hi)
+      break;
+    if (glm::length(c.at(m1) - p) <= glm::length(c.at(m2) - p))
+      hi = m2;
+    else
+      lo = m1;
+  }
+  const double mid = 0.5 * (lo + hi);
+  return glm::length(c.at(mid) - p) <= bestD ? mid : best;
+}
+
+// Is the curve a line, an arc or a circle (whose crossings have a side)?
+bool Simple(const Entity& e) {
+  return std::holds_alternative<Line>(e) || std::holds_alternative<Arc>(e) ||
+         std::holds_alternative<Circle>(e);
+}
+
+std::vector<glm::dvec2> CrossingsSimple(const Entity& e, const Entity& other);
+
+// Two curves neither of which is a line, an arc or a circle: where their
+// polylines cross, refined by Newton on both parameters.
+std::vector<glm::dvec2> CrossingsGeneral(const Param& a, const Param& b) {
+  std::vector<glm::dvec2> out;
+  const auto sample = [](const Param& c, std::vector<double>& ts,
+                         std::vector<glm::dvec2>& ps) {
+    const int n = std::max(c.samples, 8);
+    for (int i = 0; i <= n; i++) {
+      ts.push_back(c.t0 + (c.t1 - c.t0) * i / n);
+      ps.push_back(c.at(ts.back()));
+    }
+  };
+  std::vector<double> ta, tb;
+  std::vector<glm::dvec2> pa, pb;
+  sample(a, ta, pa);
+  sample(b, tb, pb);
+  // Chunks of 16 segments with their boxes, so most pairs are skipped.
+  struct Box {
+    size_t i0, i1;
+    glm::dvec2 lo, hi;
+  };
+  const auto boxes = [](const std::vector<glm::dvec2>& ps) {
+    std::vector<Box> out;
+    for (size_t i = 0; i + 1 < ps.size(); i += 16) {
+      Box bx{i, std::min(i + 16, ps.size() - 1), ps[i], ps[i]};
+      for (size_t k = bx.i0; k <= bx.i1; k++) {
+        bx.lo = glm::min(bx.lo, ps[k]);
+        bx.hi = glm::max(bx.hi, ps[k]);
+      }
+      out.push_back(bx);
+    }
+    return out;
+  };
+  const std::vector<Box> ba = boxes(pa), bb = boxes(pb);
+  const auto cross = [](glm::dvec2 u, glm::dvec2 v) {
+    return u.x * v.y - u.y * v.x;
+  };
+  const auto keep = [&](glm::dvec2 p) {
+    for (const glm::dvec2& q : out)
+      if (glm::length(q - p) < 1e-9)
+        return;
+    out.push_back(p);
+  };
+  for (const Box& x : ba)
+    for (const Box& y : bb) {
+      if (x.hi.x < y.lo.x || y.hi.x < x.lo.x || x.hi.y < y.lo.y ||
+          y.hi.y < x.lo.y)
+        continue;
+      for (size_t i = x.i0; i < x.i1; i++)
+        for (size_t j = y.i0; j < y.i1; j++) {
+          const glm::dvec2 r = pa[i + 1] - pa[i], q = pb[j + 1] - pb[j];
+          const double den = cross(r, q);
+          if (std::abs(den) < 1e-300)
+            continue;
+          const double s = cross(pb[j] - pa[i], q) / den;
+          const double t = cross(pb[j] - pa[i], r) / den;
+          if (s < 0.0 || s > 1.0 || t < 0.0 || t > 1.0)
+            continue;
+          // Newton on F(u, w) = a(u) - b(w), from the polylines' crossing.
+          double u = ta[i] + s * (ta[i + 1] - ta[i]);
+          double w = tb[j] + t * (tb[j + 1] - tb[j]);
+          const double hu = 1e-7 * (a.t1 - a.t0), hw = 1e-7 * (b.t1 - b.t0);
+          bool ok = false;
+          for (int it = 0; it < 60; it++) {
+            const glm::dvec2 F = a.at(u) - b.at(w);
+            if (glm::length(F) < 1e-13 * (1.0 + glm::length(a.at(u)))) {
+              ok = true;
+              break;
+            }
+            const glm::dvec2 du = (a.at(u + hu) - a.at(u - hu)) / (2.0 * hu);
+            const glm::dvec2 dw = (b.at(w + hw) - b.at(w - hw)) / (2.0 * hw);
+            // J = [du, -dw]; solve J [x, y] = -F.
+            const double det = cross(du, -dw);
+            if (std::abs(det) < 1e-300)
+              break;
+            const double x = cross(-F, -dw) / det;
+            const double y = cross(du, -F) / det;
+            u += x;
+            w += y;
+            if (std::abs(x) < 1e-16 * (a.t1 - a.t0) &&
+                std::abs(y) < 1e-16 * (b.t1 - b.t0)) {
+              ok = glm::length(a.at(u) - b.at(w)) < 1e-9;
+              break;
+            }
+          }
+          const double su = 1e-12 * (a.t1 - a.t0), sw = 1e-12 * (b.t1 - b.t0);
+          if (ok && u >= a.t0 - su && u <= a.t1 + su && w >= b.t0 - sw &&
+              w <= b.t1 + sw)
+            keep(a.at(std::clamp(u, a.t0, a.t1)));
+        }
+    }
+  return out;
+}
+
 } // namespace
 
 bool Splittable(const Entity& e) {
-  return std::holds_alternative<Line>(e) || std::holds_alternative<Arc>(e) ||
-         std::holds_alternative<Circle>(e);
+  if (const auto* bs = std::get_if<BSpline>(&e))
+    return bs->poles.size() >= 2 && BSplineDegree(*bs) >= 1;
+  return Simple(e) || std::holds_alternative<Ellipse>(e) ||
+         std::holds_alternative<EllipseArc>(e);
+}
+
+size_t CutsFor(const Entity& e) {
+  return std::holds_alternative<Circle>(e) || std::holds_alternative<Ellipse>(e)
+             ? 2
+             : 1;
+}
+
+std::optional<double> CurveParam(const Entity& e, glm::dvec2 p) {
+  if (const auto* el = std::get_if<Ellipse>(&e))
+    return Into(EllipseParamOfPoint(el->center, el->rMajor, el->rMinor,
+                                    el->rotation, p),
+                0.0);
+  if (const auto* ea = std::get_if<EllipseArc>(&e)) {
+    double en = ea->endParam;
+    while (en <= ea->startParam)
+      en += kTwoPi;
+    const double t = Into(EllipseParamOfPoint(ea->center, ea->rMajor,
+                                              ea->rMinor, ea->rotation, p),
+                          ea->startParam);
+    // Past the sweep: the nearer end.
+    if (t > en)
+      return t - en < ea->startParam + kTwoPi - t ? en : ea->startParam;
+    return t;
+  }
+  if (const auto* bs = std::get_if<BSpline>(&e))
+    return SplineParamNearest(*bs, p);
+  return std::nullopt;
 }
 
 double CurveLength(const Entity& e) {
@@ -105,7 +268,18 @@ double CurveLength(const Entity& e) {
     return kTwoPi * c->radius;
   if (const auto* a = std::get_if<Arc>(&e))
     return a->radius * (SweepEnd(*a) - a->startAngle);
-  return 0.0;
+  const auto c = ParamOf(e);
+  if (!c)
+    return 0.0;
+  const int n = 8 * std::max(c->samples, 8);
+  double len = 0.0;
+  glm::dvec2 prev = c->at(c->t0);
+  for (int i = 1; i <= n; i++) {
+    const glm::dvec2 q = c->at(c->t0 + (c->t1 - c->t0) * i / n);
+    len += glm::length(q - prev);
+    prev = q;
+  }
+  return len;
 }
 
 std::optional<NearestPoint> NearestOnCurve(const Entity& e, glm::dvec2 p) {
@@ -128,6 +302,12 @@ std::optional<NearestPoint> NearestOnCurve(const Entity& e, glm::dvec2 p) {
       const glm::dvec2 s = ArcPointUV(*a, 1), en = ArcPointUV(*a, 2);
       q = glm::length(p - s) <= glm::length(p - en) ? s : en;
     }
+  } else if (const auto* bs = std::get_if<BSpline>(&e)) {
+    if (!Splittable(e))
+      return std::nullopt;
+    q = BSplineEvalUV(*bs, SplineParamNearest(*bs, p));
+  } else if (const auto c = ParamOf(e)) {
+    q = c->at(NearestParam(*c, p));
   } else {
     return std::nullopt;
   }
@@ -140,10 +320,30 @@ bool AtCurveEnd(const Entity& e, glm::dvec2 p, double tol) {
   if (const auto* a = std::get_if<Arc>(&e))
     return glm::length(p - ArcPointUV(*a, 1)) < tol ||
            glm::length(p - ArcPointUV(*a, 2)) < tol;
+  if (const auto* ea = std::get_if<EllipseArc>(&e))
+    return glm::length(p - EllipseArcPointUV(*ea, 1)) < tol ||
+           glm::length(p - EllipseArcPointUV(*ea, 2)) < tol;
+  if (const auto* bs = std::get_if<BSpline>(&e))
+    return !bs->poles.empty() && (glm::length(p - bs->poles.front()) < tol ||
+                                  glm::length(p - bs->poles.back()) < tol);
   return false;
 }
 
 std::vector<glm::dvec2> Crossings(const Entity& e, const Entity& other) {
+  if (Simple(e))
+    return CrossingsSimple(e, other);
+  if (!Splittable(e))
+    return {};
+  if (Simple(other))
+    return CrossingsSimple(other, e);
+  const auto a = ParamOf(e), b = ParamOf(other);
+  if (!a || !b)
+    return {};
+  return CrossingsGeneral(*a, *b);
+}
+
+namespace {
+std::vector<glm::dvec2> CrossingsSimple(const Entity& e, const Entity& other) {
   std::vector<glm::dvec2> out;
   // The signed distance from `e`'s curve: across a line, out of a circle.
   std::function<double(glm::dvec2)> side;
@@ -286,6 +486,7 @@ std::vector<glm::dvec2> Crossings(const Entity& e, const Entity& other) {
   }
   return out;
 }
+} // namespace
 
 std::vector<Entity> SplitPieces(const Entity& e,
                                 const std::vector<glm::dvec2>& cuts) {
@@ -322,8 +523,127 @@ std::vector<Entity> SplitPieces(const Entity& e,
       t2 += kTwoPi;
     piece(Arc{c->center, c->radius, t1, t2}, true);
     piece(Arc{c->center, c->radius, t2, t1 + kTwoPi}, false);
+  } else if (const auto* ea = std::get_if<EllipseArc>(&e)) {
+    if (cuts.size() != 1)
+      return out;
+    double en = ea->endParam;
+    while (en <= ea->startParam)
+      en += kTwoPi;
+    const double t = *CurveParam(e, cuts[0]);
+    EllipseArc a1 = *ea, a2 = *ea;
+    a1.startParam = ea->startParam;
+    a1.endParam = t;
+    a2.startParam = t;
+    a2.endParam = en;
+    piece(a1, true);
+    piece(a2, false);
+  } else if (const auto* el = std::get_if<Ellipse>(&e)) {
+    if (cuts.size() != 2)
+      return out;
+    const double t1 = *CurveParam(e, cuts[0]);
+    double t2 = Into(*CurveParam(e, cuts[1]), t1);
+    if (t2 <= t1)
+      t2 += kTwoPi;
+    const auto arc = [&](double s0, double s1) {
+      return EllipseArc{el->center,   el->rMajor, el->rMinor,
+                        el->rotation, s0,         s1};
+    };
+    piece(arc(t1, t2), true);
+    piece(arc(t2, t1 + kTwoPi), false);
+  } else if (const auto* bs = std::get_if<BSpline>(&e)) {
+    if (cuts.size() != 1)
+      return out;
+    const auto cut = CutSpline(*bs, SplineParamNearest(*bs, cuts[0]));
+    if (!cut)
+      return out;
+    std::vector<BSpline> splines;
+    for (const SplinePiece& p : cut->pieces)
+      splines.push_back(p.spline);
+    const size_t keeper = KeeperOf(splines);
+    for (size_t i = 0; i < splines.size(); i++)
+      piece(splines[i], i == keeper);
   }
   return out;
+}
+
+size_t KeeperOf(const std::vector<BSpline>& pieces) {
+  size_t best = 0;
+  double bestLen = -1.0;
+  for (size_t i = 0; i < pieces.size(); i++) {
+    const double len = CurveLength(pieces[i]);
+    if (len > bestLen + 1e-12) {
+      bestLen = len;
+      best = i;
+    }
+  }
+  return best;
+}
+
+glm::dvec2 TangentAt(const Entity& e, glm::dvec2 p) {
+  glm::dvec2 d{1.0, 0.0};
+  if (const auto* l = std::get_if<Line>(&e)) {
+    d = l->b - l->a;
+  } else if (const auto* bs = std::get_if<BSpline>(&e)) {
+    if (Splittable(e))
+      d = BSplineDerivUV(*bs, SplineParamNearest(*bs, p));
+  } else if (const auto c = ParamOf(e)) {
+    const double t = NearestParam(*c, p);
+    const double h = 1e-6 * (c->t1 - c->t0);
+    d = c->at(std::min(t + h, c->t1)) - c->at(std::max(t - h, c->t0));
+  }
+  const double len = glm::length(d);
+  return len > 0.0 ? d / len : glm::dvec2(1.0, 0.0);
+}
+
+const char* ConstraintWord(ConstraintKind k) {
+  using K = ConstraintKind;
+  switch (k) {
+  case K::Coincident:
+    return "coincident";
+  case K::Horizontal:
+    return "horizontal";
+  case K::Vertical:
+    return "vertical";
+  case K::Parallel:
+    return "parallel";
+  case K::Perpendicular:
+    return "perpendicular";
+  case K::Equal:
+    return "equal";
+  case K::Distance:
+    return "distance";
+  case K::Radius:
+    return "radius";
+  case K::Angle:
+    return "angle";
+  case K::Tangent:
+    return "tangent";
+  case K::PointOnLine:
+    return "point_on_line";
+  case K::Symmetric:
+    return "symmetric";
+  case K::Midpoint:
+    return "midpoint";
+  case K::Fixed:
+    return "fixed";
+  case K::Concentric:
+    return "concentric";
+  case K::Collinear:
+    return "collinear";
+  case K::DistanceX:
+    return "distance_x";
+  case K::DistanceY:
+    return "distance_y";
+  case K::Diameter:
+    return "diameter";
+  case K::DistancePL:
+    return "distance_pl";
+  case K::Curvature:
+    return "curvature";
+  case K::ArcLength:
+    return "arc_length";
+  }
+  return "constraint";
 }
 
 } // namespace sketch

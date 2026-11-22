@@ -17,14 +17,17 @@
 #include "core/sketch/SketchOrientation.h"
 #include "core/sketch/SketchProfile.h" // SegmentIntersect
 #include "core/sketch/SketchSolver.h"
+#include "core/sketch/SketchSpline.h"
 #include "core/sketch/SketchSplit.h"
 #include "core/sketch/SketchText.h"
 
 #include <algorithm>
 #include <cmath>
+#include <functional>
 #include <limits>
 #include <map>
 #include <set>
+#include <tuple>
 #include <type_traits>
 #include <variant>
 #include <vector>
@@ -736,6 +739,12 @@ std::string CurveName(const sketch::Entity& e) {
     return "arc " + id;
   if (std::holds_alternative<sketch::Circle>(e))
     return "circle " + id;
+  if (std::holds_alternative<sketch::Ellipse>(e))
+    return "ellipse " + id;
+  if (std::holds_alternative<sketch::EllipseArc>(e))
+    return "elliptical arc " + id;
+  if (std::holds_alternative<sketch::BSpline>(e))
+    return "spline " + id;
   return "entity " + id;
 }
 std::string Coord(glm::dvec2 p) {
@@ -744,6 +753,65 @@ std::string Coord(glm::dvec2 p) {
 // A joint this close to another curve's end (or a point) is made coincident
 // with it, mm.
 constexpr double kJointOnEnd = 1e-6;
+// Where a split's joint (at `at`) is held: coincident with another curve's
+// end (or a point) there, replacing the point-on-curve that held that end
+// on the split curve; else on the crossing curve; else it slides. `pieces`
+// are the split's own pieces, which are not "another curve".
+void HoldJoint(SketchFeature& sk, const sketch::PointRef& joint, glm::dvec2 at,
+               uint32_t crossing, const std::vector<uint32_t>& pieces,
+               std::vector<sketch::Constraint>& added) {
+  using K = sketch::ConstraintKind;
+  std::optional<sketch::PointRef> end;
+  for (const sketch::Entity& e : sk.entities) {
+    const uint32_t eid = sketch::EntityId(e);
+    if (std::find(pieces.begin(), pieces.end(), eid) != pieces.end())
+      continue;
+    std::vector<uint8_t> ws = sketch::EndsOf(e);
+    if (std::holds_alternative<sketch::Point>(e))
+      ws = {0};
+    for (uint8_t w : ws)
+      if (glm::length(sketch::EntityPointUV(e, w) - at) < kJointOnEnd) {
+        end = sketch::PointRef{eid, w};
+        break;
+      }
+    if (end)
+      break;
+  }
+  if (end) {
+    const sketch::Constraint join{K::Coincident, joint, *end, 0.0};
+    const std::vector<size_t> gone = sketch::SubsumedBy(sk, join);
+    for (auto it = gone.rbegin(); it != gone.rend(); ++it)
+      sk.constraints.erase(sk.constraints.begin() +
+                           static_cast<std::ptrdiff_t>(*it));
+    added.push_back(join);
+  } else if (crossing != 0) {
+    added.push_back({K::PointOnLine, joint, {crossing, 0}, 0.0});
+  }
+}
+
+// The `count` axis ends (which 3..6) of an ellipse farthest, in its
+// parameter, from both of the parameters t1 and t2.
+std::vector<uint8_t> FarAxisEnds(double t1, double t2, size_t count) {
+  const std::pair<uint8_t, double> ends[] = {
+      {sketch::kEllipseMajorPos, 0.0},
+      {sketch::kEllipseMinorPos, 0.5 * M_PI},
+      {sketch::kEllipseMajorNeg, M_PI},
+      {sketch::kEllipseMinorNeg, 1.5 * M_PI}};
+  const auto apart = [](double a, double b) {
+    const double d = std::fmod(std::abs(a - b), 2.0 * M_PI);
+    return std::min(d, 2.0 * M_PI - d);
+  };
+  std::vector<std::pair<double, uint8_t>> byDistance;
+  for (const auto& [w, t] : ends)
+    byDistance.push_back({-std::min(apart(t, t1), apart(t, t2)), w});
+  std::stable_sort(
+      byDistance.begin(), byDistance.end(),
+      [](const auto& a, const auto& b) { return a.first < b.first; });
+  std::vector<uint8_t> out;
+  for (size_t i = 0; i < count && i < byDistance.size(); i++)
+    out.push_back(byDistance[i].second);
+  return out;
+}
 } // namespace
 
 std::string SketchFeature::SplitRefusal(uint32_t id) const {
@@ -752,20 +820,30 @@ std::string SketchFeature::SplitRefusal(uint32_t id) const {
   if (idx == std::numeric_limits<size_t>::max())
     return "no sketch entity with id " + std::to_string(id);
   const sketch::Entity& e = entities[idx];
-  const char* accepted = "Split takes lines, arcs and circles";
-  if (std::holds_alternative<sketch::BSpline>(e))
-    return "spline " + std::to_string(id) + ": a spline is not split yet (" +
-           accepted + ")";
-  if (std::holds_alternative<sketch::Ellipse>(e))
-    return "ellipse " + std::to_string(id) + ": an ellipse is not split yet (" +
-           accepted + ")";
-  if (std::holds_alternative<sketch::EllipseArc>(e))
-    return "elliptical arc " + std::to_string(id) +
-           ": an elliptical arc is not split yet (" + accepted + ")";
+  const char* accepted = "Split takes lines, arcs, circles, ellipses, "
+                         "elliptical arcs and splines";
+  if (const auto* bs = std::get_if<sketch::BSpline>(&e);
+      bs && !sketch::Splittable(e))
+    return "spline " + std::to_string(id) + " has " +
+           std::to_string(bs->poles.size()) +
+           " pole(s), which is no curve to split (" + accepted + ")";
   if (!sketch::Splittable(e))
     return "entity " + std::to_string(id) + " is " +
            (std::holds_alternative<sketch::Point>(e) ? "a point" : "a label") +
            ", which has no curve to split (" + accepted + ")";
+  const auto rigid = [](double a, double b) {
+    return !(b > 0.0) || !(a > b * (1.0 + 1e-9));
+  };
+  if ((std::holds_alternative<sketch::Ellipse>(e) &&
+       rigid(std::get<sketch::Ellipse>(e).rMajor,
+             std::get<sketch::Ellipse>(e).rMinor)) ||
+      (std::holds_alternative<sketch::EllipseArc>(e) &&
+       rigid(std::get<sketch::EllipseArc>(e).rMajor,
+             std::get<sketch::EllipseArc>(e).rMinor)))
+    return CurveName(e) +
+           " is circle-shaped (its radii are equal), which the solver holds "
+           "rigid, so its pieces could not follow each other: draw it as a "
+           "circle or an arc to split it";
   if (std::string by = GeneratedBy(id); !by.empty())
     return GeneratedRefusal(id, by, "split");
   const bool line = std::holds_alternative<sketch::Line>(e);
@@ -785,7 +863,7 @@ std::string SketchFeature::SplitRefusal(uint32_t id) const {
 
 std::vector<uint32_t>
 SketchFeature::SplitEntity(uint32_t id, const std::vector<SplitCut>& cuts,
-                           std::string* whyNot) {
+                           std::string* whyNot, CutReport* report) {
   const auto fail = [&](const std::string& why) -> std::vector<uint32_t> {
     if (whyNot)
       *whyNot = why;
@@ -795,12 +873,14 @@ SketchFeature::SplitEntity(uint32_t id, const std::vector<SplitCut>& cuts,
     return fail(why);
   const sketch::Entity curve = entities[IndexOfEntity(id)];
   const std::string name = CurveName(curve);
-  const bool circle = std::holds_alternative<sketch::Circle>(curve);
-  const size_t want = circle ? 2 : 1;
+  const size_t want = sketch::CutsFor(curve);
+  const auto* spline = std::get_if<sketch::BSpline>(&curve);
   if (cuts.size() != want)
-    return fail(name + " takes " + (circle ? "two cuts" : "one cut") +
-                " (a closed curve is cut twice), got " +
-                std::to_string(cuts.size()));
+    return fail(name + " takes " + (want == 2 ? "two cuts" : "one cut") +
+                (spline && sketch::SplineClosed(*spline)
+                     ? " (a closed spline's seam is its other)"
+                     : " (a closed curve is cut twice)") +
+                ", got " + std::to_string(cuts.size()));
   const double length = sketch::CurveLength(curve);
   std::vector<glm::dvec2> at;
   std::vector<uint32_t> crossing;
@@ -842,14 +922,27 @@ SketchFeature::SplitEntity(uint32_t id, const std::vector<SplitCut>& cuts,
       p = nearest->at;
     }
     if (sketch::AtCurveEnd(curve, p))
-      return fail("the cut " + Coord(p) + " is at an end of " + name +
-                  ", which splits nothing");
+      return fail("the cut " + Coord(p) + " is at " +
+                  (spline && sketch::SplineClosed(*spline)
+                       ? "the seam of " + name +
+                             ", which is already its ends, so it splits "
+                             "nothing"
+                       : "an end of " + name + ", which splits nothing"));
     for (const glm::dvec2& q : at)
       if (glm::length(q - p) < 1e-4)
         return fail("the two cuts of " + name + " are at one point, " +
                     Coord(p));
     at.push_back(p);
     crossing.push_back(cut.crossing);
+  }
+  if (spline) {
+    const double u = sketch::SplineParamNearest(*spline, at[0]);
+    std::string why;
+    const std::vector<uint32_t> ids =
+        SplitSplineAt(id, u, at[0], crossing[0], 0, report, nullptr, &why);
+    if (ids.empty())
+      return fail(why);
+    return ids;
   }
   return SplitAt(id, at, crossing, false);
 }
@@ -865,8 +958,11 @@ SketchFeature::SplitAt(uint32_t id, const std::vector<glm::dvec2>& at,
     return {};
   const bool line = std::holds_alternative<sketch::Line>(original);
   const bool circle = std::holds_alternative<sketch::Circle>(original);
+  const bool ellipse = std::holds_alternative<sketch::Ellipse>(original);
+  const bool ellArc = std::holds_alternative<sketch::EllipseArc>(original);
+  const bool closed = circle || ellipse; // cut twice, no ends
   const uint8_t farEnd =
-      line ? 1 : 2; // the end piece 2 takes (none on a circle)
+      line ? 1 : 2; // the end piece 2 takes (none on a closed curve)
   const auto isLineId = [&](uint32_t e) {
     if (sketch::IsDatum(e))
       return e != sketch::kOrigin;
@@ -879,7 +975,7 @@ SketchFeature::SplitAt(uint32_t id, const std::vector<glm::dvec2>& at,
   // end, read as the solver reads a joint (sketch::Solver: the first
   // coincident between an end of each).
   std::vector<bool> joinedFar(constraints.size(), false);
-  if (!circle) {
+  if (!closed) {
     const std::vector<uint8_t> ends = sketch::EndsOf(original);
     for (size_t k = 0; k < constraints.size(); k++) {
       const sketch::Constraint& t = constraints[k];
@@ -915,7 +1011,7 @@ SketchFeature::SplitAt(uint32_t id, const std::vector<glm::dvec2>& at,
   const uint32_t newId = AddEntity(pieces[1]); // may reallocate `entities`
 
   std::vector<sketch::Constraint> added;
-  if (!circle) {
+  if (!closed) {
     // An end's constraints go with the piece that holds the end; so does a
     // tangent joined there. A whole-edge distance {id,0}-{id,1} therefore
     // spans both pieces.
@@ -948,8 +1044,9 @@ SketchFeature::SplitAt(uint32_t id, const std::vector<glm::dvec2>& at,
           sym.driven = con.driven;
           con = sym;
         }
-    // The far end's coordinate expressions go with it.
-    if (auto it = entityExprs.find(id); it != entityExprs.end()) {
+    // The far end's coordinate expressions go with it (an ellipse has
+    // none).
+    if (auto it = entityExprs.find(id); it != entityExprs.end() && !ellArc) {
       const std::vector<std::string> farFields =
           line ? std::vector<std::string>{"bx", "by"}
                : std::vector<std::string>{"end_angle_deg"};
@@ -988,8 +1085,33 @@ SketchFeature::SplitAt(uint32_t id, const std::vector<glm::dvec2>& at,
         // equal radius would, with the cuts opposite each other).
         added.push_back({K::Coincident, {newId, 2}, {id, 1}, 0.0});
         added.push_back({K::Tangent, {id, 0}, {newId, 0}, 0.0});
+      } else if (ellipse) {
+        // The circle's joints, and the two axis ends of piece 2 farthest
+        // from the cuts held on piece 1's ellipse: a concentric would
+        // leave cuts a diameter apart one equation short (the second cut
+        // is the first's mirror), and an axis end near a cut repeats it.
+        added.push_back({K::Coincident, {newId, 2}, {id, 1}, 0.0});
+        added.push_back({K::Tangent, {id, 0}, {newId, 0}, 0.0});
+        const auto& g = std::get<sketch::EllipseArc>(pieces[0]);
+        for (uint8_t w : FarAxisEnds(g.startParam, g.endParam, 2))
+          added.push_back({K::PointOnLine, {newId, w}, {id, 0}, 0.0});
       } else {
         added.push_back({K::Concentric, {id, 0}, {newId, 0}, 0.0});
+        if (ellArc) {
+          // The concentric and the joint leave piece 2's ellipse one
+          // turn (or, tied by a major end, one minor radius) from piece
+          // 1's: an axis end coincident pins it. Not the end the cut is
+          // near -- there turning the ellipse slides the joint along it,
+          // so the joint would not hold the turn -- and an equal radius
+          // fails there too.
+          const auto& g = std::get<sketch::EllipseArc>(pieces[0]);
+          const double t = g.endParam;
+          const double sn = std::sin(t), cs = std::cos(t);
+          const uint8_t w = g.rMajor * sn * sn >= g.rMinor * cs * cs
+                                ? sketch::kEllipseMajorPos
+                                : sketch::kEllipseMinorPos;
+          added.push_back({K::Coincident, {newId, w}, {id, w}, 0.0});
+        }
       }
     }
     // Where each joint is held: coincident with another curve's end (or a
@@ -997,34 +1119,9 @@ SketchFeature::SplitAt(uint32_t id, const std::vector<glm::dvec2>& at,
     // curve; else on the crossing curve; else it slides.
     for (size_t j = 0; j < at.size(); j++) {
       const sketch::PointRef joint =
-          circle ? sketch::PointRef{id, uint8_t(j == 0 ? 1 : 2)}
+          closed ? sketch::PointRef{id, uint8_t(j == 0 ? 1 : 2)}
                  : sketch::PointRef{id, farEnd};
-      std::optional<sketch::PointRef> end;
-      for (const sketch::Entity& e : entities) {
-        const uint32_t eid = sketch::EntityId(e);
-        if (eid == id || eid == newId)
-          continue;
-        std::vector<uint8_t> ws = sketch::EndsOf(e);
-        if (std::holds_alternative<sketch::Point>(e))
-          ws = {0};
-        for (uint8_t w : ws)
-          if (glm::length(sketch::EntityPointUV(e, w) - at[j]) < kJointOnEnd) {
-            end = sketch::PointRef{eid, w};
-            break;
-          }
-        if (end)
-          break;
-      }
-      if (end) {
-        const sketch::Constraint join{K::Coincident, joint, *end, 0.0};
-        const std::vector<size_t> gone = sketch::SubsumedBy(*this, join);
-        for (auto it = gone.rbegin(); it != gone.rend(); ++it)
-          constraints.erase(constraints.begin() +
-                            static_cast<std::ptrdiff_t>(*it));
-        added.push_back(join);
-      } else if (crossing[j] != 0) {
-        added.push_back({K::PointOnLine, joint, {crossing[j], 0}, 0.0});
-      }
+      HoldJoint(*this, joint, at[j], crossing[j], {id, newId}, added);
     }
   }
   constraints.insert(constraints.end(), added.begin(), added.end());
@@ -1036,12 +1133,288 @@ SketchFeature::SplitAt(uint32_t id, const std::vector<glm::dvec2>& at,
         std::find(op.sourceIds.begin(), op.sourceIds.end(), id) !=
             op.sourceIds.end())
       op.sourceIds.push_back(newId);
-    if (!circle && op.centerEntity == id && op.centerWhich == farEnd)
+    if (!closed && op.centerEntity == id && op.centerWhich == farEnd)
       op.centerEntity = newId;
   }
   if (!derived.empty())
     RegenerateDerived();
   return {id, newId};
+}
+
+namespace {
+// Why spline `id` of `sk` cannot be cut at parameter `u`, keeping `keep`
+// (SplitSplineAt's): "" when it can.
+std::string SplineCutRefusal(const SketchFeature& sk, uint32_t id, double u,
+                             int keep) {
+  const size_t idx = sk.IndexOfEntity(id);
+  if (idx == std::numeric_limits<size_t>::max())
+    return "no sketch entity with id " + std::to_string(id);
+  const auto* sp = std::get_if<sketch::BSpline>(&sk.entities[idx]);
+  if (!sp)
+    return "entity " + std::to_string(id) + " is not a spline";
+  const std::string name = "spline " + std::to_string(id);
+  const auto cut = sketch::CutSpline(*sp, u);
+  if (!cut)
+    return "the cut is at an end of " + name + ", which splits nothing";
+  const size_t lo = keep == 2 ? cut->before : 0;
+  const size_t hi = keep == 1 ? cut->before : cut->pieces.size();
+  if (lo >= hi)
+    return "the cut leaves nothing of " + name;
+  std::vector<bool> kept(sp->poles.size(), false);
+  for (size_t i = lo; i < hi; i++) {
+    if (cut->pieces[i].spline.poles.size() > 255)
+      return "a piece of " + name + " would carry " +
+             std::to_string(cut->pieces[i].spline.poles.size()) +
+             " poles, past the 255 a sketch spline holds";
+    for (int src : cut->pieces[i].source)
+      if (src >= 0)
+        kept[static_cast<size_t>(src)] = true;
+  }
+  for (const sketch::DerivedOp& op : sk.derived)
+    if (op.centerEntity == id && op.centerWhich < kept.size() &&
+        !kept[op.centerWhich])
+      return "a linked pattern is centred on pole " +
+             std::to_string(op.centerWhich) + " of " + name +
+             ", which the cut replaces: centre it elsewhere, then split";
+  return {};
+}
+} // namespace
+
+std::vector<uint32_t>
+SketchFeature::SplitSplineAt(uint32_t id, double u, glm::dvec2 at,
+                             uint32_t crossing, int keep, CutReport* report,
+                             sketch::PointRef* cutEnd, std::string* whyNot) {
+  using K = sketch::ConstraintKind;
+  const auto fail = [&](const std::string& why) -> std::vector<uint32_t> {
+    if (whyNot)
+      *whyNot = why;
+    return {};
+  };
+  const size_t idx = IndexOfEntity(id);
+  if (idx == std::numeric_limits<size_t>::max())
+    return fail("no sketch entity with id " + std::to_string(id));
+  const auto* sp = std::get_if<sketch::BSpline>(&entities[idx]);
+  if (!sp)
+    return fail("entity " + std::to_string(id) + " is not a spline");
+  if (std::string why = SplineCutRefusal(*this, id, u, keep); !why.empty())
+    return fail(why);
+  const sketch::BSpline original = *sp;
+  const std::string name = "spline " + std::to_string(id);
+  const size_t n = original.poles.size();
+  const bool closed = sketch::SplineClosed(original);
+  const auto cut = sketch::CutSpline(original, u);
+  const size_t lo = keep == 2 ? cut->before : 0;
+  const size_t hi = keep == 1 ? cut->before : cut->pieces.size();
+  // Where each original pole went: (piece, which), or nowhere (replaced).
+  std::vector<std::optional<std::pair<size_t, uint8_t>>> where(n);
+  for (size_t i = lo; i < hi; i++) {
+    const std::vector<int>& src = cut->pieces[i].source;
+    for (size_t k = 0; k < src.size(); k++)
+      if (src[k] >= 0 && !where[static_cast<size_t>(src[k])])
+        where[static_cast<size_t>(src[k])] = {i, static_cast<uint8_t>(k)};
+  }
+
+  const auto isLineId = [&](uint32_t e) {
+    if (sketch::IsDatum(e))
+      return e != sketch::kOrigin;
+    const size_t i = IndexOfEntity(e);
+    return i != std::numeric_limits<size_t>::max() &&
+           std::holds_alternative<sketch::Line>(entities[i]);
+  };
+  // Before anything moves: the end each tangent or curvature on the spline
+  // is joined at (as the solver reads a joint), and which kept piece each
+  // point on the spline lies on.
+  std::vector<int> joinedAt(constraints.size(), -1);
+  std::vector<int> onPiece(constraints.size(), -1);
+  const std::vector<uint8_t> ends = sketch::EndsOf(original);
+  const auto isEnd = [](const std::vector<uint8_t>& es, uint8_t w) {
+    return std::find(es.begin(), es.end(), w) != es.end();
+  };
+  for (size_t k = 0; k < constraints.size(); k++) {
+    const sketch::Constraint& t = constraints[k];
+    if (t.kind == K::PointOnLine && t.b.entity == id && t.a.entity != id) {
+      const size_t ai = IndexOfEntity(t.a.entity);
+      const glm::dvec2 q = sketch::IsDatum(t.a.entity)
+                               ? sketch::DatumPointUV(t.a.entity, t.a.which)
+                           : ai == std::numeric_limits<size_t>::max()
+                               ? glm::dvec2(0.0)
+                               : sketch::EntityPointUV(entities[ai], t.a.which);
+      double best = std::numeric_limits<double>::infinity();
+      for (size_t i = lo; i < hi; i++) {
+        const auto nr = sketch::NearestOnCurve(cut->pieces[i].spline, q);
+        if (nr && nr->distance < best) {
+          best = nr->distance;
+          onPiece[k] = static_cast<int>(i);
+        }
+      }
+      // On the part a fillet removed: nothing of the curve is there.
+      if (best > 1e-6 * (1.0 + sketch::CurveLength(original)))
+        onPiece[k] = -2;
+      continue;
+    }
+    if ((t.kind != K::Tangent && t.kind != K::Curvature) ||
+        (t.a.entity == id) == (t.b.entity == id))
+      continue;
+    const uint32_t other = t.a.entity == id ? t.b.entity : t.a.entity;
+    const size_t oi = IndexOfEntity(other);
+    if (oi == std::numeric_limits<size_t>::max())
+      continue;
+    const std::vector<uint8_t> otherEnds = sketch::EndsOf(entities[oi]);
+    for (const sketch::Constraint& c : constraints) {
+      if (c.kind != K::Coincident)
+        continue;
+      bool found = false;
+      for (const auto& [p, q] : {std::pair{c.a, c.b}, std::pair{c.b, c.a}})
+        if (p.entity == id && isEnd(ends, p.which) && q.entity == other &&
+            isEnd(otherEnds, q.which)) {
+          joinedAt[k] = p.which;
+          found = true;
+          break;
+        }
+      if (found)
+        break;
+    }
+  }
+
+  // The pieces: the longest kept keeps the id. AddEntity may reallocate
+  // `entities`: nothing above is dereferenced past here.
+  std::vector<sketch::BSpline> kept;
+  for (size_t i = lo; i < hi; i++)
+    kept.push_back(cut->pieces[i].spline);
+  const size_t keeper = lo + sketch::KeeperOf(kept);
+  std::vector<uint32_t> ids(cut->pieces.size(), 0);
+  ids[keeper] = id;
+  sketch::BSpline first = cut->pieces[keeper].spline;
+  first.id = id;
+  entities[idx] = first;
+  for (size_t i = lo; i < hi; i++)
+    if (i != keeper)
+      ids[i] = AddEntity(cut->pieces[i].spline);
+  const auto refOf = [&](size_t pole) -> std::optional<sketch::PointRef> {
+    if (pole >= n || !where[pole])
+      return std::nullopt;
+    return sketch::PointRef{ids[where[pole]->first], where[pole]->second};
+  };
+
+  // The transfer.
+  std::vector<std::string> dropped;
+  std::vector<sketch::Constraint> survivors;
+  survivors.reserve(constraints.size());
+  for (size_t k = 0; k < constraints.size(); k++) {
+    sketch::Constraint con = constraints[k];
+    const PointSlots slots = PointSlotsOf(con, isLineId(con.c.entity));
+    std::vector<size_t> gone;
+    const auto map = [&](sketch::PointRef& r) {
+      if (r.entity != id)
+        return;
+      if (const auto to = refOf(r.which))
+        r = *to;
+      else
+        gone.push_back(r.which);
+    };
+    if (slots.a)
+      map(con.a);
+    if (slots.b)
+      map(con.b);
+    if (slots.c)
+      map(con.c);
+    const std::string word = sketch::ConstraintWord(con.kind);
+    const std::string what = word + " (constraint " + std::to_string(k) + ")";
+    if (!gone.empty()) {
+      std::sort(gone.begin(), gone.end());
+      gone.erase(std::unique(gone.begin(), gone.end()), gone.end());
+      std::string poles = gone.size() == 1 ? "pole " : "poles ";
+      for (size_t g = 0; g < gone.size(); g++)
+        poles += (g == 0                 ? ""
+                  : g + 1 == gone.size() ? " and "
+                                         : ", ") +
+                 std::to_string(gone[g]);
+      dropped.push_back(what + " on " + poles + " of " + name);
+      continue;
+    }
+    if (joinedAt[k] >= 0) {
+      const auto to = refOf(static_cast<size_t>(joinedAt[k]));
+      if (!to) {
+        dropped.push_back(what + " at the end of " + name + " the cut removed");
+        continue;
+      }
+      (con.a.entity == id ? con.a : con.b).entity = to->entity;
+    } else if (onPiece[k] == -2) {
+      dropped.push_back(what + " on the part of " + name + " the cut removed");
+      continue;
+    } else if (onPiece[k] >= 0) {
+      con.b.entity = ids[static_cast<size_t>(onPiece[k])];
+    }
+    survivors.push_back(con);
+  }
+  constraints = std::move(survivors);
+
+  // Pole expressions follow their poles; a replaced pole's is dropped.
+  if (auto it = entityExprs.find(id); it != entityExprs.end()) {
+    std::map<std::string, std::string> old = std::move(it->second);
+    entityExprs.erase(it);
+    for (const auto& [field, expr] : old) {
+      const auto pf = sketch::PoleField(field);
+      const auto to = pf ? refOf(pf->first) : std::nullopt;
+      if (!to) {
+        dropped.push_back("the expression on " + field + " of " + name);
+        continue;
+      }
+      entityExprs[to->entity]["p" + std::to_string(to->which) +
+                              (pf->second ? "x" : "y")] = expr;
+    }
+  }
+
+  // The joints between the kept pieces, as smooth as the curve was there.
+  std::vector<sketch::Constraint> added;
+  const auto last = [&](size_t i) {
+    return static_cast<uint8_t>(cut->pieces[i].spline.poles.size() - 1);
+  };
+  for (size_t i = lo; i + 1 < hi; i++) {
+    added.push_back({K::Coincident, {ids[i], last(i)}, {ids[i + 1], 0}, 0.0});
+    if (cut->joints[i] == sketch::PieceJoint::G2)
+      added.push_back({K::Curvature, {ids[i], 0}, {ids[i + 1], 0}, 0.0});
+    else if (cut->joints[i] == sketch::PieceJoint::G1)
+      added.push_back({K::Tangent, {ids[i], 0}, {ids[i + 1], 0}, 0.0});
+  }
+  std::vector<uint32_t> order(ids.begin() + static_cast<std::ptrdiff_t>(lo),
+                              ids.begin() + static_cast<std::ptrdiff_t>(hi));
+  if (keep == 0) {
+    // A closed spline's seam: its pieces' outer ends, C0 as it was.
+    if (closed)
+      added.push_back(
+          {K::Coincident, {ids[hi - 1], last(hi - 1)}, {ids[lo], 0}, 0.0});
+    HoldJoint(*this, {ids[cut->before - 1], last(cut->before - 1)}, at,
+              crossing, order, added);
+  }
+  constraints.insert(constraints.end(), added.begin(), added.end());
+  if (cutEnd)
+    *cutEnd = keep == 1 ? sketch::PointRef{ids[hi - 1], last(hi - 1)}
+                        : sketch::PointRef{ids[lo], 0};
+
+  // A linked pattern or mirror of the spline repeats every piece; one
+  // centred on a pole follows it.
+  for (sketch::DerivedOp& op : derived) {
+    if (op.sourceSketchId == 0 &&
+        std::find(op.sourceIds.begin(), op.sourceIds.end(), id) !=
+            op.sourceIds.end())
+      for (uint32_t pid : order)
+        if (pid != id)
+          op.sourceIds.push_back(pid);
+    if (op.centerEntity == id)
+      if (const auto to = refOf(op.centerWhich)) {
+        op.centerEntity = to->entity;
+        op.centerWhich = to->which;
+      }
+  }
+  if (!derived.empty())
+    RegenerateDerived();
+  if (report) {
+    report->replaced.push_back({id, order});
+    report->dropped.insert(report->dropped.end(), dropped.begin(),
+                           dropped.end());
+  }
+  return order;
 }
 
 void SketchFeature::DropEndRefs(uint32_t id, uint8_t which) {
@@ -1565,7 +1938,8 @@ std::string SketchFeature::GeneratedBy(uint32_t id) const {
 
 uint32_t SketchFeature::FilletCorner(uint32_t id1, uint32_t id2, double radius,
                                      std::optional<glm::dvec2> nearUV,
-                                     std::string* whyNot, double* largestFit) {
+                                     std::string* whyNot, double* largestFit,
+                                     CutReport* report) {
   using K = sketch::ConstraintKind;
   if (largestFit)
     *largestFit = 0.0;
@@ -1589,24 +1963,26 @@ uint32_t SketchFeature::FilletCorner(uint32_t id1, uint32_t id2, double radius,
     const sketch::Entity& e = entities[i];
     const std::string id = std::to_string(sketch::EntityId(e));
     if (std::holds_alternative<sketch::Line>(e) ||
-        std::holds_alternative<sketch::Arc>(e))
+        std::holds_alternative<sketch::Arc>(e) ||
+        std::holds_alternative<sketch::EllipseArc>(e))
       return {};
-    if (std::holds_alternative<sketch::BSpline>(e))
-      return "spline " + id +
-             ": a spline end is not filleted yet (a fillet takes lines and "
-             "arcs)";
-    if (std::holds_alternative<sketch::EllipseArc>(e))
-      return "elliptical arc " + id +
-             ": an elliptical arc end is not filleted yet (a fillet takes "
-             "lines and arcs)";
+    const char* takes = "(a fillet takes lines, arcs, elliptical arcs and "
+                        "open splines that share an end)";
+    if (const auto* bs = std::get_if<sketch::BSpline>(&e)) {
+      if (!sketch::EndsOf(e).empty())
+        return {};
+      return "spline " + id + " is " +
+             (sketch::SplineClosed(*bs) ? "closed"
+                                        : "too short to be a curve") +
+             ", which has no end to round " + takes;
+    }
     const char* what = std::holds_alternative<sketch::Circle>(e) ? "a circle"
                        : std::holds_alternative<sketch::Ellipse>(e)
                            ? "an ellipse"
                        : std::holds_alternative<sketch::Point>(e) ? "a point"
                                                                   : "a label";
-    return "entity " + id + " is " + what +
-           ", which has no end to round (a fillet takes lines and arcs that "
-           "share an end)";
+    return "entity " + id + " is " + what + ", which has no end to round " +
+           takes;
   };
   for (size_t i : {i1, i2})
     if (std::string why = kindOf(i); !why.empty())
@@ -1658,6 +2034,18 @@ uint32_t SketchFeature::FilletCorner(uint32_t id1, uint32_t id2, double radius,
                 units::FormatNumber(largest) + " mm is the largest that does");
   }
   const glm::dvec2 C = geo->corner;
+  // A spline is cut at its tangent point, its corner side removed: checked
+  // here, so a cut that cannot be made changes nothing.
+  const bool spline1 = std::holds_alternative<sketch::BSpline>(entities[i1]);
+  const bool spline2 = std::holds_alternative<sketch::BSpline>(entities[i2]);
+  const auto keepOf = [](uint8_t w) { return w == 0 ? 2 : 1; };
+  for (const auto& [sp, id, param, w] :
+       {std::tuple{spline1, id1, geo->param1, w1},
+        std::tuple{spline2, id2, geo->param2, w2}})
+    if (sp)
+      if (std::string why = SplineCutRefusal(*this, id, param, keepOf(w));
+          !why.empty())
+        return fail(why);
 
   // Trim each curve to its tangent point (ids and construction kept).
   entities[i1] = geo->trimmed1;
@@ -1714,19 +2102,30 @@ uint32_t SketchFeature::FilletCorner(uint32_t id1, uint32_t id2, double radius,
     moved[k] = m;
   }
   // The old corner coincident is now P=P, and where three ends were joined
-  // pairwise two coincidents became one and the same: drop the self-
-  // coincidents and every re-pointed coincident that repeats another,
-  // which would read as redundant.
+  // pairwise two coincidents became one and the same -- or, where a chain
+  // of them ran through both corner ends, a loop through the point: drop
+  // the self-coincidents and every re-pointed coincident joining two points
+  // already joined, which would read as redundant.
   {
-    const auto key = [](const sketch::Constraint& con) {
-      auto a = std::make_pair(con.a.entity, con.a.which);
-      auto b = std::make_pair(con.b.entity, con.b.which);
-      return a < b ? std::make_pair(a, b) : std::make_pair(b, a);
+    using Key = std::pair<uint32_t, uint8_t>;
+    std::map<Key, Key> parent;
+    const std::function<Key(Key)> find = [&](Key k) {
+      auto it = parent.find(k);
+      if (it == parent.end() || it->second == k)
+        return k;
+      return it->second = find(it->second);
     };
-    std::set<decltype(key(constraints[0]))> seen;
+    const auto join = [&](const sketch::Constraint& con) {
+      const Key ra = find({con.a.entity, con.a.which});
+      const Key rb = find({con.b.entity, con.b.which});
+      if (ra == rb)
+        return false;
+      parent[ra] = rb;
+      return true;
+    };
     for (size_t k = 0; k < constraints.size(); k++)
       if (constraints[k].kind == K::Coincident && !moved[k])
-        seen.insert(key(constraints[k]));
+        join(constraints[k]);
     std::vector<sketch::Constraint> kept;
     kept.reserve(constraints.size());
     for (size_t k = 0; k < constraints.size(); k++) {
@@ -1734,13 +2133,21 @@ uint32_t SketchFeature::FilletCorner(uint32_t id1, uint32_t id2, double radius,
       if (con.kind == K::Coincident) {
         if (con.a.entity == con.b.entity && con.a.which == con.b.which)
           continue;
-        if (moved[k] && !seen.insert(key(con)).second)
+        if (moved[k] && !join(con))
           continue;
       }
       kept.push_back(con);
     }
     constraints = std::move(kept);
   }
+
+  // Each spline cut back to its tangent point; the arc joins the end the
+  // cut leaves.
+  sketch::PointRef end1{id1, w1}, end2{id2, w2};
+  if (spline1)
+    SplitSplineAt(id1, geo->param1, geo->t1, 0, keepOf(w1), report, &end1);
+  if (spline2)
+    SplitSplineAt(id2, geo->param2, geo->t2, 0, keepOf(w2), report, &end2);
 
   const uint32_t arcId = AddEntity(geo->arc);
 
@@ -1753,16 +2160,27 @@ uint32_t SketchFeature::FilletCorner(uint32_t id1, uint32_t id2, double radius,
   // rest (the solver reads it as the angle there, for any pair of curves).
   const bool s1 = geo->arcStartsAtT1;
   constraints.push_back(
-      {K::Coincident, {id1, w1}, {arcId, s1 ? uint8_t(1) : uint8_t(2)}, 0.0});
+      {K::Coincident, end1, {arcId, s1 ? uint8_t(1) : uint8_t(2)}, 0.0});
   constraints.push_back(
-      {K::Coincident, {id2, w2}, {arcId, s1 ? uint8_t(2) : uint8_t(1)}, 0.0});
-  constraints.push_back({K::Tangent, {id1, 0}, {arcId, 0}, 0.0});
-  constraints.push_back({K::Tangent, {id2, 0}, {arcId, 0}, 0.0});
+      {K::Coincident, end2, {arcId, s1 ? uint8_t(2) : uint8_t(1)}, 0.0});
+  constraints.push_back({K::Tangent, {end1.entity, 0}, {arcId, 0}, 0.0});
+  constraints.push_back({K::Tangent, {end2.entity, 0}, {arcId, 0}, 0.0});
 
-  // The corner point stays on each line's line and each arc's circle, which
-  // locks the line's direction and the arc's circle as they were.
-  constraints.push_back({K::PointOnLine, {pId, 0}, {id1, 0}, 0.0});
-  constraints.push_back({K::PointOnLine, {pId, 0}, {id2, 0}, 0.0});
+  // The corner point stays on each line's line, each arc's circle and each
+  // elliptical arc's ellipse, which locks them as they were. A spline needs
+  // no lock: nothing of it runs past its tangent point.
+  if (!spline1)
+    constraints.push_back({K::PointOnLine, {pId, 0}, {id1, 0}, 0.0});
+  if (!spline2)
+    constraints.push_back({K::PointOnLine, {pId, 0}, {id2, 0}, 0.0});
+  // Two splines and nothing re-pointed: the corner point holds nothing.
+  if (std::none_of(constraints.begin(), constraints.end(),
+                   [&](const sketch::Constraint& c) {
+                     return c.a.entity == pId || c.b.entity == pId ||
+                            c.c.entity == pId;
+                   }))
+    entities.erase(entities.begin() +
+                   static_cast<std::ptrdiff_t>(IndexOfEntity(pId)));
 
   // Add-then-prune: in a richly-constrained corner the fillet's own web (arc
   // tangency + endpoint coincidents + the point-on-line direction locks) can

@@ -945,25 +945,33 @@ static constexpr MethodDoc ModelingMethods[] = {
     {"fillet",
      "Sketch fillet: round the corner two curves make at a shared end "
      "{sketch_id, entity1, entity2, radius (mm), near?: [u, v] (sketch mm)} "
-     "with a tangent arc, trimming both to it. Lines and arcs; a spline or "
-     "an elliptical arc end is refused by name. `near` picks the corner "
-     "when the two share two ends (refused without it). A radius too large "
-     "is refused naming the largest that fits. Returns arc_id.",
+     "with a tangent arc, trimming both to it. Lines, arcs, elliptical arcs "
+     "and open splines; a spline is cut exactly at its tangent point and its "
+     "corner side removed. `near` picks the corner when the two share two "
+     "ends (refused without it). A radius too large is refused naming the "
+     "largest that fits. Returns arc_id, `replaced` ([{spline, pieces}]: "
+     "each cut spline and its pieces in order) and `dropped` (each "
+     "constraint on a pole the cut replaced, by name).",
      "entity1, entity2, near, radius, sketch_id", remote::NeedsPart},
     {"split",
-     "Sketch split: cut a line, an arc or a circle into pieces that stay "
-     "one curve {sketch_id, entity_id, at: [u, v] (sketch mm; a circle "
-     "takes two: [[u, v], [u, v]]), crossing?: entity id (or one per cut, "
-     "null for none)}. With `crossing` a cut is that curve's crossing "
-     "nearest its `at` and the joint is held on it, so the DOF does not "
-     "change; at another curve's end the joint becomes coincident with it; "
-     "elsewhere `at` moves to the nearest point of the curve (refused past "
-     "a hundredth of its length) and the joint slides, one more DOF. A "
-     "line's pieces stay collinear, an arc's concentric. A spline, an "
-     "ellipse or an elliptical arc, a generated entity, a cut at an end, an "
-     "equal length on the line and an arc_length on the arc are refused by "
-     "name. Returns entity_ids in order along the curve (the first keeps "
-     "the id), dof, regen, digest.",
+     "Sketch split: cut a line, an arc, a circle, an ellipse, an elliptical "
+     "arc or a spline into pieces that stay one curve {sketch_id, "
+     "entity_id, at: [u, v] (sketch mm; a circle or an ellipse takes two: "
+     "[[u, v], [u, v]]), crossing?: entity id (or one per cut, null for "
+     "none)}. With `crossing` a cut is that curve's crossing nearest its "
+     "`at` and the joint is held on it, so the DOF does not change; at "
+     "another curve's end the joint becomes coincident with it; elsewhere "
+     "`at` moves to the nearest point of the curve (refused past a "
+     "hundredth of its length) and the joint slides, one more DOF. A line's "
+     "pieces stay collinear, an arc's concentric, an ellipse's on one "
+     "ellipse; a spline is cut exactly by knot insertion into pieces joined "
+     "in G2 (a closed spline takes one cut, its seam is the other), and a "
+     "constraint on a pole the cut replaced is dropped and named in "
+     "`dropped`. A generated entity, a circle-shaped ellipse, a cut at an "
+     "end, an equal length on the line and an arc_length on the arc are "
+     "refused by name. Returns entity_ids in order along the curve (the "
+     "first keeps the id; of a spline's pieces the longest does), dropped, "
+     "dof, regen, digest.",
      "at, crossing, entity_id, sketch_id", remote::NeedsPart},
     {"offset",
      "Offset a closed sketch chain {sketch_id, chain: [entity ids], distance "
@@ -2863,7 +2871,8 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
     }
     json before = DocumentIO::FeatureToJson(*sk);
     std::string why;
-    const std::vector<uint32_t> ids = sk->SplitEntity(id, cuts, &why);
+    SketchFeature::CutReport report;
+    const std::vector<uint32_t> ids = sk->SplitEntity(id, cuts, &why, &report);
     if (ids.empty())
       throw std::runtime_error("split failed: " + why);
     sketch::Solver solver;
@@ -2878,6 +2887,7 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
     state.commands->Execute(
         std::make_unique<ModifyFeatureCommand>(index, before, after), *doc);
     return json{{"entity_ids", ids},
+                {"dropped", report.dropped},
                 {"dof", solved.dof},
                 {"regen", RegenSummaryJson(*doc)},
                 {"digest", DigestJson(preDigest, *doc)}};
@@ -2995,12 +3005,18 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
                                    n.dump());
         nearUV = glm::dvec2(n[0].get<double>(), n[1].get<double>());
       }
+      SketchFeature::CutReport report;
       const uint32_t arcId = sk->FilletCorner(
           p.at("entity1").get<uint32_t>(), p.at("entity2").get<uint32_t>(),
-          p.at("radius").get<double>(), nearUV, &whyNot);
+          p.at("radius").get<double>(), nearUV, &whyNot, nullptr, &report);
       if (arcId == 0) // loud, not {"arc_id": 0} — a silent no-op to a script
         throw std::runtime_error("fillet failed: " + whyNot);
       result["arc_id"] = arcId;
+      json replaced = json::array();
+      for (const SketchFeature::CutReport::Replaced& r : report.replaced)
+        replaced.push_back({{"spline", r.spline}, {"pieces", r.pieces}});
+      result["replaced"] = replaced;
+      result["dropped"] = report.dropped;
     }
     sketch::Solver solver;
     solver.Load(*sk);

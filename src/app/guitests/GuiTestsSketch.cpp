@@ -737,14 +737,16 @@ void RegisterSketchGuiTests(ImGuiTestEngine* engine) {
     auto* sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
     IM_CHECK(sk != nullptr);
     nlohmann::json before = DocumentIO::FeatureToJson(*sk);
-    sk->AddEntity(sketch::BSpline{{{-2, 0}, {-1, 1}, {1, -1}, {2, 0}}});
+    // A circle-shaped ellipse: the solver holds it rigid, so its pieces
+    // could not follow each other.
+    sk->AddEntity(sketch::Ellipse{{0, 0}, 1.5, 1.5, 0.0});
     nlohmann::json after = DocumentIO::FeatureToJson(*sk);
     s_App->commands->Execute(
         std::make_unique<ModifyFeatureCommand>(0, before, after), *Doc());
     ctx->Yield(2);
     sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
     const glm::dvec2 on =
-        sketch::BSplineEvalUV(std::get<sketch::BSpline>(sk->entities[0]), 0.5);
+        sketch::EllipsePointUV(std::get<sketch::Ellipse>(sk->entities[0]), 0.7);
     const nlohmann::json held = DocumentIO::FeatureToJson(*sk);
     ui::RunCommand(*s_App, "sketch.split");
     ctx->Yield();
@@ -752,11 +754,126 @@ void RegisterSketchGuiTests(ImGuiTestEngine* engine) {
     ctx->MouseMoveToPos(ImVec2(p.x, p.y));
     ctx->MouseClick(ImGuiMouseButton_Left);
     ctx->Yield();
-    IM_CHECK(s_App->sketchEdit.actionMsg.rfind("Not split: spline", 0) == 0);
-    IM_CHECK(s_App->sketchEdit.actionMsg.find("a spline is not split yet") !=
+    IM_CHECK(s_App->sketchEdit.actionMsg.rfind("Not split: ellipse", 0) == 0);
+    IM_CHECK(s_App->sketchEdit.actionMsg.find("circle-shaped") !=
              std::string::npos);
     IM_CHECK(s_App->sketchEdit.tool == ui::SketchTool::Split);
     IM_CHECK(DocumentIO::FeatureToJson(*Doc()->GetFeature(0)) == held);
+  };
+
+  // docs/sketching/README.md#split, the owner's flow on a spline: a line
+  // drawn across a traced spline, the spline split where the line crosses
+  // it, and one piece made construction. The cut is exact (knot insertion),
+  // so the pieces are the spline; the sketch still solves, clean, and
+  // nothing moves.
+  t = IM_REGISTER_TEST(engine, "split", "spline_crossed_by_line_construction");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    EnterSketchOnPlane(ctx, 0);
+    for (int i = 0; i < 600 && s_App->camera->IsAnimating(); i++)
+      ctx->Yield();
+    s_App->camera->StopAnimation();
+    s_App->camera->SetTarget(glm::vec3(0.0f));
+    s_App->camera->SetUp(glm::vec3(0.0f, 1.0f, 0.0f));
+    s_App->camera->SetPosition(glm::vec3(0.0f, 0.0f, 10.0f));
+    ctx->Yield(2);
+    auto* sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    IM_CHECK(sk != nullptr);
+    nlohmann::json before = DocumentIO::FeatureToJson(*sk);
+    const uint32_t spline = sk->AddEntity(sketch::BSpline{
+        {{-3, -1}, {-2, 1.5}, {-0.5, -1.5}, {1, 1.8}, {2.2, -0.5}, {3, 1}}});
+    const uint32_t line = sk->AddEntity(sketch::Line{{0.6, -2.5}, {0.6, 2.5}});
+    nlohmann::json after = DocumentIO::FeatureToJson(*sk);
+    s_App->commands->Execute(
+        std::make_unique<ModifyFeatureCommand>(0, before, after), *Doc());
+    ctx->Yield(2);
+    sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    const sketch::Entity original = sk->entities[sk->IndexOfEntity(spline)];
+    const std::vector<glm::dvec2> xs =
+        sketch::Crossings(original, sk->entities[sk->IndexOfEntity(line)]);
+    IM_CHECK_EQ(xs.size(), (size_t)1);
+    const auto at = [&](glm::dvec2 uv) {
+      const glm::vec2 p = ui::SketchUVToScreen(
+          *s_App, dynamic_cast<SketchFeature*>(Doc()->GetFeature(0))->plane,
+          glm::vec2(uv));
+      return ImVec2(p.x, p.y);
+    };
+    const size_t undo0 = s_App->commands->UndoDepth();
+    ctx->KeyPress(ImGuiKey_K);
+    ctx->Yield();
+    IM_CHECK(s_App->sketchEdit.tool == ui::SketchTool::Split);
+    // Near the crossing, along the spline: snapped to the crossing, the
+    // pieces previewed in two shades.
+    const glm::dvec2 along = sketch::TangentAt(original, xs[0]);
+    ctx->MouseMoveToPos(at(xs[0] - 0.08 * along));
+    ctx->Yield(2);
+    {
+      const ui::SketchEditState& e = s_App->sketchEdit;
+      IM_CHECK(e.hasSplitPreview);
+      IM_CHECK_EQ(e.splitPreviewCurve, spline);
+      IM_CHECK_EQ(e.splitPreviewCuts.size(), (size_t)1);
+      IM_CHECK_LT(glm::length(e.splitPreviewCuts[0] - xs[0]), 1e-9);
+      IM_CHECK_GE(e.splitPreviewPieces.size(), (size_t)2);
+    }
+    GuiShot(ctx, "split_hover_spline");
+    ctx->MouseClick(ImGuiMouseButton_Left);
+    ctx->Yield(2);
+    IM_CHECK_EQ(s_App->commands->UndoDepth(), undo0 + 1);
+    sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    std::vector<uint32_t> pieces;
+    for (const sketch::Entity& e : sk->entities)
+      if (std::holds_alternative<sketch::BSpline>(e))
+        pieces.push_back(sketch::EntityId(e));
+    IM_CHECK_GE(pieces.size(), (size_t)2);
+    IM_CHECK(sk->IndexOfEntity(spline) != SIZE_MAX);
+    for (uint32_t p : pieces)
+      for (const glm::dvec2& q : sketch::BSplineSampleUV(
+               std::get<sketch::BSpline>(sk->entities[sk->IndexOfEntity(p)])))
+        IM_CHECK_LT(sketch::NearestOnCurve(original, q)->distance, 1e-9);
+    const std::vector<sketch::Entity> cut = sk->entities;
+
+    // Finish the tool, pick the piece past the crossing, Q.
+    ctx->MouseMoveToPos(at({-2.0, -2.2}));
+    ctx->MouseClick(ImGuiMouseButton_Left);
+    ctx->Yield();
+    IM_CHECK(s_App->sketchEdit.tool == ui::SketchTool::Select);
+    const auto& o = std::get<sketch::BSpline>(original);
+    const glm::dvec2 past = sketch::BSplineEvalUV(o, 2.6);
+    ctx->MouseMoveToPos(at(past));
+    ctx->MouseClick(ImGuiMouseButton_Left);
+    ctx->Yield();
+    IM_CHECK_EQ(s_App->sketchEdit.selected.size(), (size_t)1);
+    const uint32_t picked = s_App->sketchEdit.selected[0].entity;
+    IM_CHECK(std::find(pieces.begin(), pieces.end(), picked) != pieces.end());
+    ctx->KeyPress(ImGuiKey_Q);
+    ctx->Yield(2);
+    sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    IM_CHECK(sketch::IsConstruction(sk->entities[sk->IndexOfEntity(picked)]));
+    sketch::Solver solver;
+    solver.Load(*sk);
+    const sketch::SolveResult r = solver.Solve();
+    IM_CHECK(r.ok);
+    IM_CHECK(r.conflictingConstraints.empty());
+    IM_CHECK(r.redundantConstraints.empty());
+    IM_CHECK(solver.UnsupportedConstraints().empty());
+    std::vector<sketch::Entity> solved = sk->entities;
+    solver.WriteBack(solved);
+    for (size_t i = 0; i < solved.size(); i++) {
+      const auto a = sketch::TessellateEntity(solved[i]);
+      const auto b = sketch::TessellateEntity(cut[i]);
+      IM_CHECK_EQ(a.size(), b.size());
+      for (size_t k = 0; k < a.size() && k < b.size(); k++)
+        IM_CHECK_LT(glm::length(a[k] - b[k]), 1e-9);
+    }
+    s_App->sketchEdit.selected.clear();
+    ctx->MouseMoveToPos(at({-2.0, -2.2}));
+    ctx->Yield(2);
+    GuiShot(ctx, "split_spline_result");
+    // Two undo steps (the split, the construction) put the sketch back.
+    for (int i = 0; i < 2; i++)
+      ui::GlobalUndo(*s_App);
+    ctx->Yield();
+    IM_CHECK(DocumentIO::FeatureToJson(*Doc()->GetFeature(0)) == after);
   };
 
   // Hovering (no click) with the Trim tool computes the preview span for the

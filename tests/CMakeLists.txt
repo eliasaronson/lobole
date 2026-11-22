@@ -194,6 +194,7 @@ add_executable(designer_tests
     test_spline.cpp
     test_ellipse_arc.cpp
     test_sketch_curves.cpp
+    test_sketch_split_curves.cpp
     test_sketch_g2.cpp
     test_sketch_edits.cpp
     test_sketch_text.cpp

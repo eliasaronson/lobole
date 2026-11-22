@@ -3,6 +3,8 @@
 
 #include "core/io/SketchImport.h"
 
+#include "core/sketch/SketchSpline.h"
+
 #include <algorithm>
 #include <cmath>
 #include <numbers>
@@ -242,26 +244,7 @@ SplineToSketch(const std::vector<double>& knotsIn,
   const auto multiplicity = [&](double u) {
     return static_cast<int>(std::count(U.begin(), U.end(), u));
   };
-  const auto insert = [&](double u) {
-    const int nn = static_cast<int>(P.size());
-    // The span u lies in, U[k] <= u < U[k+1] — past the last pole's span
-    // when u is an unclamped end of the domain, which the formula allows.
-    int k = p;
-    while (k + 2 < static_cast<int>(U.size()) && U[k + 1] <= u)
-      k++;
-    const int sMul = multiplicity(u);
-    std::vector<glm::dvec2> Q(P.size() + 1);
-    for (int i = 0; i <= k - p; i++)
-      Q[i] = P[i];
-    for (int i = k - p + 1; i <= k - sMul; i++) {
-      const double alpha = (u - U[i]) / (U[i + p] - U[i]);
-      Q[i] = alpha * P[i] + (1.0 - alpha) * P[i - 1];
-    }
-    for (int i = k - sMul; i < nn; i++)
-      Q[i + 1] = P[i];
-    U.insert(U.begin() + k + 1, u);
-    P = std::move(Q);
-  };
+  const auto insert = [&](double u) { sketch::InsertKnot(U, P, p, u); };
   std::vector<double> distinct;
   for (double u : knotsIn)
     if (u >= a && u <= b && (distinct.empty() || distinct.back() != u))

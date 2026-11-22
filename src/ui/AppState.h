@@ -237,8 +237,9 @@ struct SketchEditState {
   bool hasFilletPreview = false;
   sketch::Arc filletPreviewArc{};
   uint32_t filletPreviewCurves[2] = {0, 0};
-  // The Split tool (docs/sketching/README.md#split). A circle takes two
-  // cuts: the first is held here (0 = none) until the second click.
+  // The Split tool (docs/sketching/README.md#split). A circle or an ellipse
+  // takes two cuts: the first is held here (0 = none) until the second
+  // click.
   uint32_t splitCircle = 0;
   glm::dvec2 splitFirstAt{0.0};
   uint32_t splitFirstCrossing = 0;
@@ -249,7 +250,8 @@ struct SketchEditState {
   std::vector<glm::dvec2> splitPreviewTicks; // two per cut: across the curve
   std::vector<sketch::Entity> splitPreviewPieces;
   uint32_t splitPreviewCurve = 0;
-  bool splitPreviewClosed = false; // the curve under the cursor is a circle
+  bool splitPreviewClosed = false; // the curve takes two cuts (a circle,
+                                   // an ellipse)
 
   // Mirror tool is two-step: collect geometry (false), then pick the axis
   // (true). Enter advances; Escape backs out. Selection carries the sources.

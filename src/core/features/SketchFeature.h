@@ -997,33 +997,61 @@ public:
     uint32_t crossing = 0;
   };
 
-  // Splits the line, arc or circle `id` into pieces that stay one curve
-  // (docs/sketching/README.md#split): a line or an arc at one cut, a circle at
-  // two. Piece 1 keeps `id`; the ids come back in order along the curve (a
-  // circle's from the first cut counter-clockwise). A line's pieces are joined
-  // Coincident plus Parallel (or the Horizontal/Vertical the line carried), so
-  // they stay collinear; an arc's Coincident and Concentric, so the radius
-  // follows; a circle's Coincident at both cuts and Tangent at the first, which
-  // makes them one circle. A constraint on an end goes with the piece holding
-  // the end, and so does a tangent joined there; one on the whole curve stays
-  // on piece 1; a whole-edge distance spans the pieces and a midpoint of the
-  // line becomes a symmetric of its outer ends. A joint at another curve's end
-  // (or a point) is made coincident with it, replacing the point-on-curve that
-  // held it there; at a crossing it is held on the crossing curve, so the
-  // degrees of freedom do not change; anywhere else it slides, one more. A cut
-  // without a crossing moves `at` to the nearest point of the curve. Returns
-  // empty with nothing changed and `whyNot` naming the reason: an unknown or
-  // generated entity (GeneratedBy), a point, a label, a spline or an ellipse
-  // (not split yet), the wrong number of cuts, a cut at an end or past a
-  // hundredth of the curve's length from it, a crossing that does not cross, or
-  // an equal length on the line or an arc length on the arc, which two pieces
-  // cannot keep.
+  // What a cut of a spline left behind (SplitEntity, FilletCorner): each cut
+  // spline and its pieces in order along it, and each constraint (or pole
+  // expression) on a pole the cut replaced, which is dropped -- "distance
+  // (constraint 6) on pole 4 of spline 9".
+  struct CutReport {
+    struct Replaced {
+      uint32_t spline = 0;
+      std::vector<uint32_t> pieces;
+    };
+    std::vector<Replaced> replaced;
+    std::vector<std::string> dropped;
+  };
+
+  // Splits the curve `id` into pieces that stay one curve
+  // (docs/sketching/README.md#split): a line, an arc, an elliptical arc or a
+  // spline at one cut (a closed spline's seam is its other), a circle or an
+  // ellipse at two. Piece 1 keeps `id` (of a spline's, the longest does);
+  // the ids come back in order along the curve (a closed curve's from the
+  // first cut counter-clockwise). A line's pieces are joined Coincident plus
+  // Parallel (or the Horizontal/Vertical the line carried), so they stay
+  // collinear; an arc's Coincident and Concentric, so the radius follows; a
+  // circle's Coincident at both cuts and Tangent at the first, which makes
+  // them one circle. An elliptical arc's are joined Coincident and
+  // Concentric with an axis end of piece 2 coincident with piece 1's (the
+  // one the cut is not near); an ellipse's two arcs Coincident at both
+  // cuts, Tangent at the first, and the two axis ends of piece 2 farthest
+  // from the cuts on piece 1's ellipse. A spline is cut exactly by knot
+  // insertion (sketch::CutSpline): the pieces are joined Coincident and
+  // Curvature where the curve was C2, Tangent where C1, and Coincident alone
+  // where C0 (a closed spline's seam). A constraint on an end goes with the
+  // piece holding the end, and so does a tangent joined there; one on the
+  // whole curve stays on piece 1; a whole-edge distance spans the pieces and
+  // a midpoint of the line becomes a symmetric of its outer ends. A spline
+  // pole the insertion leaves in place keeps its constraints and
+  // expressions, re-indexed onto its piece; one on a pole it replaces is
+  // dropped and named in `report`; a point on the spline goes to the piece
+  // it lies on. A joint at another curve's end (or a point) is made
+  // coincident with it, replacing the point-on-curve that held it there; at
+  // a crossing it is held on the crossing curve, so the degrees of freedom
+  // do not change; anywhere else it slides, one more. A cut without a
+  // crossing moves `at` to the nearest point of the curve. Returns empty
+  // with nothing changed and `whyNot` naming the reason: an unknown or
+  // generated entity (GeneratedBy), a point, a label, a circle-shaped
+  // ellipse (which the solver holds rigid), the wrong number of cuts, a cut
+  // at an end (or a closed spline's seam) or past a hundredth of the
+  // curve's length from it, a crossing that does not cross, an equal length
+  // on the line or an arc length on the arc, which two pieces cannot keep,
+  // or a linked circular pattern centred on a pole the cut replaces.
   std::vector<uint32_t> SplitEntity(uint32_t id,
                                     const std::vector<SplitCut>& cuts,
-                                    std::string* whyNot = nullptr);
+                                    std::string* whyNot = nullptr,
+                                    CutReport* report = nullptr);
   // Why entity `id` cannot be split wherever it is cut ("" = it can):
   // SplitEntity's refusals that do not depend on the cuts. For a tool's
-  // first click on a circle.
+  // first click on a closed curve.
   std::string SplitRefusal(uint32_t id) const;
 
   // Trims the line `id` at `clickUV`: removes the sub-segment the click falls
@@ -1084,21 +1112,26 @@ public:
   std::vector<uint32_t> MirrorEntities(const std::vector<uint32_t>& sourceIds,
                                        uint32_t axisLineId, bool link);
 
-  // Rounds the corner two curves (lines or arcs) make at a shared end with a
-  // tangent arc of `radius` (docs/sketching/README.md#fillet): trims each
-  // curve to its tangent point, inserts the arc joined to both by Coincident
-  // + Tangent, and leaves a construction point at the old corner that every
-  // constraint on the corner ends is re-pointed onto, held on each line's
-  // line and each arc's circle. `nearUV` (sketch mm) picks the corner when the
-  // two share two ends. Returns the arc's id, or 0 with nothing changed and
-  // `whyNot` naming the reason: no shared end, a spline or elliptical arc
-  // (not filleted yet), an entity a linked op or a projection owns, or a
+  // Rounds the corner two curves make at a shared end with a tangent arc of
+  // `radius` (docs/sketching/README.md#fillet): lines, arcs, elliptical arcs
+  // and open splines. Trims each curve to its tangent point, inserts the arc
+  // joined to both by Coincident + Tangent, and leaves a construction point
+  // at the old corner that every constraint on the corner ends is
+  // re-pointed onto, held on each line's line, each arc's circle and each
+  // elliptical arc's ellipse. A spline is cut at its tangent point as
+  // SplitEntity cuts it and the corner side removed: `report` names it and
+  // its pieces, and each constraint the cut could not keep. `nearUV`
+  // (sketch mm) picks the corner when the two share two ends. Returns the
+  // arc's id, or 0 with nothing changed and `whyNot` naming the reason: no
+  // shared end, a curve with no end (a circle, an ellipse, a closed spline,
+  // a point, a label), an entity a linked op or a projection owns, or a
   // radius too large -- then `largestFit` receives the largest that fits
   // (0 when none does) and the reason names it.
   uint32_t FilletCorner(uint32_t id1, uint32_t id2, double radius,
                         std::optional<glm::dvec2> nearUV = std::nullopt,
                         std::string* whyNot = nullptr,
-                        double* largestFit = nullptr);
+                        double* largestFit = nullptr,
+                        CutReport* report = nullptr);
 
   // What owns entity `id` when something other than the user does -- "a
   // linked pattern", "a linked mirror", "a linked copy", "a projection", "a
@@ -1248,6 +1281,16 @@ private:
   std::vector<uint32_t> SplitAt(uint32_t id, const std::vector<glm::dvec2>& at,
                                 const std::vector<uint32_t>& crossing,
                                 bool trim);
+  // SplitEntity's cut of spline `id` at parameter `u`. `keep` 0 keeps every
+  // piece, joined; 1 only those before the cut, 2 only those after (a
+  // fillet's trim: no joint at the cut). Returns the kept pieces' ids in
+  // order along the curve, and `cutEnd` the kept end at the cut; empty with
+  // nothing changed (and `whyNot`) when the cut cannot be made.
+  std::vector<uint32_t> SplitSplineAt(uint32_t id, double u, glm::dvec2 at,
+                                      uint32_t crossing, int keep,
+                                      CutReport* report,
+                                      sketch::PointRef* cutEnd = nullptr,
+                                      std::string* whyNot = nullptr);
   // Drops every constraint naming end `which` of `id` in a point slot, and
   // a tangent or curvature joined there; coincidences chained through the
   // end are kept between the others (DeleteEntity's repair).

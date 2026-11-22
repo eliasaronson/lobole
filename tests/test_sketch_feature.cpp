@@ -996,11 +996,17 @@ TEST_CASE("SplitEntity refuses, naming why, and changes nothing",
   CHECK(has(why(l0, {{{1, 0}}, {{3, 0}}}), "takes one cut"));
   CHECK(has(why(c0, {{{1, 0}}}), "takes two cuts"));
   CHECK(has(why(c0, {{{1, 0}}, {{1, 0}}}), "are at one point"));
-  CHECK(has(why(sp, {{{12, 6}}}), "a spline is not split yet"));
-  CHECK(has(why(el, {{{23, 0}}, {{17, 0}}}), "an ellipse is not split yet"));
-  CHECK(has(why(ea, {{{33, 0}}}), "an elliptical arc is not split yet"));
-  CHECK(has(why(sp, {{{12, 6}}}), "Split takes lines, arcs and circles"));
+  // A spline, an ellipse and an elliptical arc split (test_sketch_split_
+  // curves.cpp); their counts and ends are refused as a line's are.
+  CHECK(has(why(sp, {{{10, 5}}}), "at an end of spline"));
+  CHECK(has(why(sp, {{{12, 6}}, {{14, 4}}}), "takes one cut"));
+  CHECK(has(why(el, {{{23, 0}}}), "takes two cuts"));
+  CHECK(has(why(ea, {{{33, 0}}}), "at an end of elliptical arc"));
+  CHECK(has(why(ea, {{{30, 0}}}), "more than a hundredth of its length"));
   CHECK(has(why(pt, {{{1, 1}}}), "a point, which has no curve to split"));
+  CHECK(has(why(pt, {{{1, 1}}}),
+            "Split takes lines, arcs, circles, ellipses, elliptical arcs and "
+            "splines"));
   CHECK(has(why(eqA, {{{2, 6}}}), "carries an equal length (constraint 0)"));
   CHECK(has(why(a0, {{{10, 2}}}), "carries an arc length (constraint 1)"));
 }
@@ -1447,10 +1453,9 @@ TEST_CASE("FilletCorner refuses, naming why, and changes nothing",
   // Two shared ends and no `near`: both named.
   CHECK(why(l, a).find("share two ends, at (0, 0) and (10, 0)") !=
         std::string::npos);
-  CHECK(why(l, sp).find("spline " + std::to_string(sp) +
-                        ": a spline end is not filleted yet") == 0);
-  CHECK(why(ea, l).find("elliptical arc " + std::to_string(ea) +
-                        ": an elliptical arc end is not filleted yet") == 0);
+  // A spline and an elliptical arc are filleted (test_sketch_split_
+  // curves.cpp); two sharing no end are still refused.
+  CHECK(why(ea, sp).find("share no end") != std::string::npos);
   CHECK(why(c, l).find("is a circle, which has no end") != std::string::npos);
   CHECK(why(l, l).find("two different curves") != std::string::npos);
   CHECK(why(c, 999).find("no sketch entity with id 999") == 0);
@@ -1510,17 +1515,17 @@ TEST_CASE("CornerAt takes the sector the cursor is in", "[sketch][fillet]") {
   REQUIRE(!onVertex.has_value());
   CHECK(onVertex.error().find("4 curves end at this point; move into the "
                               "corner") == 0);
-  // A sector bounded by the spline is refused by name in stage A.
-  std::string why;
-  CHECK(sk->FilletCorner(id.h1, id.s, 1.0, glm::dvec2(0, 0), &why) == 0);
-  CHECK(why.find("spline " + std::to_string(id.s)) == 0);
-
-  // Each line sector fillets; the other two curves stay at the corner and
-  // nothing reads redundant.
-  for (int sector = 0; sector < 2; sector++) {
+  // Every sector fillets, the two the spline bounds too (the spline cut at
+  // its tangent point); the other two curves stay at the corner and
+  // nothing reads redundant. Filleting the spline and h1, which the chain
+  // of coincidents does not join directly, re-points that chain into a
+  // loop through the corner point: the coincident closing it is dropped.
+  for (int sector = 0; sector < 4; sector++) {
+    INFO("sector " << sector);
     auto fresh = make();
-    const uint32_t x = sector == 0 ? id.h1 : id.v;
-    const uint32_t y = sector == 0 ? id.v : id.h2;
+    const uint32_t xs[] = {id.h1, id.v, id.h2, id.s};
+    const uint32_t ys[] = {id.v, id.h2, id.s, id.h1};
+    const uint32_t x = xs[sector], y = ys[sector];
     std::string w;
     const uint32_t made = fresh->FilletCorner(x, y, 1.0, glm::dvec2(0, 0), &w);
     INFO(w);
@@ -1538,9 +1543,11 @@ TEST_CASE("CornerAt takes the sector the cursor is in", "[sketch][fillet]") {
             fresh->entities[fresh->IndexOfEntity(other)]);
         CHECK(glm::length(ln.a) < 1e-9);
       }
-    const auto& spl =
-        std::get<sketch::BSpline>(fresh->entities[fresh->IndexOfEntity(id.s)]);
-    CHECK(glm::length(spl.poles[0]) < 1e-9);
+    if (x != id.s && y != id.s) {
+      const auto& spl = std::get<sketch::BSpline>(
+          fresh->entities[fresh->IndexOfEntity(id.s)]);
+      CHECK(glm::length(spl.poles[0]) < 1e-9);
+    }
     // No coincident is repeated.
     std::set<std::pair<std::pair<uint32_t, int>, std::pair<uint32_t, int>>>
         seen;

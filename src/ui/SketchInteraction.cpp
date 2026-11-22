@@ -678,7 +678,8 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
   if (edit.tool == SketchTool::Split) {
     // docs/sketching/README.md#split: a click cuts the curve under the
     // cursor, snapped to a crossing with any curve, then to another curve's
-    // end on it, else at the nearest point. A circle takes two clicks.
+    // end on it, else at the nearest point. A circle or an ellipse takes
+    // two clicks.
     edit.hasSplitPreview = false;
     edit.splitPreviewCuts.clear();
     edit.splitPreviewTicks.clear();
@@ -741,8 +742,8 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
     };
 
     // The curve under the cursor: the nearest body a cut here would not cut
-    // at an end (so at a T the stem's foot splits the bar); with a circle's
-    // first cut held, only that circle.
+    // at an end (so at a T the stem's foot splits the bar); with a closed
+    // curve's first cut held, only that curve.
     uint32_t curveId = 0, refused = 0, other = 0;
     Cut cut;
     bool atEnd = false;
@@ -773,39 +774,30 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
     // The preview: the cut marks (the held one first) and the pieces.
     if (curveId != 0 && !atEnd) {
       const sketch::Entity& e = *entityOf(curveId);
-      const bool circle = std::holds_alternative<sketch::Circle>(e);
+      const bool twoCuts = sketch::CutsFor(e) == 2;
       std::vector<glm::dvec2> cuts;
-      if (circle && edit.splitCircle == curveId)
+      if (twoCuts && edit.splitCircle == curveId)
         cuts.push_back(edit.splitFirstAt);
       cuts.push_back(cut.at);
       const double tick = 7.0 / ppu;
       for (const glm::dvec2& p : cuts) {
-        glm::dvec2 across{0.0, 1.0};
-        if (const auto* l = std::get_if<sketch::Line>(&e)) {
-          const glm::dvec2 d = glm::normalize(l->b - l->a);
-          across = {-d.y, d.x};
-        } else {
-          const glm::dvec2 c = std::holds_alternative<sketch::Circle>(e)
-                                   ? std::get<sketch::Circle>(e).center
-                                   : std::get<sketch::Arc>(e).center;
-          across = glm::normalize(p - c);
-        }
+        const glm::dvec2 along = sketch::TangentAt(e, p);
+        const glm::dvec2 across{-along.y, along.x};
         edit.splitPreviewTicks.push_back(p - tick * across);
         edit.splitPreviewTicks.push_back(p + tick * across);
       }
       edit.splitPreviewCuts = cuts;
-      if (!circle || cuts.size() == 2)
+      if (!twoCuts || cuts.size() == 2)
         edit.splitPreviewPieces = sketch::SplitPieces(e, cuts);
       edit.splitPreviewCurve = curveId;
-      edit.splitPreviewClosed = circle;
+      edit.splitPreviewClosed = twoCuts;
       edit.hasSplitPreview = true;
     }
 
     if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
       if (curveId != 0) {
         const sketch::Entity& e = *entityOf(curveId);
-        if (std::holds_alternative<sketch::Circle>(e) &&
-            edit.splitCircle == 0) {
+        if (sketch::CutsFor(e) == 2 && edit.splitCircle == 0) {
           // Step 1/2: hold the first cut, checked as far as it can be.
           std::string why = sketch->SplitRefusal(curveId);
           if (why.empty() && atEnd)
@@ -826,9 +818,15 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
         cuts.push_back({cut.at, cut.crossing});
         nlohmann::json before = DocumentIO::FeatureToJson(*sketch);
         std::string why;
-        if (!sketch->SplitEntity(curveId, cuts, &why).empty()) {
+        SketchFeature::CutReport report;
+        if (!sketch->SplitEntity(curveId, cuts, &why, &report).empty()) {
           edit.splitCircle = 0;
+          // A spline's cut names what it could not keep; the pill's DOF
+          // says how many its extra poles added.
           edit.actionMsg.clear();
+          for (const std::string& d : report.dropped)
+            edit.actionMsg +=
+                (edit.actionMsg.empty() ? "Split; dropped " : "; ") + d;
           commitMutation(before);
           return true; // `sketch` may be stale past the commit
         }
@@ -836,10 +834,15 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
       } else if (refused != 0) {
         edit.actionMsg = "Not split: " + sketch->SplitRefusal(refused);
       } else if (other != 0) {
-        edit.actionMsg = "Not split: circle " +
-                         std::to_string(edit.splitCircle) +
-                         " is cut twice; click it again for the second cut "
-                         "(Esc drops the first)";
+        const sketch::Entity* held = entityOf(edit.splitCircle);
+        edit.actionMsg =
+            std::string("Not split: ") +
+            (held && std::holds_alternative<sketch::Ellipse>(*held)
+                 ? "ellipse "
+                 : "circle ") +
+            std::to_string(edit.splitCircle) +
+            " is cut twice; click it again for the second cut (Esc drops "
+            "the first)";
       } else {
         // A tap in empty space finishes the tool (Escape = abort).
         edit.tool = SketchTool::Select;
@@ -1114,10 +1117,14 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
         nlohmann::json before = DocumentIO::FeatureToJson(*sketch);
         std::string why;
         double largest = 0.0;
+        SketchFeature::CutReport report;
         if (sketch->FilletCorner(target.a, target.b, edit.filletRadius,
-                                 target.nearUV, &why, &largest)) {
+                                 target.nearUV, &why, &largest, &report)) {
           edit.filletFirst = 0;
           edit.actionMsg.clear();
+          for (const std::string& d : report.dropped)
+            edit.actionMsg +=
+                (edit.actionMsg.empty() ? "Filleted; dropped " : "; ") + d;
           commitMutation(before);
           return true; // `sketch` may be stale past the commit
         }

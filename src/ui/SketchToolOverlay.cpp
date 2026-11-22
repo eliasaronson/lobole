@@ -460,13 +460,14 @@ ToolPrompt SketchToolPrompt(const SketchEditState& edit,
     // The one place that says what to do; a refusal says only why.
     if (edit.splitCircle != 0)
       set("Split", 2, 2,
-          "click the circle again for the second cut (Esc drops the first)");
+          "click the curve again for the second cut (Esc drops the first)");
     else if (edit.hasSplitPreview && edit.splitPreviewClosed)
-      set("Split", 1, 2, "click where the first cut goes (a circle takes two)");
+      set("Split", 1, 2,
+          "click where the first cut goes (a circle or an ellipse takes two)");
     else
       set("Split", 0, 0,
           "click a curve to cut it, at a crossing, an end on it or anywhere "
-          "(a circle takes two cuts)");
+          "(a circle or an ellipse takes two cuts)");
     break;
   case T::Text:
     set("Text", 0, 0,

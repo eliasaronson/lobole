@@ -818,6 +818,75 @@ def main():
             except RuntimeError as e:
                 expect(why in str(e), f"split error explains: {why} ({e})")
 
+        phase("Split and fillet a spline, split an ellipse")
+        # docs/sketching/README.md#a-spline-cut-exactly: a spline is cut by
+        # knot insertion, so its pieces are the curve; a constraint on a
+        # pole the cut replaced is dropped and named. One undo step each.
+        d.call("new_project")
+        skq = d.call("add_feature", feature={
+            "type": "Sketch", "name": "Sketch Q",
+            "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1],
+                      "uAxis": [1, 0, 0]},
+            "entities": [{"type": "spline",
+                          "poles": [[0, 0], [2, 4], [4, 0], [6, 5], [8, 0],
+                                    [10, 6], [12, 0]]},
+                         {"type": "line", "a": [5, -3], "b": [5, 9]},
+                         {"type": "ellipse", "center": [30, 0],
+                          "r_major": 6, "r_minor": 3, "rotation": 0},
+                         {"type": "line", "a": [20, 0], "b": [40, 0]}]})
+        qs, ql, qe, qx = skq["entity_ids"]
+        # A fixed on every pole: the kept ones survive, the rest are named.
+        d.call("add_constraints", sketch_id=skq["id"], constraints=[
+            {"kind": "fixed", "refs": [[qs, k]]} for k in range(7)])
+        before_q = d.call("get_state")["features"][0]
+        sq = d.call("split", sketch_id=skq["id"], entity_id=qs, at=[5, 2],
+                    crossing=ql)
+        expect(len(sq["entity_ids"]) >= 2 and qs in sq["entity_ids"],
+               f"a spline splits into pieces, one keeping the id: {sq}")
+        expect(sq["dropped"] and all(
+            "on pole" in x and f"of spline {qs}" in x for x in sq["dropped"]),
+            f"each replaced pole's constraint is named: {sq['dropped']}")
+        qents = {e["id"]: e for e in
+                 d.call("get_state")["features"][0]["entities"]}
+        expect(qents[sq["entity_ids"][0]]["poles"][0] == [0, 0] and
+               qents[sq["entity_ids"][-1]]["poles"][-1] == [12, 0],
+               "the pieces run from the spline's start to its end")
+        d.call("undo")
+        expect(d.call("get_state")["features"][0]["entities"] ==
+               before_q["entities"], "one undo puts the spline back")
+        # The ellipse at the two crossings of its major axis: the DOF does
+        # not change.
+        dof0 = d.call("split", sketch_id=skq["id"], entity_id=qs, at=[5, 2],
+                      crossing=ql)["dof"]
+        se = d.call("split", sketch_id=skq["id"], entity_id=qe,
+                    at=[[36, 0], [24, 0]], crossing=qx)
+        expect(se["dof"] == dof0 and len(se["entity_ids"]) == 2,
+               f"an ellipse cut at two crossings costs no DOF: {dof0} -> "
+               f"{se['dof']}")
+        qents = {e["id"]: e for e in
+                 d.call("get_state")["features"][0]["entities"]}
+        expect(all(qents[i]["type"] == "ellipse_arc"
+                   for i in se["entity_ids"]),
+               "a split ellipse is two elliptical arcs")
+        # A fillet between a line and a spline cuts the spline and says so.
+        skr = d.call("add_feature", feature={
+            "type": "Sketch", "name": "Sketch R",
+            "plane": {"origin": [0, 0, 50], "normal": [0, 0, 1],
+                      "uAxis": [1, 0, 0]},
+            "entities": [{"type": "line", "a": [0, 0], "b": [10, 0]},
+                         {"type": "spline",
+                          "poles": [[10, 0], [9, 4], [6, 6], [3, 8],
+                                    [0, 8]]}]})
+        rl, rs = skr["entity_ids"]
+        d.call("add_constraint", sketch_id=skr["id"], kind="coincident",
+               refs=[[rl, 1], [rs, 0]])
+        fr = d.call("fillet", sketch_id=skr["id"], entity1=rl, entity2=rs,
+                    radius=1.5)
+        expect(fr["arc_id"] != 0 and len(fr["replaced"]) == 1 and
+               fr["replaced"][0]["spline"] == rs and
+               fr["replaced"][0]["pieces"] and fr["dropped"] == [],
+               f"a fillet on a spline names its pieces: {fr}")
+
         phase("Linked linear pattern, then edit its count via modify_feature")
         # Linked linear pattern, then edit its count via modify_feature.
         d.call("new_project")

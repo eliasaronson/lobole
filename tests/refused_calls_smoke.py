@@ -324,7 +324,7 @@ def main():
                     {"type": "arc", "center": [5, 0], "radius": 5,
                      "start_angle_deg": 0, "end_angle_deg": 180},
                     {"type": "spline",
-                     "poles": [[10, 0], [12, 3], [14, -2], [16, 0]]},
+                     "poles": [[50, 0], [52, 3], [54, -2], [50, 0]]},
                     {"type": "line", "a": [30, 0], "b": [40, 0]}]})
             fl, fa, fs, far = fil["entity_ids"]
             for label, params, needle in [
@@ -334,9 +334,11 @@ def main():
                     ("fillet two shared ends without near",
                      {"entity1": fl, "entity2": fa, "radius": 1},
                      "share two ends"),
-                    ("fillet a spline end", {"entity1": fl, "entity2": fs,
-                                             "radius": 1},
-                     "a spline end is not filleted yet"),
+                    # A spline end is filleted (remote_smoke.py); a
+                    # closed one has none.
+                    ("fillet a closed spline", {"entity1": fl, "entity2": fs,
+                                                "radius": 1},
+                     "is closed, which has no end to round"),
                     ("fillet no shared end", {"entity1": fl, "entity2": far,
                                               "radius": 1}, "share no end"),
                     ("fillet zero radius", {"entity1": fl, "entity2": fa,
@@ -359,10 +361,12 @@ def main():
                     {"type": "line", "a": [0, 0], "b": [10, 0]},
                     {"type": "circle", "center": [20, 0], "radius": 3},
                     {"type": "spline",
-                     "poles": [[30, 0], [32, 3], [34, -2], [36, 0]]},
+                     "poles": [[30, 0], [32, 3], [34, -2], [30, 0]]},
                     {"type": "line", "a": [0, 5], "b": [10, 5]},
-                    {"type": "line", "a": [0, 8], "b": [10, 8]}]})
-            sl, sc, ssp, sfar, seq = spl["entity_ids"]
+                    {"type": "line", "a": [0, 8], "b": [10, 8]},
+                    {"type": "ellipse", "center": [60, 0], "r_major": 3,
+                     "r_minor": 3, "rotation": 0}]})
+            sl, sc, ssp, sfar, seq, sel = spl["entity_ids"]
             d.call("add_constraint", sketch_id=spl["id"], kind="equal",
                    refs=[[sfar, 0], [seq, 0]])
             for label, params, needle in [
@@ -372,8 +376,17 @@ def main():
                      "a hundredth of its length"),
                     ("split a circle once", {"entity_id": sc, "at": [23, 0]},
                      "takes two cuts"),
-                    ("split a spline", {"entity_id": ssp, "at": [32, 1]},
-                     "a spline is not split yet"),
+                    # A spline and an ellipse split (remote_smoke.py); a
+                    # closed spline takes one cut, at its seam none, and a
+                    # circle-shaped ellipse is rigid.
+                    ("split a closed spline twice",
+                     {"entity_id": ssp, "at": [[32, 1], [33, 0]]},
+                     "seam is its other"),
+                    ("split a closed spline at its seam",
+                     {"entity_id": ssp, "at": [30, 0]}, "the seam of"),
+                    ("split a circle-shaped ellipse",
+                     {"entity_id": sel, "at": [[63, 0], [57, 0]]},
+                     "circle-shaped"),
                     ("split a crossing that does not cross",
                      {"entity_id": sl, "at": [5, 0], "crossing": sfar},
                      "does not cross"),
