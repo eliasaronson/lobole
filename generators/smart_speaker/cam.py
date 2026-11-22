@@ -122,8 +122,10 @@ def build(app, p, part_name="front_wall"):
     # Ordered by TOOL, not as authored. The operations are written driver by
     # driver, which reads well and alternates the 6 mm and the 3 mm four
     # times; at the machine each change is a stop, a collet and a re-zero.
+    # One program per tool: the 6090's controller is run one tool at a
+    # time, the collet changed and Z re-zeroed between files.
     app.set_cam_setup(id=sid, machine=MACHINE["name"], origin_at="stock_max",
-                      order="tool")
+                      order="tool", split_output=True)
     # The stock IS the part: this panel arrives already cut to its outline
     # from the sheet, and this job only puts the driver features in it. The
     # default relative stock carries a 2 mm margin and a millimetre in Z,
@@ -248,8 +250,17 @@ def verify(app, sid):
 
 
 def post(app, sid, path):
-    """Write the G-code. This is the artefact the whole job exists for."""
+    """Write the G-code. This is the artefact the whole job exists for.
+
+    The setups post one program per tool (`split_output`), so `path` is a
+    base and the files are `<base>-T<n>.nc` beside it; every one is named
+    here, because a run that printed only the base sent the machine one
+    tool's worth of the job.
+    """
     r = app.cam_post(setup=sid, path=str(path))
-    print(f"  posted {path} — {r.get('lines')} lines"
+    files = r.get("files") or [{"tool": None, "path": str(path)}]
+    print(f"  posted {len(files)} file(s), {r.get('lines')} lines"
           + (f", SKIPPED {r.get('skipped')}" if r.get("skipped") else ""))
+    for f in files:
+        print(f"    T{f['tool']}: {f['path']}")
     return r

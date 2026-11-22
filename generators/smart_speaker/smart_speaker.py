@@ -231,24 +231,43 @@ def main():
         with phase("cam"):
             import cam
             _job, sid = cam.build(app, p)
-            ok, _v = cam.verify(app, sid)
-            if not ok:
+            cam_ok, _v = cam.verify(app, sid)
+            if not cam_ok:
                 print("  !! the job does not cut what it should")
-            elif not args.no_save:
+            # One program per tool, named `<stem>-<panel>-<side>-T<n>.nc`
+            # with no spaces: they go on an SD card and through a shell.
+            stem = Path(args.out).expanduser().with_suffix("")
+            if cam_ok and not args.no_save:
                 cam.post(app, sid,
-                         Path(args.out).expanduser().with_suffix("")
-                         .with_name(Path(args.out).stem
-                                    + " - baffle face 1.nc"))
+                         stem.with_name(f"{stem.stem}-baffle-face1.nc"))
             # The other side of both uprights: the divider dado and the face
             # dowels, in two setups because they do not fit the machine at
             # once (cam_back.py).
             import cam_back
-            stem = Path(args.out).expanduser().with_suffix("")
-            cam_back.build_all(
+            cam_ok = cam_back.build_all(
                 app, p,
                 post_to=None if args.no_save else
                 (lambda panel, which:
-                 stem.with_name(f"{stem.stem} - {panel} back {which}.nc")))
+                 stem.with_name(f"{stem.stem}-{panel}-back-{which}.nc"))
+            ) and cam_ok
+            # The side wall's inner face (dado and upper dowels; the lower
+            # ones are out of reach, cam_side.py) and the floor's underside.
+            # Verified and posted while each one's job is the active one.
+            import cam_floor
+            import cam_side
+            for mod, name in ((cam_side, "side_wall-inner"),
+                              (cam_floor, "bottom_wall-underside")):
+                _job, sid = mod.build(app, p)
+                good, _v = cam.verify(app, sid)
+                if not good:
+                    print(f"  !! {name} does not cut what it should")
+                elif not args.no_save:
+                    cam.post(app, sid,
+                             stem.with_name(f"{stem.stem}-{name}.nc"))
+                cam_ok = good and cam_ok
+            # A job that failed its verify is not a passing run: posting is
+            # already skipped for it, and the document is not saved either.
+            return _finish(app, args, asm, p, made, cam_ok=cam_ok)
 
     return _finish(app, args, asm, p, made)
 
@@ -290,10 +309,10 @@ def _chamber_occupants(app, asm, p):
     return total
 
 
-def _finish(app, args, asm, p, made):
+def _finish(app, args, asm, p, made, cam_ok=True):
     displaced = _chamber_occupants(app, asm, p)
     with phase("verify"):
-        ok = verify.run(app, p, made, asm, deep=args.deep)
+        ok = verify.run(app, p, made, asm, deep=args.deep) and cam_ok
         if displaced is not None:
             tuned, _fb = verify.tuning(p, displaced)
             ok = tuned and ok

@@ -33,7 +33,10 @@ python3 generators/smart_speaker/modal.py [--port N] [--mesh 25] [--project P] [
   coverings, braces, port, hardware); it is what `tests/generators_smoke.py`
   runs, headless, checking that the dowel holes of joined panels line up.
 - `all` (default) adds the bought parts, the assembly, and the CAM jobs,
-  posted as `.nc` beside the project. `--skip-cam` leaves the jobs out.
+  posted beside the project as one program per tool and setup,
+  `<stem>-<panel>-<side>-T<n>.nc` (no spaces: they go on an SD card). A job
+  that fails its verify is not posted and fails the run. `--skip-cam` leaves
+  the jobs out.
 - The run refuses to save what failed its checks; `--save-anyway` saves it
   to look at, marked untrustworthy. `--deep` compares against the reference
   STEPs by shape (IoU) instead of size and census.
@@ -52,7 +55,7 @@ python3 generators/smart_speaker/modal.py [--port N] [--mesh 25] [--project P] [
 | `hardware.py` | T-nuts and dowels |
 | `bought.py` | imports the sliced STEPs |
 | `mates.py`, `seating.py` | the assembly's mates |
-| `cam.py`, `cam_back.py` | the baffle's front job; the back of both uprights |
+| `cam.py`, `cam_back.py`, `cam_side.py`, `cam_floor.py` | the baffle's front; the back of both uprights; the side walls' inner face; the floor's underside |
 | `verify.py` | what the run refuses to save without |
 | `modal.py` | panel modes |
 | `smart_speaker.py` | the run |
@@ -104,6 +107,12 @@ element strings, which are valid only for the feature order that made them.
 `cam_back.py` cuts the divider dado and the face dowels on the back of both
 uprights in two setups each, because the dowels 1006 mm apart do not fit the
 900 mm travel; the deep dowels into the panels' end faces are a jig's work.
+`cam_side.py` cuts the side wall's inner face from the top end only — its
+stopped dado (T-boned, since the divider is square) and the four upper
+dowels; the lower ones are past the travel. It lies spun a quarter turn so
+its length runs along Y under the gantry. `cam_floor.py` cuts the floor
+underside up: the port hole, its R11 roundover with a 4 mm ball, and the
+bolt holes.
 
 ## What the run checks
 

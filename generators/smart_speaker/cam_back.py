@@ -11,8 +11,10 @@ so this is one function called twice rather than two jobs written twice.
 
 The face dowels sit at v +/-503, which is 1006 mm apart on a panel 1122
 long, and the 6090 travels 900. No reach offset places one window over
-both. So the panel is cut at one end, slid along the bed, and cut at the
-other:
+both. So the panel is cut at one end, TURNED ROUND, and cut at the other --
+each time with the end being cut at the back of the bed, the rest hanging
+off the front, and the zero on the far-right corner, as cam.py's baffle
+(`_cut_end_at_the_back`):
 
     top end     the divider dado (v 359..375) and the top dowels (v 503)
     bottom end  the bottom dowels (v -503)
@@ -118,37 +120,48 @@ def _stock_top(app, setup_id):
     raise SdkError(f"setup {setup_id} has gone")
 
 
-def _zero_on_the_cut_end(app, setup_id, label):
-    """Put the machine's zero on the END THIS SETUP CUTS, and check it can.
+def _cut_end_at_the_back(app, setup_id, job_part, label, spins=(0, 180)):
+    """Zero on the FAR-RIGHT corner and turn the panel until the end this
+    setup cuts is the one there; returns the spin.
 
-    This is the whole of the reach problem, and it is a datum question
-    rather than a bed-position one. The panel is 1122 mm and the 6090
-    travels 900, so of the two ends exactly one is reachable from each
-    origin — and which name that is depends on which way the panel was laid,
-    because the two uprights are mirror images and their inside faces look
-    opposite ways. So try both and keep the one that works.
+    The panel is 1122 mm and the 6090 travels 900, so it overhangs the bed
+    in every setup, and on this machine it can only overhang the FRONT. So
+    the end being cut goes to the back, the rest hangs off the front, and
+    the zero is the far-right corner (`stock_max`) -- the baffle's own
+    convention (cam.py), which is the program that was cut first. Between a
+    panel's top-end and bottom-end programs it is TURNED ROUND, never slid
+    the other way, and touched off on the same corner each time.
 
-    `reach_offset` is the wrong tool and was a long detour: it slides the bed
-    under a FIXED origin, so with the wrong datum no value helps — measured,
-    every offset either left the cutting 222 mm outside the travel or moved
-    it out of the file entirely ("every cut of this operation lies beyond
-    6090's travel, so none of it is in the file"). Both have to be checked,
-    because the second silences the first by emitting nothing.
+    This used to keep the panel's orientation and pick between the min and
+    max corners, so the two programs of one panel zeroed on opposite corners
+    and overhung opposite ends of the bed; one of them could not be clamped.
+    `reach_offset` cannot do this either: it slides the bed under a FIXED
+    origin, and with the wrong end at the datum no offset helps.
     """
+    app.set_cam_setup(id=setup_id, origin_at="stock_max")
     tried = []
-    for origin in ("stock_min", "stock_max"):
-        app.set_cam_setup(id=setup_id, origin_at=origin)
+    for spin in spins:
+        app.set_job_placement(setup=setup_id, part=job_part, rot_z=spin)
         app.set_cam_setup(id=setup_id, reach_offset="auto")
         says = app.cam_verify(setup=setup_id)["says"]
         paths = app.cam_toolpath(setup=setup_id)["operations"]
         empty = [o for o in paths if o.get("error") or not o.get("moves")]
         if not [m for m in says if "cannot go" in m] and not empty:
-            return origin
-        tried.append((origin, "outside the travel" if not empty
+            return spin
+        tried.append((spin, "outside the travel" if not empty
                       else "nothing in the file"))
-    raise SdkError(f"{label}: neither end of the panel puts this setup's "
-                   f"cutting inside the machine — {tried}. It wants "
-                   f"splitting further, or a longer machine")
+    raise SdkError(f"{label}: no turn of the panel puts this setup's cutting "
+                   f"inside the machine from its far-right corner -- {tried}")
+
+
+def job_part_of(app, job, part, label):
+    """The JOB's id for a part, which is not the part document's: a job
+    holds placements and `set_job_placement` addresses one of those."""
+    in_job = [q for q in app.list_job_parts(job=job["id"])["parts"]
+              if q.get("source") == part.id]
+    if len(in_job) != 1:
+        raise SdkError(f"{label}: the job holds {len(in_job)} copies of it")
+    return in_job[0]["id"]
 
 
 def build(app, p, panel):
@@ -156,13 +169,7 @@ def build(app, p, panel):
     part = app.part(panel, create=False)
     part.activate()
     job = app.machine_part(part=part.id, name=f"{panel} - face 2 (back)")
-    # The JOB's id for this part, which is not the part document's: a job
-    # holds placements and `set_job_placement` addresses one of those.
-    in_job = [q for q in app.list_job_parts(job=job["id"])["parts"]
-              if q.get("source") == part.id]
-    if len(in_job) != 1:
-        raise SdkError(f"{panel}: the job holds {len(in_job)} copies of it")
-    job_part = in_job[0]["id"]
+    job_part = job_part_of(app, job, part, panel)
 
     t = float(p["wall_thickness"])
     inside = _inside_face(part, p, panel)
@@ -177,24 +184,16 @@ def build(app, p, panel):
 
     v_top = float(p["carcass_half_h"]) - t / 2.0      # the top dowels' height
     setups = []
-    # Each setup is ZEROED ON THE END IT CUTS, and that is the whole trick.
-    # The two dowel groups are 1006 mm apart and the 6090 travels 900, so no
-    # single origin reaches both: with `stock_max` for both, the far pair
-    # lands 222 mm outside the Y travel and the program asks the controller
-    # for somewhere it cannot go. Origin at the end being worked makes each
-    # program local to that end — 152 mm of travel for one, 108 for the
-    # other — which is also exactly what happens at the machine: clamp the
-    # panel with the end you are cutting at the origin, touch off on that
-    # corner, run that program, then turn the panel round and run the other.
-    #
-    # `reach_offset` is the wrong tool for this. It says where the bed is
-    # under one fixed origin, so it can only slide a 900 window over 222 mm
-    # of a 1122 panel; the reach is not the problem, the datum is.
+    # One setup per end, each zeroed on the far-right corner with the end it
+    # cuts at the back of the bed (`_cut_end_at_the_back`): the two dowel
+    # groups are 1006 mm apart and the 6090 travels 900, so no one origin
+    # reaches both.
     for label, cuts in (("Back - top end", ("dado", v_top)),
                         ("Back - bottom end", (-v_top,))):
         sid = app.add_cam_setup(name=f"{panel}: {label}", post="mach3")["id"]
         setups.append(sid)
-        app.set_cam_setup(id=sid, machine=cam.MACHINE["name"], order="tool")
+        app.set_cam_setup(id=sid, machine=cam.MACHINE["name"], order="tool",
+                          split_output=True)  # one program per tool, as cam.py
         # The stock IS the part — see cam.py: this panel is already cut to
         # its outline, and a margin here would read as leftover nothing
         # removes.
@@ -241,18 +240,9 @@ def build(app, p, panel):
                     targets=[bore.ref], side="inside",
                     top_z=top, bottom_z=top - t / 2.0, stepdown=2.0)
                 n += 1
-        # WHERE THE BED IS, stated rather than inferred. `auto` resolves to
-        # [0, 0] on these setups — it places the window over the cutting and
-        # the cutting is already at the datum — and with the origin at an end
-        # of an 1122 mm panel that leaves the far end 222 mm outside a 900 mm
-        # Y travel, which the program then asks the controller for. So the
-        # offset is the reach this setup actually needs: the distance from
-        # its own datum to the furthest thing it cuts. Measured on the top
-        # setup, anything from 152 mm up is clean and 0 is not; 152 is
-        # exactly that distance.
-        zeroed = _zero_on_the_cut_end(app, sid, f"{panel} / {label}")
-        print(f"  {panel}: {label} — {n} operation(s), zeroed on "
-              f"{zeroed.replace('stock_', '')}")
+        spin = _cut_end_at_the_back(app, sid, job_part, f"{panel} / {label}")
+        print(f"  {panel}: {label} — {n} operation(s), far-right zero, "
+              f"turned {spin}")
     return job, setups
 
 
