@@ -265,9 +265,11 @@ def main():
                     cam.post(app, sid,
                              stem.with_name(f"{stem.stem}-{name}.nc"))
                 cam_ok = good and cam_ok
-            # A job that failed its verify is not a passing run: posting is
-            # already skipped for it, and the document is not saved either.
-            return _finish(app, args, asm, p, made, cam_ok=cam_ok)
+        # A job that failed its verify is not a passing run: posting is
+        # already skipped for it, and the document is not saved either.
+        # Finished outside the phase, or the cam phase's time lands after
+        # the table that reports it (and holds the verify phase as well).
+        return _finish(app, args, asm, p, made, cam_ok=cam_ok)
 
     return _finish(app, args, asm, p, made)
 
