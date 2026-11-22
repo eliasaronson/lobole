@@ -446,7 +446,9 @@ hand. The instance answers other calls while a job runs. Some calls run as
 jobs even without `async` and wait PARKED for theirs, answering as they
 always did while the frame and other connections carry on
 ([requests that wait](../architecture.md#requests-that-wait)): a
-synchronous `check_requirements` and a synchronous `design_sweep` are two.
+synchronous `check_requirements` and a synchronous `design_sweep` are two,
+and `align_import {mode: best_fit}`, whose `align` job is cancelled by
+`cancel_background_job {kind: align}`, is another.
 
 ## Refusals
 

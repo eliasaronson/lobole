@@ -1,19 +1,17 @@
-# A scan: what a fit found, and how far the model is from it
+# A scan: how far the model is from it
 
 A primitive fitted to a scan -- a plane, cylinder, cone, sphere or torus --
 rests on the surface that was clicked, says how good it is, takes hints and
 says what it found when one surface does not explain the region
 ([fitting a primitive to a mesh](../modeling/README.md#fitting-a-primitive-to-a-mesh)).
-A model built on a scan should be checkable against that scan: laid onto
-it, and coloured by how far it stands off.
+A scan is laid onto a model, or onto the scan before it, by
+`align_import {mode: best_fit}`
+([laying a scan onto a body](../interchange/README.md#laying-a-scan-onto-a-body)).
+A model built on a scan should also be checkable against that scan:
+coloured by how far it stands off.
 
 ## The problem
 
-- **A scan cannot be laid onto a model, or onto the scan before it.**
-  `align_import` has floor, three points, principal axes and scale
-  (src/core/ImportAlign.cpp). A re-scan has to be placed by hand "in the
-  same place" for its datums to follow, and a seed left off the surface
-  fails the datum.
 - **Nothing says how far the model is from the scan.** `compare_geometry`
   is B-Rep against B-Rep by volume. The scan route (datums, a section into a
   sketch, the model) ends with no check of the result, and neither a Cradle
@@ -21,34 +19,7 @@ it, and coloured by how far it stands off.
 
 ## The shape of the fix
 
-### 1. Laying a scan onto a body
-
-`align_import {mode: "best_fit", onto, …}` moves an Import's placement so its
-mesh lies on `onto`: a body of the part (B-Rep, by its tessellation, or
-another mesh body).
-
-- **Rigid only.** Scale is never fitted: a scale error is something to see.
-- **Starts.** The placement as it stands, and the 24 attitudes that lay the
-  mesh's principal axes on the target's. A partial scan of a near-cube ranks
-  its axes differently from the whole, so all 24 are tried.
-- **Each start** runs point-to-plane ICP on a thinned sample (each step
-  solved about the correspondences' centroid, the pose kept in doubles),
-  with pairs past three times the median distance left out of the step.
-- **The winner** is the pose with the lowest *capped mean distance over
-  every sample*, not over the pairs a step kept: scoring the survivors lets
-  a pose slide off the part and look better.
-- `pairs: [[from_mm, to_mm] × 3]` instead of the 24 starts: three picked
-  pairs give the start (refused when collinear).
-- `region: {feature_id, point_mm, radius_mm}` limits the fit to a patch.
-- The reply: `rotate_deg`, `translate_mm` as applied, `moved_mm` (the
-  largest displacement of a mesh corner), `mean_mm` and `p95_mm` after, and
-  `within_mm` with the share of samples inside it. It is one undo step. It
-  runs as a heavy job with progress and can be cancelled between passes.
-
-A datum's seed is a world point, so a re-scan laid onto the old scan's body
-by this keeps its datums.
-
-### 2. How far a body is from the scan
+### How far a body is from the scan
 
 `compare_scan {scan, body, tolerance_mm?}` (inspection; changes nothing).
 `scan` is a mesh body, `body` any body.
@@ -60,7 +31,10 @@ by this keeps its datums.
 - **Facing.** A scan point whose nearest surface faces away from the scan's
   normal there is measured to the nearest surface that faces its way. On a
   thin wall the nearest surface past half the thickness is the far side,
-  and the reading would have the wrong sign.
+  and the reading would have the wrong sign. `mesh::FacingSurface`
+  (src/core/mesh/Facing.h, the best fit's) answers the nearest surface
+  within an angle of a normal; `mesh::SampleSurface`
+  (src/core/mesh/Register.h) gives a scan point's blended vertex normal.
 - **The other direction.** Points on the body are measured to the scan where
   scan surface faces the same way and lies under them; elsewhere they read
   "no scan". This finds what the model has and the object does not, and
@@ -89,8 +63,7 @@ where they compare a body with its mesh.
 
 Each lands on its own with the suites green.
 
-- **D.** Best fit (§1).
-- **E.** Deviation (§2): the RPC, then the picture and the tool.
+- **E.** Deviation: the RPC, then the picture and the tool.
 
 ## Not in this plan
 
@@ -102,13 +75,12 @@ sketch: [section-sketch-relations.md](section-sketch-relations.md).
 
 ## Files
 
-- new `src/core/mesh/Register.{h,cpp}` (ICP), `Deviation.{h,cpp}`
-- `src/core/ImportAlign.{h,cpp}`, `src/core/mesh/Align.{h,cpp}`
+- new `src/core/mesh/Deviation.{h,cpp}`
 - `src/remote/RemoteInspection.cpp` (`compare_scan`,
-  `set_scan_deviation`), `src/remote/RemoteModeling.cpp` (`align_import`)
+  `set_scan_deviation`)
 - a new `src/ui/ScanCompareTool.{h,cpp}`, the field renderer
-- `tests/mesh_organic.{h,cpp}` (fixtures), new
-  `tests/test_mesh_register.cpp`, `tests/test_mesh_deviation.cpp`
+- `tests/mesh_organic.{h,cpp}` (fixtures: `ScannedSolid` gives a part and
+  its scan standing on it), new `tests/test_mesh_deviation.cpp`
 - docs/modeling/README.md, docs/inspect/README.md
 
 ## Verified by
@@ -116,19 +88,15 @@ sketch: [section-sketch-relations.md](section-sketch-relations.md).
 Every fixture is tilted off the axes, so a fit that only works axis-aligned
 cannot pass, and every number is checked against the generator's.
 
-- **Best fit.** A scan displaced by random rigid motions (seeded) from its
-  body is brought back within the noise, for a bracket, a near-cube with one
-  feature, and a scan of half the part; a thin plate is not flipped onto its
-  back. Scale is never changed. A datum fitted before a re-scan refits after
-  it without its seed moving.
 - **Deviation.** A body with one face raised 0.20 mm and another sunk
   0.15 mm against the scan: exactly those two hotspots, with those signs and
   depths within the noise, on those faces, and every other face inside the
   tolerance. A 1 mm wall reads its own side, not through to the far one. A
   scan of half the part gives `no_scan` near a half. A scan against the
   body it was sampled from reads `within` near 1.
-- **Cost** (CPU time, `[slow]`): best fit of a 500k-triangle scan and its
-  deviation each have a stated budget, set from the first measurement.
-- **Through the pipeline:** a smoke that imports a scan, lays it on a body,
-  fits its datums, compares, and reads the same numbers after save and
-  reopen; `refused_calls_smoke` covers each new refusal changing nothing.
+- **Cost** (CPU time, `[slow]`): the deviation of a 500k-triangle scan has
+  a stated budget, set from the first measurement.
+- **Through the pipeline:** `tests/scan_align_smoke.py` imports a scan,
+  lays it on a body, fits a datum and reads the same numbers after save and
+  reopen; it gains the compare; `refused_calls_smoke` covers each new
+  refusal changing nothing.

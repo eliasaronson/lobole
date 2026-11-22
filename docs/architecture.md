@@ -378,7 +378,7 @@ PARKED instead (`RemoteServer::Parked`, `remote::Parking` in
 `RemoteParking.h`): the work goes to background jobs, `PollParked` asks it
 once a tick, after `ReapBackgroundJobs`, whether it is done, and the answer
 -- or a refusal, or the request put back at the head of the queue to run its
-handler from the caches -- goes out then. Five domains park: CAM, on its
+handler from the caches -- goes out then. Six domains park: CAM, on its
 toolpath passes ([cam/README.md](cam/README.md#requests-that-wait));
 drawings, on their views' projection, except on `--headless`, where the
 synchronous handler holds no frame
@@ -390,7 +390,9 @@ synchronous handler holds no frame
 synchronous `design_sweep`, on its job
 ([design sweep](requirements/README.md#design-sweep)); and `import_step`,
 on the `import` job, in every mode ([long
-operations](ui/long-operations.md#import)). A request that reads a part's geometry
+operations](ui/long-operations.md#import)); and an `align_import`
+best fit, on its `align` job, which commits the placement when it lands
+([laying a scan onto a body](interchange/README.md#laying-a-scan-onto-a-body)). A request that reads a part's geometry
 while a heavy feature of it builds waits for the build, and a call that left
 its part building one answers when it lands, with the part as built
 ([heavy features](ui/long-operations.md#heavy-features)). The pump sets

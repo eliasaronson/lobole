@@ -241,7 +241,8 @@ scale. An `Import` carries a placement of its own (`src/core/ImportPlacement.h`)
   import already has. It writes the placement WHOLE, so a placement bound
   to the variables comes out of an alignment unbound -- the composed turn
   is no longer what any one text said; the Align tool does the same, and
-  puts the texts back when it is cancelled. The modes:
+  puts the texts back when it is cancelled. The modes (a sixth is
+  [best_fit](#laying-a-scan-onto-a-body), onto another body):
   - `floor` {`point_mm`, `tolerance_mm`?}: the plane of the flat grown from
     the triangle under the point (`mesh::GrowPlane`, `src/core/mesh/Align.h`:
     the region `fit_primitive` grows for a plane, fitted robustly so a stray
@@ -270,7 +271,7 @@ scale. An `Import` carries a placement of its own (`src/core/ImportPlacement.h`)
   The plane modes put the bodies on the side of the plane that holds their
   surface centroid (above the floor) and centre them over the origin in x
   and y; `principal` centres them. Any other mode is refused, naming the
-  four, and a parameter that belongs to another mode (`distance_mm` on a
+  five, and a parameter that belongs to another mode (`distance_mm` on a
   floor) is refused naming whose it is. The reply: the inputs,
   `placement`, `scale`, and `fit` -- floor {`fitted`: region |
   boundary_loop, `body`, `triangles` and `area_mm2` or `loop_vertices`,
@@ -288,7 +289,7 @@ scale. An `Import` carries a placement of its own (`src/core/ImportPlacement.h`)
 - **In the GUI** the Import's editor shows Move, Turn and Scale, each an
   undoable modify, and *Align...*, which opens the **Align tool**
   (`src/ui/AlignTool.{h,cpp}`; the toolbar's *Align an import* opens it on
-  the selected import, else the newest): the four modes, each point picked
+  the selected import, else the newest): the five modes, each point picked
   on the import in the viewport (`kAlignToolSlot`, a point session: the
   pick's hit point, `SlotPickState::hitPoint`). It previews as soon as the
   mode has its points (principal at once; scale once the true distance
@@ -296,7 +297,114 @@ scale. An `Import` carries a placement of its own (`src/core/ImportPlacement.h`)
   with no undo entry, and always from where the import stood, so a second
   pick never compounds. Accept is one undo step; Cancel, Escape, the undo
   chord, a new preview and a tab switch put it back. What it fitted shows
-  under the points, and a failure in red with Accept disabled.
+  under the points, and a failure in red with Accept disabled. *Best fit*
+  picks the body to go onto (*Onto*, a click on any face of it) and runs
+  the fit as an `align` job, its progress bar and Cancel in the window
+  (`DrawJobProgress`) while the frame keeps drawing; it previews when it
+  lands, and a cancel leaves the import where it stood.
+
+## Laying a scan onto a body
+
+`align_import {feature_id, mode: "best_fit", onto, pairs_mm?, region?}`
+moves an Import's placement so its triangles lie on the body `onto` made
+(its feature_id): a B-Rep by its tessellation (at the deflection a mesh
+Boolean's operand takes, `chord_mm` in the reply), or another mesh body --
+an earlier scan. The import's own body is refused, and so is a feature
+that made no body. The fit is `importalign::BestFit`
+(`src/core/ImportAlign.{h,cpp}`) over `src/core/mesh/Register.{h,cpp}`:
+
+- **Rigid only.** It never fits a scale: a scale error is something to see,
+  and `mean_mm` shows it. `scale` is no parameter of `align_import` (refused
+  as unknown, naming what it takes); the placement's own scale is kept as
+  it was, and mode `scale` sets one from a known distance.
+- **Matched to the surface facing its way.** Each sample of the scan is a
+  point and its normal -- its triangle's, or on a sliver (whose own normal
+  points anywhere: a scan's mesher leaves many) its corners' vertex normals
+  blended; blended everywhere, a coarse CAD mesh's normals lean across its
+  sharp edges past the angle a match allows -- matched to the nearest triangle of the body
+  whose normal is within 72° of it (`mesh::FacingSurface`,
+  `src/core/mesh/Facing.h`; `mesh::Bvh::ClosestPoint` takes a filter).
+  Within half a thin wall's thickness the nearest surface is the far side,
+  which faces the other way.
+- **Starts.** The placement as it stands, and the 24 attitudes that lay the
+  scan's principal axes on the body's -- each also turned 45° about each of
+  the body's axes, since where two of a partial scan's spreads are alike its
+  frame stands at any angle between them -- each placed with its centroid on
+  the body's and with each of the eight corners of its box (in the body's
+  frame) on the body's same corner, because a scan of part of an object
+  still reaches some of its extremes: 865 starts. A scan of half a bracket
+  ranks its axes nothing like the whole, and from the centroid alone it
+  settled on the upright, which is a plate of the same size.
+- **Screened, run, refined** (`mesh::Search`). Every start runs three
+  passes on 150 samples, matched within a quarter of the cap; the best 12
+  that stand apart (10° or a twentieth of the part) run until they settle
+  on 1500 samples; the winner is refined on 12000. While the poses are far
+  off they match onto a stand-in of a dense body: 20000 small triangles in
+  its tangent planes (`mesh::Surfels`), so a search costs what 20000
+  triangles cost whatever the body has; the refinement matches the body
+  itself.
+- **Each pass** is point-to-plane ICP, solved about the kept pairs'
+  centroid with the pose in doubles (a small point-to-point term holds the
+  motions a flat region leaves free). Pairs past three times the median
+  distance are left out of the step, never under a fiftieth of the cap: near
+  the answer the median is the noise, and three times it trimmed away the
+  pairs on a plate's edges that hold its slide in its own plane. A pass
+  searches within six times the last median (never under a twentieth of
+  the cap); the scoring pass within the cap.
+- **The winner** is the pose with the lowest *capped mean distance over
+  every sample* -- a sample with no surface facing its way within the cap
+  (a tenth of the body's diagonal, never under ten times the noise) counts
+  the cap -- never over the pairs a step kept, which lets a pose slide off
+  the part and look better.
+- `pairs_mm: [[on the import, on the body] x 3]` give the one start instead
+  of the search, the two triangles laid frame on frame (refused, before
+  any job, when either three are in a line); picked pairs whose sides
+  differ by more than 5% between the two say so in the `note` (rigid: a
+  wrong scale stays). `region: {feature_id, point_mm, radius_mm}` limits the
+  fit to a patch: the scan's surface within the radius as it stands now,
+  and, with `feature_id` the body's, the body's within a quarter more. A
+  patch has no shape to find the part by, so it is laid from where it
+  stands (or from its pairs); a region with no surface within it is refused
+  before any job. A patch must fix every motion: one clear of a part's
+  sides leaves it free to slide along them.
+- **The reply** adds `fit` {`onto`, `rotate_deg` and `translate_mm` (the
+  motion applied, as `align_import` composes it onto the placement),
+  `moved_mm` (the farthest any vertex moved), `mean_mm` and `p95_mm` (the
+  samples' distances after; the mean over those matched), `within_mm`
+  (the scan's noise, `mesh::ScanTolerance`, never under the body's chord
+  nor a ten-thousandth of its diagonal -- an exact copy's noise is its
+  file's precision, finer than a fit settles to)
+  and `within` (the share inside it), `unmatched`, `samples`, `starts`,
+  `winner` (placement | principal | pairs), `score_mm`, `runner_up`?
+  {`score_mm`, `turn_deg`, `move_mm`}, `note`?, `chord_mm`?}. `runner_up` is
+  the best kept start that ended at another attitude or a tenth of the part
+  away. When it scores within the noise (or half the winner's score) of the
+  winner, `note` says the shape barely tells them apart and that three
+  `pairs_mm` say which: a box is its own half turn about each of its axes,
+  and is laid in one of the four, its runner-up scoring what the winner
+  does; a turned part is told round its axis only by what is not turned
+  (the post's lump: 44° away at 0.048 mm against 0.037). Against a winner
+  of a few hundredths, a bracket's closest other attitude scored about
+  3.7 mm, a near-cube with one blind hole 0.38 mm and a thin plate on its
+  back 0.19 mm (`tests/test_mesh_register.cpp` prints each).
+- **One undo step**, as every mode. It runs as an **`align` job**: the
+  handler reads and refuses every input and gathers the triangles on the
+  frame (a B-Rep tessellated on a copy), the fit runs on the worker with
+  its progress and a cancel between passes, and the request is answered
+  when it lands (`ParkModelingRequest`, [requests that
+  wait](../architecture.md#requests-that-wait)); a `batch` runs it in
+  place. Cancelled, it is refused and changes nothing; an import moved,
+  removed or closed while it ran is refused the same way.
+- **It costs** about 3 CPU s for a 30k-triangle scan onto a 340k-triangle
+  body, most of it the screen, and 1.2 CPU s for a 500k-triangle scan
+  onto the same body (fewer passes: the denser scan settles sooner); the
+  `[slow]` budget is 4 CPU s.
+
+A datum's seed is a world point ([datums on a
+scan](../modeling/README.md#datums-on-a-scan)), so a re-scan laid by a best
+fit onto the scan it replaces -- kept as a second import, or onto the model
+made from it -- keeps its datums: they refit where they were, their seeds
+untouched.
 
 ## IGES
 
@@ -1063,7 +1171,7 @@ on an assembly tab, and unknown extensions, are refused by name.
 | `export_dxf` | RemoteSheetMetal | a flat pattern as R12 DXF |
 | `export_print_job {path, plates, slicer_config?, name?}` | RemotePrint | a print job, one 3MF of plates for Bambu Studio ([print jobs](../tolerances/README.md#print-jobs)) |
 | `add_feature` with `type: "Import"` | RemoteModeling | the feature directly; reports `recentred_by`, `up_axis` and a `placement` it was given |
-| `align_import {feature_id, mode, point_mm?, points_mm?, distance_mm?, tolerance_mm?}` | RemoteModeling | an Import's placement from a floor, three points, its principal axes or a known distance ([placing an import](#placing-an-import)) |
+| `align_import {feature_id, mode, point_mm?, points_mm?, distance_mm?, tolerance_mm?, onto?, pairs_mm?, region?}` | RemoteModeling | an Import's placement from a floor, three points, its principal axes, a known distance ([placing an import](#placing-an-import)) or a best fit onto another body ([laying a scan onto a body](#laying-a-scan-onto-a-body)) |
 
 ## Tests
 
@@ -1074,11 +1182,14 @@ on an assembly tab, and unknown extensions, are refused by name.
 | `tests/fixtures/import/` | the fixtures and `make_fixtures.py` / `make_iges.cpp`, which wrote them: our box under real SolidWorks 2024 and Autodesk headers, IGES as a solid, as surfaces and with a SolidWorks system ID, ezdxf DXFs, SVGs, an OBJ |
 | `tests/golden/v190-import-up-axis.json` | `up_axis` and `turn_deg` round-trip; v97 and v103 reload as `none` |
 | `tests/test_import_align.cpp` `[align]` | a placement's angles read back; composing an alignment is the matrix product; a mesh body and a B-Rep placed (moved vertices, volume, face names kept); the keys written, read and refused; floor on a tilted box as a mesh and as facets, then scaled by a known edge with the floor kept; three points; principal axes; the rim of an open scan on z = 0 with the figure standing; each refusal |
+| `tests/test_mesh_register.cpp` `[register]` | [laying a scan onto a body](#laying-a-scan-onto-a-body): a bracket, a near-cube with one blind hole, a scan of half the bracket and a thin plate, each tilted off the axes, laid back from six seeded random rigid motions to within 0.015 mm and 0.01° of the motion applied (the noise is 0.05 mm); the plate's closest other attitude is it on its back, scored several times worse; a box (its own half turn) says so in its `note` and lands on one of its symmetries; an exact copy of a coarse CAD mesh (few triangles, sharp edges) laid to 1e-6 mm; the scale never changes; three pairs, and in a line refused; a region; a cancel; a datum fitted before a re-scan refits after it, its seed unmoved; `[slow]` a 500k-triangle scan under its CPU budget |
 | `tests/golden/v213-import-placement.json` | `placement` and `scale` round-trip |
 | GUI `align/a_floor_picked_on_a_scan_is_one_undo_step` | the tool waits for a pick with Accept disabled, a click on the face previews it on the floor, Accept is one undo step and Undo puts it back; principal previews with no pick and Cancel puts it back |
+| GUI `align/a_best_fit_runs_off_the_frame` | Best fit arms the onto pick with Accept disabled; a click on the other body runs the fit as an `align` job and lands a preview standing on it, saying the box is its own turn; Accept is one undo step and Undo puts it back |
+| `tests/scan_align_smoke.py` | a noisy scan of a modelled box, turned and moved, laid onto the box by `best_fit` through the RPC (its bounding box the box's, the note, the B-Rep's chord), a datum on it, the placement and the datum read back after save and reopen; `cancel_align`: the `align` job listed, cancelled from another connection, the call refused and the document unchanged |
 | `tests/test_assembly_flatten.cpp` | `Flatten`'s levels compose to exactly its world placement |
 | `tests/headless_smoke.py` | STEP / STL / BREP round trips, `keep_origin`, `as_assembly`; every import fixture through `import_step` / `import_sketch` with its reply read |
-| `tests/refused_calls_smoke.py` | an unknown `up_axis`, `units` on IGES, a drawing given to `import_step`, a scale of -1 and an unknown placement key; `align_import`'s unknown mode, a parameter of another mode, a point off the import, three points in a line, a missing distance; each changing nothing |
+| `tests/refused_calls_smoke.py` | an unknown `up_axis`, `units` on IGES, a drawing given to `import_step`, a scale of -1 and an unknown placement key; `align_import`'s unknown mode, a parameter of another mode, a point off the import, three points in a line, a missing distance; best_fit without `onto`, onto no feature or the import itself, with a `scale`, pairs in a line or two of them, a region of a third body or off the import, `onto` on a floor; each changing nothing |
 | GUI `import/solidworks_part_stands_up_and_lies_down` | the pill, the editor's axis combo, undo |
 | `tests/test_mesh_scan_import.cpp` `[mesh_body][import]` | [PLY and glTF](#ply-and-gltf): each encoding, colours, every representation, nodes placed in mm and stood up, each refusal, a cancel |
 | `tests/test_mesh_import.cpp` `[interchange][import]` | counting a binary, an ASCII and a lying STL and an OBJ's polygons; the limit is where the law reaches the patient wait, and the refusal names the count, the time and the override; a mesh read reports its phases and stops on a cancel (STL and OBJ); a seeded import is the import of its file (bodies, names, volume, units) |

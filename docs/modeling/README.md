@@ -1267,6 +1267,10 @@ place (aligned the same way) and the datum moves onto it.
 - The seed is a world point. A scan moved after its datums were fitted
   (a new `align_import`) leaves the seed where it was; one now off the
   surface fails the datum with the distance, never a fit somewhere else.
+  So a re-scan read standing anywhere is laid back by a best fit onto the
+  scan it replaces (kept as a second import) or onto the model made from it
+  ([laying a scan onto a body](../interchange/README.md#laying-a-scan-onto-a-body)),
+  and its datums refit where they were.
 - A datum that cannot fit -- its body gone, the seed off the surface, a
   curved kind on a flat -- fails with the reason, and its output is the
   default, never the last good one ([the datum
