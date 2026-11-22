@@ -1677,6 +1677,8 @@ set_tests_properties(python_package_compiles PROPERTIES TIMEOUT 60)
 # it is gui-labelled (a hidden window), and a feature type added without a
 # row stayed red there for two days in September 2026 with nothing on the
 # default path to say so. This needs no display, no GPU and no mcp SDK.
+# It also holds every agent-facing text to the method tables
+# (tests/agent_prose.py) and lints the published schemas' portability.
 add_test(NAME mcp_formats_gate
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/mcp_formats_gate.py
                  $<TARGET_FILE:designer>)

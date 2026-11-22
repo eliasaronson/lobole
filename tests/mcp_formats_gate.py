@@ -16,6 +16,12 @@ This is the same check against a HEADLESS app, so it runs in `ctest -LE gui`
 and in CI. Needs no display, no GPU and no mcp SDK: it imports only the
 constants, with the SDK import stubbed.
 
+It also holds every text an agent reads to the method tables
+(tests/agent_prose.py: the prompt, the instructions, the format texts, the
+tools' descriptions, the help() reference, the describe rows), and lints
+every schema describe publishes and, where the SDK is installed, every
+tool's input schema for portability.
+
 Usage: mcp_formats_gate.py <path-to-designer-binary>
 """
 import os
@@ -39,8 +45,18 @@ def load_mcp_constants():
     mcpserver = types.ModuleType("mcp.server.mcpserver")
 
     class _MCPServer:
+        # What `@mcp.tool(description=...)` announced, by function name:
+        # the descriptions the prose scan reads (the schemas need the SDK).
+        announced = {}
+
         def __init__(self, *a, **k):
             pass
+
+        def tool(self, *a, description=None, **k):
+            def register(f):
+                _MCPServer.announced[f.__name__] = description
+                return f
+            return register
 
         def __getattr__(self, name):
             return lambda *a, **k: (lambda f: f)
@@ -64,6 +80,84 @@ def load_mcp_constants():
                         "mcp.server.mcpserver.exceptions": exceptions})
     import lobole.mcp
     return lobole.mcp
+
+
+def announced_tools(m):
+    """{name: (description, input schema or None)} of every tool the server
+    announces: from the SDK's own list where it is installed, else from the
+    stand-in's record (no schemas)."""
+    announced = getattr(type(m.mcp), "announced", None)
+    if announced is not None:
+        return {n: (d, None) for n, d in announced.items()}
+    import anyio  # the SDK's own dependency
+    return {t.name: (t.description, t.input_schema)
+            for t in anyio.run(m.mcp.list_tools)}
+
+
+def schema_problems(schema, where):
+    """A `type` that is an array, or an `enum` beside one: what some model
+    vendors refuse a whole tool list over. Alternatives are written `anyOf`
+    (docs/scripting/mcp.md#portable-schemas)."""
+    out = []
+    if isinstance(schema, dict):
+        t = schema.get("type")
+        if isinstance(t, list):
+            out.append(f"{where}: \"type\": {t} (write anyOf)"
+                       + (" beside an enum" if "enum" in schema else ""))
+        for k, v in schema.items():
+            out += schema_problems(v, f"{where}/{k}")
+    elif isinstance(schema, list):
+        for i, v in enumerate(schema):
+            out += schema_problems(v, f"{where}[{i}]")
+    return out
+
+
+def source_files():
+    """The app's and the package's source, whose quoted literals count as
+    names that exist (tests/agent_prose.py)."""
+    import subprocess
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    listed = subprocess.run(
+        ["git", "-C", root, "ls-files", "src/*.cpp", "src/*.h",
+         "python/lobole/*.py"], capture_output=True, text=True)
+    if listed.returncode != 0 or not listed.stdout.strip():
+        # Not a checkout (a source tarball): every file under the two trees.
+        import glob
+        return [f for pat in ("src/**/*.cpp", "src/**/*.h",
+                              "python/lobole/*.py")
+                for f in glob.glob(os.path.join(root, pat), recursive=True)]
+    return [os.path.join(root, f) for f in listed.stdout.split()]
+
+
+def prose_problems(m, desc, tools):
+    """Every agent-facing text checked, and a planted name caught in each
+    kind of text: a gate that cannot see a plant is blind."""
+    import agent_prose
+    problems = []
+    names = set(tools) | set(m._EXPOSED)
+    literals = agent_prose.source_literals(source_files())
+    texts = agent_prose.agent_texts(
+        m, desc, {n: d for n, (d, _) in tools.items()})
+    for name, unknown in agent_prose.scan(texts, desc, names,
+                                          literals).items():
+        problems.append(f"{name} names what nothing registers: "
+                        f"{', '.join(unknown)}")
+    # One of each kind of text, with a planted call, a planted word and a
+    # planted key of a real method: each must come back.
+    plant = (" Call rpc('make_it_so') on the frobnicated_widget, then "
+             "rpc('add_requirement', {name, colour_key}).")
+    want = ["add_requirement.colour_key", "frobnicated_widget", "make_it_so"]
+    kinds = {}
+    for name in texts:
+        kinds.setdefault(name.split(":", 1)[0], name)
+    for name in kinds.values():
+        planted = {name: texts[name] + plant}
+        got = agent_prose.scan(planted, desc, names, literals).get(name, [])
+        missing = [w for w in want if w not in got]
+        if missing:
+            problems.append(f"the prose scan is blind in {name}: a planted "
+                            f"{', '.join(missing)} was not caught")
+    return problems, len(texts)
 
 
 def main():
@@ -152,6 +246,22 @@ def main():
         if name != "ui_action" and name not in rows:
             problems.append(f"help prose for {name}, which the app does not "
                             "serve")
+    # Every text an agent reads names only what exists.
+    tools = announced_tools(m)
+    found, text_count = prose_problems(m, desc, tools)
+    problems += found
+    # The schemas stay portable: the app's own (test_rpc_contract.cpp lints
+    # them too) and the tools' signatures as the SDK writes them.
+    for row in desc["methods"]:
+        for key in ("request_schema", "result_schema"):
+            if key in row:
+                problems += schema_problems(row[key], f"{row['name']}.{key}")
+    schemas = {n: s for n, (_, s) in tools.items() if s is not None}
+    for name, schema in sorted(schemas.items()):
+        problems += schema_problems(schema, f"tool {name}")
+    if not schema_problems({"properties": {"x": {"type": ["string",
+                                                          "null"]}}}, "p"):
+        problems.append("the schema lint does not see a planted type array")
     if problems:
         print("mcp formats gate: python/lobole/mcp.py has drifted from the "
               "app:")
@@ -160,7 +270,10 @@ def main():
         return 1
     print(f"mcp formats gate: {len(desc['feature_types'])} feature types, "
           f"{len(desc['sketch_entity_types'])} entity types and "
-          f"{len(app_slugs)} material slugs all documented")
+          f"{len(app_slugs)} material slugs all documented; {text_count} "
+          f"agent-facing texts name only what exists; "
+          f"{len(schemas) if schemas else 'no (the mcp SDK is not installed)'}"
+          f" tool schemas and every describe schema portable")
     return 0
 
 

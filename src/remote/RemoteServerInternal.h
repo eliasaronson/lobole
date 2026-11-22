@@ -24,6 +24,7 @@
 
 #include <optional>
 #include <set>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -61,6 +62,13 @@ std::string UnknownMethodError(const std::string& method);
 // refusal (code unknown_argument, the key, the keys the row takes).
 std::optional<remote::ContractError>
 UndeclaredParamsError(const std::string& method, const nlohmann::json& params);
+
+namespace remote {
+struct MethodDoc;
+}
+
+// Every module's MethodDoc table, in describe's order: the one list of them.
+std::span<const std::span<const remote::MethodDoc>> AllMethodTables();
 
 // The request schema of `method` -- an inspection contract or a typed
 // MethodDoc row (docs/scripting/rpc.md#typed-contracts) -- or nullptr.

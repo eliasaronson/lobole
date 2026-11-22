@@ -184,14 +184,54 @@ test is taken out of the prompt rather than left in untested.
 | `get_state` carries `selection` and `selection_items` | `workflow_claims_smoke` |
 | a buckling study's `buckling_factor` (and `factor_of_safety`) is its governing factor; a study requirement never checked is `unchecked` | `buckling_smoke` |
 | the GUI-driving RPCs need a window; offscreen renders | `remote_smoke`, `offscreen_smoke` |
-| every name it uses is an announced tool or a registered RPC | `mcp_smoke` |
+| every name it uses is an announced tool or a registered RPC | `mcp_formats_gate`, `mcp_smoke` |
 
-The last row is the drift gate: `mcp_smoke` fails when a call-shaped name in
-the prompt (an `rpc('x')`, or any snake_case word) is neither a tool, an
-RPC, a key `describe` publishes, nor one of the few vocabulary words it
-lists, and checks itself on a planted unknown name. The prompt names no
+The last row is the drift gate, and it covers every text, not only this
+one ([below](#every-text-names-only-what-exists)). The prompt names no
 port: the human's instance is the registry's `gui` one the agent did not
 start.
+
+### Every text names only what exists
+
+An agent on this surface reads prose, and copies the names in it. Every
+text it reads is held to the method tables by `tests/agent_prose.py`, run
+over all of them by `mcp_formats_gate` (headless, the default path):
+`WORKFLOW`, the server's `INSTRUCTIONS`, `FEATURE_FORMATS`,
+`CONSTRAINT_FORMATS`, every announced tool's description, every
+`_reference` text `help()` serves, and every `describe` row's prose.
+
+`unknown_names(text, describe, tools, vocabulary)` returns what nothing
+registers:
+
+- a `snake_case` word that is not a method, a tool, a key or a value
+  `describe` publishes (parameters, `returns`, every key and enum value of
+  the request and result schemas, the feature types' contract keys and
+  `params` text, and its name lists: mate types, material slugs, ...), nor a
+  word of that text's entry in `VOCABULARY`, which says where each comes
+  from; an `x_expr` counts as the twin of `x`;
+- whatever `rpc('x')` or `help('x')` names that is not a method or a tool;
+- a key in `rpc('m', {a, b})`'s braces that `m`'s row does not take.
+
+The prompt texts (`WORKFLOW`, `INSTRUCTIONS`, the two format texts) are
+held to that alone. The rest describe what a call answers, which `describe`
+publishes only where a row states `returns`, so for them a word the app's or
+the package's source writes as a quoted literal (`"peak_at"`) counts as
+existing too: a renamed key, whose old literal is gone, is still caught. The
+gate plants a call, a word and a key in one text of each kind and fails
+unless all three come back. `mcp_smoke` keeps what only the transport
+shows: the prompt it is served is `WORKFLOW`, and names nothing the
+announced tools and the app lack.
+
+### Portable schemas
+
+Some model vendors refuse a whole tool list over one `"type": [..]`. Every
+alternative is written `anyOf`: `RpcContract.cpp` does so for a typed row's
+column, and the MCP SDK for the tools' signatures. `test_rpc_contract.cpp`
+walks every request and result schema `describe` publishes and fails on a
+`type` that is an array (and on an `enum` beside one); `mcp_formats_gate`
+does the same over those schemas as `describe` serves them and over every
+announced tool's input schema, where the SDK is installed. Both check
+themselves on a planted array.
 
 ## Format documentation
 
@@ -209,8 +249,10 @@ and its prose.
 
 ## Testing
 
-- `mcp_formats_gate` — the prose against `describe`, and each announced
-  tool's signature against its RPC's row, headless.
+- `mcp_formats_gate` — the prose against `describe`, each announced
+  tool's signature against its RPC's row, every agent-facing text's names
+  ([above](#every-text-names-only-what-exists)) and the schemas'
+  portability, headless.
 - `python_package_compiles` — compiles every module of the package on the
   default path, with no display and no SDK. `mcp_smoke` is GUI-labelled, so
   without it a syntax error in the server would pass every default run.
@@ -218,8 +260,8 @@ and its prose.
   SDK or a Vulkan device).
 - `mcp_smoke` (GUI) — models a dimensioned bracket end to end through the
   SDK's stdio client, so the MCP layer itself is exercised, and fails when
-  the workflow prompt names something that is neither a tool nor an RPC;
-  skips without the `mcp` SDK.
+  the prompt it is served is not `WORKFLOW` or names something that is
+  neither a tool nor an RPC; skips without the `mcp` SDK.
 - `workflow_claims_smoke` (headless) and `rpc_digest_gate` (source, no
   app) — the prompt's claims in the table above.
 - `packaging_smoke` — the wheel `pyproject.toml` builds, imported alone.

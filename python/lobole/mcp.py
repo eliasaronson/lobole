@@ -812,14 +812,14 @@ class _Server(MCPServer):
                 raise
 
 
-mcp = _Server(
-    "lobole",
-    instructions="Tools for driving a running Loböle CAD instance. Read the "
+# What the server tells a client it is, before any tool or prompt: held
+# to the method tables with every other text (tests/agent_prose.py).
+INSTRUCTIONS = ("Tools for driving a running Loböle CAD instance. Read the "
     "modeling-workflow prompt before modeling. The listed tools are the "
     "conversational surface; EVERY other RPC (assemblies, drawings, studies, "
     "configurations, sketch constraints, imports and exports, raw GUI "
     "actions) is reached "
-    "with rpc('method', {...}) and documented by help('method'). For building "
+    "with rpc('<method>', {...}) and documented by help('<method>'). For building "
     "a part with loops or computed arguments, execute_script (a python "
     "snippet with the client pre-bound as `d`) beats a tool call per step. "
     "For many edits at once, rpc('batch', {'calls': [...]}) runs them as ONE "
@@ -829,8 +829,9 @@ mcp = _Server(
     "imported with rpc('import_step', {'path': ...}) whatever its 3D format "
     "(STEP, IGES, STL, OBJ, PLY, glTF, BREP; an STL's holes and flats "
     "recognised as "
-    "true faces), and a DXF or SVG into a sketch with rpc('import_sketch').",
-)
+    "true faces), and a DXF or SVG into a sketch with rpc('import_sketch').")
+
+mcp = _Server("lobole", instructions=INSTRUCTIONS)
 
 _client = None
 # An EXPLICIT port (flag or env) is an instruction, not a guess: it pins the
@@ -2324,7 +2325,7 @@ _reference("run_study", "Mesh + solve a study now (explicit; never automatic). "
           "peak temperatures. A TOPOLOGY study runs ASYNC (minutes on a "
           "worker thread): it returns {started:true} immediately — poll "
           "study_status until running:false, then read study_results. "
-          "async_run=True runs a static/modal study the same way — use it "
+          "async: true runs a static/modal study the same way — use it "
           "for big meshes (a synchronous solve can outlive the client "
           "timeout); cancel_study stops any of them. "
           "Errors name the offending face/material/support.")
