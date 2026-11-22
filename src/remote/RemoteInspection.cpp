@@ -65,7 +65,6 @@
 #include "ui/ToleranceActions.h"
 #include "ui/ViewActions.h"
 #include <BRepAdaptor_Surface.hxx>
-#include <BRepBndLib.hxx>
 #include <Bnd_Box.hxx>
 #include <Standard_Failure.hxx>
 #include <TopExp.hxx>
@@ -2288,11 +2287,16 @@ void AddPressBand(json& out, const fitband::PrintedBand& pb) {
     out["press_from"] = "the built-in default: the profile has no press row";
 }
 
-// The MEASURED box of `bodies` placed at `world`, grown into `box`: off the
-// surfaces (BRepBndLib::AddOptimal, no triangulation, no tolerances), as
-// mass_properties' per-body boxes are.
+// The MEASURED box of `bodies` placed at `world`, grown into `box`: the
+// tight box (off the surfaces, no triangulation, no tolerances), as
+// mass_properties' per-body boxes are, and read from the same memos -- the
+// body's own for an unmoved body, the located-box cache for a placed one
+// (docs/modeling/README.md#bounding-boxes-are-memoized-on-the-shape).
+// Bounding the shape afresh here (BRepBndLib::AddOptimal) was 2.7 s of every
+// repeat mass_properties on a worm wheel, whose answer only a regen changes.
 void AddMeasuredBox(Bnd_Box& box, const std::vector<Body>& bodies,
                     const glm::dmat4& world) {
+  const bool unmoved = world == glm::dmat4(1.0);
   const glm::dquat q = glm::normalize(glm::quat_cast(glm::dmat3(world)));
   gp_Trsf t;
   t.SetRotation(gp_Quaternion(q.x, q.y, q.z, q.w));
@@ -2309,8 +2313,15 @@ void AddMeasuredBox(Bnd_Box& box, const std::vector<Body>& bodies,
       }
       continue;
     }
-    if (!b.shape.GetShape().IsNull())
-      BRepBndLib::AddOptimal(b.shape.GetShape().Moved(loc), box, false, false);
+    if (b.shape.GetShape().IsNull())
+      continue;
+    glm::dvec3 lo, hi;
+    if (unmoved)
+      b.shape.GetBoundingBox(lo, hi, /*tight=*/true);
+    else
+      CADShape(b.shape.GetShape().Moved(loc)).GetBoundingBox(lo, hi, true);
+    box.Add(gp_Pnt(lo.x, lo.y, lo.z));
+    box.Add(gp_Pnt(hi.x, hi.y, hi.z));
   }
 }
 

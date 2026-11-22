@@ -2013,6 +2013,12 @@ frame, on detached copies -- under a framing's identity.
 `frametime/job_tab_idle_and_switch` bounds both costs
 (docs/rendering/frame-pacing.md#tests).
 
+`mass_properties` reads its boxes from the same memos: each body's tight box,
+and the total's grown from them (an assembly's occurrences through the
+located-box cache), so a repeat call on an unchanged part costs a millisecond
+where bounding the total afresh cost five seconds on a worm wheel.
+`measure_smoke` holds the repeat to a tenth of a second of the app's CPU.
+
 The per-shape memo lives inside the object: a shape's address-based id is
 recycled by the allocator, so an outside cache keyed on the address alone
 could hand a freed shape's box to whatever lands at that address next. The

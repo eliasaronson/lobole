@@ -20,6 +20,7 @@ import tempfile
 from lobole.client import Client  # noqa: E402
 from smoke_app import launch_app  # noqa: E402
 from smoke_shapes import box, sphere  # noqa: E402
+import host_load  # noqa: E402
 
 
 
@@ -284,6 +285,34 @@ def main():
                            f"{got[key]} vs {mp[key]}")
         expect(state["bbox_max"][0] < 12.7 and state["bbox_min"][0] > -12.7,
                f"the spring's box is its size, +-12.6: {state}")
+        total_box = d.call("mass_properties")["bbox_mm"]
+        expect(abs(total_box["max"][0] - mp["bbox_max"][0]) < 1e-9 and
+               abs(total_box["min"][0] - mp["bbox_min"][0]) < 1e-9,
+               f"the total's box is the body's measured one: {total_box}")
+
+        # COST (docs/ui/testing.md#tests-that-time-things): a repeat
+        # mass_properties on an unchanged part is answered from the memos --
+        # the volume cache and the tight box on the shape. Its total box was
+        # bounded afresh every call (BRepBndLib::AddOptimal), half a second
+        # of the app's CPU on this twelve-turn spring and five on a worm
+        # wheel, for an answer only a regen changes. Now a millisecond.
+        d.call("new_project")
+        helix = d.call("add_feature", feature={
+            "type": "Curve3D", "name": "Helix", "kind": "helix",
+            "origin": [0, 0, 0], "axis": [0, 0, 1], "radius": 11,
+            "pitch": 7, "turns": 12})
+        d.call("add_feature", feature={
+            "type": "Pipe", "name": "Spring", "path_id": helix["id"],
+            "outer_diameter": 3.2})
+        first = d.call("mass_properties")
+        before = host_load.proc_cpu_s(app.pid)
+        again = d.call("mass_properties")
+        repeat_cpu = host_load.proc_cpu_s(app.pid) - before
+        expect(again["bbox_mm"] == first["bbox_mm"] and
+               again["total"] == first["total"], "the same answer again")
+        expect(repeat_cpu < 0.1,
+               f"a repeat mass_properties costs {repeat_cpu:.2f} s of the "
+               f"app's CPU (under 0.1 s: the answer is memoized)")
 
         print("measure_smoke: OK")
     finally:
