@@ -7,13 +7,16 @@
 #include "core/Document.h"
 #include "core/Feature.h"
 #include "core/SheetMetal.h"
+#include "core/drawing/DrawingDimension.h"
 #include "core/features/BaseFlangeFeature.h"
 #include "core/features/EdgeFlangeFeature.h"
 #include "core/features/ExtrudeFeature.h"
 #include "core/features/FlatPatternFeature.h"
 #include "core/features/NormalCutFeature.h"
+#include "core/features/RefoldFeature.h"
 #include "core/features/SketchFeature.h"
 #include "core/features/UnfoldFeature.h"
+#include "core/io/ExportDxf.h"
 
 #include <BRepAdaptor_Curve.hxx>
 #include <BRepAdaptor_Surface.hxx>
@@ -26,7 +29,10 @@
 #include <TopoDS.hxx>
 
 #include <cmath>
+#include <filesystem>
+#include <fstream>
 #include <numbers>
+#include <sstream>
 #include <vector>
 
 using Catch::Matchers::WithinRel;
@@ -364,5 +370,165 @@ TEST_CASE("a normal cut refuses what it cannot make",
         Circle(doc, {0, 0, 5}, {0, 0, 1}, {1, 0, 0}, {50, 30}, 3.0);
     doc.AddFeature(std::make_unique<NormalCutFeature>("Cut", sk));
     CHECK(Last(doc).GetError().find("refold them first") != std::string::npos);
+  }
+}
+
+namespace {
+
+// A closed polygon sketched on `plane` through the world points `corners`,
+// each taken onto the plane along its normal.
+uint64_t Polygon(Document& doc, const SketchPlane& plane,
+                 const std::vector<glm::dvec3>& corners) {
+  auto sk = std::make_unique<SketchFeature>("Notch", plane);
+  uint32_t id = 1;
+  for (size_t i = 0; i < corners.size(); ++i) {
+    const glm::dvec2 a = plane.WorldToPlane(corners[i]);
+    const glm::dvec2 b = plane.WorldToPlane(corners[(i + 1) % corners.size()]);
+    sk->AddEntity(sketch::Line{a, b, id++});
+  }
+  doc.AddFeature(std::move(sk));
+  return doc.GetFeature(doc.FeatureCount() - 1)->GetId();
+}
+
+// What a flat body writes on a DXF's bend layers, counted.
+size_t BendLinesInDxf(const Body& flat, const std::string& name) {
+  const std::filesystem::path path =
+      std::filesystem::temp_directory_path() / name;
+  REQUIRE(
+      dxf::WriteFlatPattern({flat.shape, flat.bends}, path.string()).empty());
+  std::stringstream text;
+  text << std::ifstream(path).rdbuf();
+  size_t n = 0;
+  for (const std::string needle :
+       {"LINE\n8\nBEND_UP\n", "LINE\n8\nBEND_DOWN\n"})
+    for (size_t at = text.str().find(needle); at != std::string::npos;
+         at = text.str().find(needle, at + 1))
+      ++n;
+  std::filesystem::remove(path);
+  return n;
+}
+
+} // namespace
+
+TEST_CASE("a cut corner a hair from a bend line flattens or is refused",
+          "[sheetmetal][normalcut]") {
+  // The wall bends up off y = 0, so the panel's tangent line runs along
+  // y = 0 and the bend lies at y < 0. A cut whose corner stops 0.001 mm short
+  // of that line leaves a sliver of panel the unfolder's tangent-plane split
+  // has to keep with the panel, a micron wide.
+  const double hair = 1e-3;
+  const glm::dvec3 top(0, 0, 1);
+
+  SECTION("a corner on the panel side") {
+    Document doc;
+    const uint64_t base = Blank(doc);
+    Wall(doc, base);
+    const double before = doc.GetBodies()[0].shape.Volume();
+    // One corner near the line, the edge beside it leaning away.
+    const std::vector<glm::dvec3> quad{
+        {40, hair, 0}, {60, 3, 0}, {60, 10, 0}, {40, 10, 0}};
+    const uint64_t sk =
+        Polygon(doc, SketchPlane(glm::dvec3(0, 0, 5), top, {1, 0, 0}), quad);
+    doc.AddFeature(std::make_unique<NormalCutFeature>("Cut", sk));
+    INFO(Last(doc).GetError());
+    REQUIRE(Last(doc).GetError().empty());
+    CHECK(Sound(doc));
+    const double area = 20.0 * (10.0 - hair) - 0.5 * 20.0 * (3.0 - hair);
+    CHECK_THAT(before - doc.GetBodies()[0].shape.Volume(),
+               WithinRel(area * kT, 1e-6));
+    const double folded = doc.GetBodies()[0].shape.Volume();
+
+    doc.AddFeature(std::make_unique<FlatPatternFeature>("Flat", base));
+    const std::string& why = Last(doc).GetError();
+    INFO(why);
+    if (why.empty()) {
+      CHECK(Sound(doc));
+      // Flattening keeps the metal: the bend's sector becomes a strip of
+      // the same neutral length, which differs from it by the K offset.
+      const BendRegion& b = doc.GetBodies()[0].bends[0];
+      const double sector =
+          0.5 * b.angle * ((kR + kT) * (kR + kT) - kR * kR) * b.width;
+      const double strip = b.allowance * kT * b.width;
+      CHECK_THAT(doc.GetBodies()[0].shape.Volume(),
+                 WithinRel(folded - sector + strip, 1e-6));
+    } else {
+      CHECK(why.find("corner") != std::string::npos);
+      CHECK(why.find("flattening failed") == std::string::npos);
+    }
+  }
+  SECTION("the same cut, unfolded and refolded") {
+    Document doc;
+    const uint64_t base = Blank(doc);
+    Wall(doc, base);
+    const std::vector<glm::dvec3> quad{
+        {40, hair, 0}, {60, 3, 0}, {60, 10, 0}, {40, 10, 0}};
+    const uint64_t sk =
+        Polygon(doc, SketchPlane(glm::dvec3(0, 0, 5), top, {1, 0, 0}), quad);
+    doc.AddFeature(std::make_unique<NormalCutFeature>("Cut", sk));
+    REQUIRE(Last(doc).GetError().empty());
+    const double folded = doc.GetBodies()[0].shape.Volume();
+    doc.AddFeature(std::make_unique<UnfoldFeature>("Unfold", base));
+    const uint64_t unfold = Last(doc).GetId();
+    const std::string unfoldWhy = Last(doc).GetError();
+    INFO(unfoldWhy);
+    if (unfoldWhy.empty()) {
+      doc.AddFeature(std::make_unique<RefoldFeature>("Refold", unfold));
+      INFO(Last(doc).GetError());
+      REQUIRE(Last(doc).GetError().empty());
+      CHECK(Sound(doc));
+      CHECK_THAT(doc.GetBodies()[0].shape.Volume(), WithinRel(folded, 1e-6));
+    } else {
+      CHECK(unfoldWhy.find("corner") != std::string::npos);
+      CHECK(unfoldWhy.find("flattening failed") == std::string::npos);
+    }
+  }
+  SECTION("a cut across the whole bend is still one bend") {
+    // Looked at along the bend's bisector, from inside its curve, the
+    // outline lands on the panel, on the bend across its whole sweep, and on
+    // the wall: a notch right through the bend, its panel-side corner a hair
+    // short of the tangent line.
+    Document doc;
+    const uint64_t base = Blank(doc);
+    Wall(doc, base);
+    const double a = std::sqrt(0.5);
+    const glm::dvec3 axis(50, 0, kT + kR);
+    const glm::dvec3 look(0, -a, -a); // toward the bend's middle
+    const SketchPlane plane(axis - look * 10.0, look, {1, 0, 0});
+    // Panel-side corners on the panel, a hair and 3 mm from the line; the
+    // others carried well past the bend onto the wall.
+    const glm::dvec3 nearCorner(45, hair, kT);
+    const glm::dvec3 farCorner(55, 3, kT);
+    const glm::dvec3 onWall(0, -kR, kT + kR + 6);
+    const std::vector<glm::dvec3> quad{nearCorner,
+                                       farCorner,
+                                       {55, onWall.y, onWall.z},
+                                       {45, onWall.y, onWall.z}};
+    const uint64_t sk = Polygon(doc, plane, quad);
+    const double before = doc.GetBodies()[0].shape.Volume();
+    doc.AddFeature(std::make_unique<NormalCutFeature>("Notch", sk));
+    INFO(Last(doc).GetError());
+    REQUIRE(Last(doc).GetError().empty());
+    CHECK(Sound(doc));
+    CHECK(doc.GetBodies()[0].shape.Volume() < before);
+    // Right through the bend: its middle, at the notch, is gone, and beside
+    // the notch it is still there.
+    const glm::dvec3 mid = axis + look * (kR + kT / 2.0);
+    CHECK_FALSE(Inside(doc, gp_Pnt(50, mid.y, mid.z)));
+    CHECK(Inside(doc, gp_Pnt(30, mid.y, mid.z)));
+    REQUIRE(doc.GetBodies()[0].bends.size() == 1);
+
+    doc.AddFeature(std::make_unique<FlatPatternFeature>("Flat", base));
+    const std::string& why = Last(doc).GetError();
+    INFO(why);
+    if (why.empty()) {
+      CHECK(Sound(doc));
+      const Body& flat = doc.GetBodies()[0];
+      CHECK(flat.bends.size() == 1);
+      CHECK(BendLinesInDxf(flat, "designer_notched_bend.dxf") == 1);
+      CHECK_FALSE(drawing::BendTableText(doc, "", {0, 0, -1}).empty());
+    } else {
+      CHECK(why.find("corner") != std::string::npos);
+      CHECK(why.find("flattening failed") == std::string::npos);
+    }
   }
 }

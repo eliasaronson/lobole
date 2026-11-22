@@ -9,9 +9,12 @@
 #include "core/SheetMetal.h"
 #include "core/features/BaseFlangeFeature.h"
 #include "core/features/EdgeFlangeFeature.h"
+#include "core/features/HemFeature.h"
+#include "core/features/NormalCutFeature.h"
 #include "core/features/SketchFeature.h"
 
 #include <BRepAdaptor_Curve.hxx>
+#include <BRepClass3d_SolidClassifier.hxx>
 #include <TopExp.hxx>
 #include <TopTools_IndexedMapOfShape.hxx>
 #include <TopoDS.hxx>
@@ -358,4 +361,75 @@ TEST_CASE("a set-back flange is one solid with its panel", "[sheetmetal]") {
       "Flange", std::vector<ElementRef>{ElementRef{base, edge}}, 20.0, 90.0));
   REQUIRE(doc.GetFeature(2)->GetError().empty());
   CHECK(doc.GetBodies()[0].shape.SolidCount() == 1);
+}
+
+TEST_CASE("a flange on an edge a cut shortened stands over what is left",
+          "[sheetmetal]") {
+  // A notch takes 20 mm off the x = 0 end of the y = 0 edge, so what is left
+  // of that edge runs x = 20..100. A flange or a hem picked on it is 80 mm
+  // wide and stands over those 80 mm, not over the edge as it was drawn.
+  const double notch = 20.0;
+  const auto notched = [&](Document& doc) {
+    const uint64_t base = Blank(doc);
+    auto sk = std::make_unique<SketchFeature>(
+        "Notch", SketchPlane(glm::vec3(0, 0, 5), glm::vec3(0, 0, 1),
+                             glm::vec3(1, 0, 0)));
+    sk->AddEntity(sketch::Line{{-1, -1}, {notch, -1}, 1});
+    sk->AddEntity(sketch::Line{{notch, -1}, {notch, 5}, 2});
+    sk->AddEntity(sketch::Line{{notch, 5}, {-1, 5}, 3});
+    sk->AddEntity(sketch::Line{{-1, 5}, {-1, -1}, 4});
+    doc.AddFeature(std::move(sk));
+    doc.AddFeature(std::make_unique<NormalCutFeature>(
+        "Notch", doc.GetFeature(doc.FeatureCount() - 1)->GetId()));
+    INFO(doc.GetFeature(doc.FeatureCount() - 1)->GetError());
+    REQUIRE(doc.GetFeature(doc.FeatureCount() - 1)->GetError().empty());
+    const std::string edge = EdgeNamed(
+        doc.GetBodies()[0], {notch, 0, kThickness}, {kWidth, 0, kThickness});
+    REQUIRE_FALSE(edge.empty());
+    return ElementRef{base, edge};
+  };
+  const auto inside = [](const Document& doc, double x, double y, double z) {
+    BRepClass3d_SolidClassifier c(doc.GetBodies()[0].shape.GetShape(),
+                                  gp_Pnt(x, y, z), 1e-6);
+    return c.State() == TopAbs_IN;
+  };
+
+  SECTION("an edge flange") {
+    Document doc;
+    const ElementRef edge = notched(doc);
+    auto f = std::make_unique<EdgeFlangeFeature>(
+        "Flange", std::vector<ElementRef>{edge}, 20.0, 90.0);
+    f->position = FlangePosition::BendOutside;
+    doc.AddFeature(std::move(f));
+    INFO(doc.GetFeature(doc.FeatureCount() - 1)->GetError());
+    REQUIRE(doc.GetFeature(doc.FeatureCount() - 1)->GetError().empty());
+    REQUIRE(doc.GetBodies()[0].bends.size() == 1);
+    CHECK_THAT(doc.GetBodies()[0].bends[0].width,
+               WithinAbs(kWidth - notch, 1e-6));
+    // The wall, mid-height, a wall's thickness out past y = 0.
+    const double y = -(kMinRadius + kThickness / 2.0);
+    const double z = kThickness + kMinRadius + 10.0;
+    CHECK(inside(doc, 60.0, y, z));
+    CHECK_FALSE(inside(doc, notch / 2.0, y, z));
+    CHECK(doc.GetBodies()[0].shape.SolidCount() == 1);
+  }
+  SECTION("a hem") {
+    Document doc;
+    const ElementRef edge = notched(doc);
+    doc.AddFeature(std::make_unique<HemFeature>(
+        "Hem", std::vector<ElementRef>{edge}, 8.0));
+    INFO(doc.GetFeature(doc.FeatureCount() - 1)->GetError());
+    REQUIRE(doc.GetFeature(doc.FeatureCount() - 1)->GetError().empty());
+    REQUIRE(doc.GetBodies()[0].bends.size() == 1);
+    CHECK_THAT(doc.GetBodies()[0].bends[0].width,
+               WithinAbs(kWidth - notch, 1e-6));
+    // The return lies over the panel above z = t; over the notch's x it is
+    // not there.
+    glm::dvec3 lo, hi;
+    doc.GetBodies()[0].shape.GetBoundingBox(lo, hi);
+    const double zr = hi.z - kThickness / 2.0;
+    CHECK(inside(doc, 60.0, 3.0, zr));
+    CHECK_FALSE(inside(doc, notch / 2.0, 7.0, zr));
+    CHECK(doc.GetBodies()[0].shape.SolidCount() == 1);
+  }
 }
