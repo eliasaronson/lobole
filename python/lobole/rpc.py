@@ -549,6 +549,7 @@ FEATURE_SCHEMAS: dict[str, dict[str, Any]] = {
     'Refold': {'type': 'object', 'properties': {'type': {'type': 'string', 'enum': ['Refold']}, 'name': {'type': 'string'}, 'id': {'type': 'integer', 'minimum': 0.0}, 'material': {'type': 'string'}, 'appearance': {'type': 'object'}, 'face_appearance': {'type': 'array', 'items': {'type': 'object'}}, 'suppressed': {'type': 'boolean'}, 'unfold_id': {'type': 'integer', 'minimum': 0.0}}, 'required': ['type', 'unfold_id'], 'additionalProperties': False},
     'Hem': {'type': 'object', 'properties': {'type': {'type': 'string', 'enum': ['Hem']}, 'name': {'type': 'string'}, 'id': {'type': 'integer', 'minimum': 0.0}, 'material': {'type': 'string'}, 'appearance': {'type': 'object'}, 'face_appearance': {'type': 'array', 'items': {'type': 'object'}}, 'suppressed': {'type': 'boolean'}, 'edges': {'type': 'array', 'items': {'type': 'object'}}, 'length': {'type': 'number'}, 'length_expr': {'type': 'string'}, 'kind': {'type': 'string', 'enum': ['closed', 'open']}, 'gap': {'type': 'number'}, 'gap_expr': {'type': 'string'}, 'outside': {'type': 'boolean'}, 'offset_start': {'type': 'number'}, 'offset_start_expr': {'type': 'string'}, 'offset_end': {'type': 'number'}, 'offset_end_expr': {'type': 'string'}}, 'required': ['type', 'edges'], 'additionalProperties': False},
     'Jog': {'type': 'object', 'properties': {'type': {'type': 'string', 'enum': ['Jog']}, 'name': {'type': 'string'}, 'id': {'type': 'integer', 'minimum': 0.0}, 'material': {'type': 'string'}, 'appearance': {'type': 'object'}, 'face_appearance': {'type': 'array', 'items': {'type': 'object'}}, 'suppressed': {'type': 'boolean'}, 'sketch_id': {'type': 'integer', 'minimum': 0.0}, 'height': {'type': 'number'}, 'height_expr': {'type': 'string'}, 'angle_deg': {'type': 'number'}, 'angle_deg_expr': {'type': 'string'}, 'flip': {'type': 'boolean'}}, 'required': ['type', 'sketch_id'], 'additionalProperties': False},
+    'Fold': {'type': 'object', 'properties': {'type': {'type': 'string', 'enum': ['Fold']}, 'name': {'type': 'string'}, 'id': {'type': 'integer', 'minimum': 0.0}, 'material': {'type': 'string'}, 'appearance': {'type': 'object'}, 'face_appearance': {'type': 'array', 'items': {'type': 'object'}}, 'suppressed': {'type': 'boolean'}, 'sketch_id': {'type': 'integer', 'minimum': 0.0}, 'angle_deg': {'type': 'number'}, 'angle_deg_expr': {'type': 'string'}, 'radius_mm': {'type': 'number'}, 'radius_mm_expr': {'type': 'string'}, 'position': {'type': 'string', 'enum': ['centerline', 'bend_start', 'bend_end']}, 'side': {'type': 'string', 'enum': ['left', 'right']}, 'side_at_mm': {'type': 'array', 'items': {'type': 'number'}}, 'reverse': {'type': 'boolean'}}, 'required': ['type', 'sketch_id'], 'additionalProperties': False},
     'CornerRelief': {'type': 'object', 'properties': {'type': {'type': 'string', 'enum': ['CornerRelief']}, 'name': {'type': 'string'}, 'id': {'type': 'integer', 'minimum': 0.0}, 'material': {'type': 'string'}, 'appearance': {'type': 'object'}, 'face_appearance': {'type': 'array', 'items': {'type': 'object'}}, 'suppressed': {'type': 'boolean'}, 'body_id': {'type': 'integer', 'minimum': 0.0}, 'style': {'type': 'string', 'enum': ['circular', 'rectangular']}, 'size': {'type': 'number'}, 'size_expr': {'type': 'string'}}, 'required': ['type', 'body_id'], 'additionalProperties': False},
     'NormalCut': {'type': 'object', 'properties': {'type': {'type': 'string', 'enum': ['NormalCut']}, 'name': {'type': 'string'}, 'id': {'type': 'integer', 'minimum': 0.0}, 'material': {'type': 'string'}, 'appearance': {'type': 'object'}, 'face_appearance': {'type': 'array', 'items': {'type': 'object'}}, 'suppressed': {'type': 'boolean'}, 'sketch_id': {'type': 'integer', 'minimum': 0.0}, 'body_id': {'type': 'integer', 'minimum': 0.0}, 'regions': {'type': 'array', 'items': {}}}, 'required': ['type', 'sketch_id'], 'additionalProperties': False},
     'Import': {'type': 'object', 'properties': {'type': {'type': 'string', 'enum': ['Import']}, 'name': {'type': 'string'}, 'id': {'type': 'integer', 'minimum': 0.0}, 'material': {'type': 'string'}, 'appearance': {'type': 'object'}, 'face_appearance': {'type': 'array', 'items': {'type': 'object'}}, 'suppressed': {'type': 'boolean'}, 'path': {'type': 'string'}, 'units': {'type': 'string', 'enum': ['mm', 'cm', 'm', 'in']}, 'keep_origin': {'type': 'boolean'}, 'color': {}, 'up_axis': {'type': 'string', 'enum': ['auto', 'none', '+x', '-x', '+y', '-y', '-z']}, 'turn_deg': {'type': 'number'}, 'representation': {'type': 'string', 'enum': ['facets', 'recognize', 'mesh', 'auto']}, 'min_sides': {'type': 'integer'}, 'placement': {}, 'scale': {'type': 'number'}}, 'required': ['type', 'path'], 'additionalProperties': False},
@@ -941,6 +942,25 @@ JogSpec = TypedDict('JogSpec', {
     'angle_deg': NotRequired[float],
     'angle_deg_expr': NotRequired[str],
     'flip': NotRequired[bool],
+})
+
+FoldSpec = TypedDict('FoldSpec', {
+    'type': Literal['Fold'],
+    'name': NotRequired[str],
+    'id': NotRequired[int],
+    'material': NotRequired[str],
+    'appearance': NotRequired[Mapping[str, Any]],
+    'face_appearance': NotRequired[Sequence[Mapping[str, Any]]],
+    'suppressed': NotRequired[bool],
+    'sketch_id': int,
+    'angle_deg': NotRequired[float],
+    'angle_deg_expr': NotRequired[str],
+    'radius_mm': NotRequired[float],
+    'radius_mm_expr': NotRequired[str],
+    'position': NotRequired[Literal['centerline', 'bend_start', 'bend_end']],
+    'side': NotRequired[Literal['left', 'right']],
+    'side_at_mm': NotRequired[Sequence[float]],
+    'reverse': NotRequired[bool],
 })
 
 CornerReliefSpec = TypedDict('CornerReliefSpec', {
@@ -1454,7 +1474,7 @@ PatternSpec = TypedDict('PatternSpec', {
     'axis': NotRequired[Mapping[str, Any]],
 })
 
-FeatureSpec = SketchSpec | ExtrudeSpec | BoxSpec | SphereSpec | CylinderSpec | FastenerSpec | CamProfileSpec | WormSpec | WormWheelSpec | BearingSpec | RetainingRingSpec | RetainingRingGrooveSpec | BaseFlangeSpec | EdgeFlangeSpec | FlatPatternSpec | UnfoldSpec | RefoldSpec | HemSpec | JogSpec | CornerReliefSpec | NormalCutSpec | ImportSpec | DerivedSpec | TemplateSpec | DatumPlaneSpec | RevolveSpec | DatumAxisSpec | FrameSpec | Curve3DSpec | BooleanSpec | CradleSpec | SplitSpec | RefineSpec | FilletSpec | ChamferSpec | ShellSpec | LoftSpec | SweepSpec | PipeSpec | RibSpec | ThreadSpec | HoleSpec | DeleteFaceSpec | OffsetFaceSpec | MoveFaceSpec | ReplaceFaceSpec | DraftSpec | CopeSpec | PatternSpec
+FeatureSpec = SketchSpec | ExtrudeSpec | BoxSpec | SphereSpec | CylinderSpec | FastenerSpec | CamProfileSpec | WormSpec | WormWheelSpec | BearingSpec | RetainingRingSpec | RetainingRingGrooveSpec | BaseFlangeSpec | EdgeFlangeSpec | FlatPatternSpec | UnfoldSpec | RefoldSpec | HemSpec | JogSpec | FoldSpec | CornerReliefSpec | NormalCutSpec | ImportSpec | DerivedSpec | TemplateSpec | DatumPlaneSpec | RevolveSpec | DatumAxisSpec | FrameSpec | Curve3DSpec | BooleanSpec | CradleSpec | SplitSpec | RefineSpec | FilletSpec | ChamferSpec | ShellSpec | LoftSpec | SweepSpec | PipeSpec | RibSpec | ThreadSpec | HoleSpec | DeleteFaceSpec | OffsetFaceSpec | MoveFaceSpec | ReplaceFaceSpec | DraftSpec | CopeSpec | PatternSpec
 
 
 

@@ -7,6 +7,7 @@
 #include "core/Angles.h"
 #include "core/ElementHistory.h"
 #include "core/features/SketchFeature.h"
+#include "core/sheet/Unfold.h"
 
 #include <BRepAdaptor_Surface.hxx>
 #include <BRepAlgoAPI_Common.hxx>
@@ -56,11 +57,6 @@ CADShape Side(const CADShape& s, const gp_Pnt& at, const gp_Dir& n,
     return {};
   CADShape out(op.Shape());
   return out.IsValid() && out.Volume() > 1e-12 ? out : CADShape{};
-}
-
-bool Inside(const CADShape& s, const gp_Pnt& p) {
-  BRepClass3d_SolidClassifier c(s.GetShape(), p, 1e-6);
-  return c.State() == TopAbs_IN;
 }
 
 } // namespace
@@ -139,37 +135,12 @@ bool JogFeature::Execute(RegenContext& ctx) {
     // ends of the line, one thickness deep.
     Body* body = nullptr;
     gp_Dir up;
-    for (Body& candidate : ctx.bodies) {
-      for (TopExp_Explorer ex(candidate.shape.GetShape(), TopAbs_FACE);
-           ex.More() && body == nullptr; ex.Next()) {
-        const TopoDS_Face face = TopoDS::Face(ex.Current());
-        BRepAdaptor_Surface surf(face);
-        if (surf.GetType() != GeomAbs_Plane)
-          continue;
-        const gp_Pln pln = surf.Plane();
-        // A line drawn on the face sits on it to whatever placed the face
-        // (a face placed through float is microns off), not to machine
-        // precision.
-        if (pln.Distance(a) > 1e-4 || pln.Distance(b) > 1e-4)
-          continue;
-        gp_Dir n = pln.Axis().Direction();
-        if (face.Orientation() == TopAbs_REVERSED)
-          n.Reverse();
-        const gp_Pnt mid((a.XYZ() + b.XYZ()) / 2.0);
-        if (!Inside(candidate.shape, mid.Translated(gp_Vec(n) * (-t / 2.0))) ||
-            Inside(candidate.shape, mid.Translated(gp_Vec(n) * -(t + t / 2.0))))
-          continue;
-        body = &candidate;
-        up = n;
-        // Onto the face exactly: the gap between the plane and the face is
-        // not a coordinate the bends should inherit.
-        const gp_Vec off(pln.Location(), a);
-        a.Translate(gp_Vec(n) * -off.Dot(gp_Vec(n)));
-        const gp_Vec offB(pln.Location(), b);
-        b.Translate(gp_Vec(n) * -offB.Dot(gp_Vec(n)));
-      }
-      if (body != nullptr)
-        break;
+    if (const auto panel =
+            sheet::PanelUnder(ctx.bodies, G(a.XYZ()), G(b.XYZ()), t)) {
+      body = &ctx.bodies[panel->body];
+      up = gp_Dir(panel->normal.x, panel->normal.y, panel->normal.z);
+      a = P(panel->a);
+      b = P(panel->b);
     }
     if (body == nullptr) {
       SetError("the jog's line is not drawn on a sheet panel - sketch it on "

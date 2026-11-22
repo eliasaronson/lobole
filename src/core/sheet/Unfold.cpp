@@ -4,23 +4,28 @@
 #include "core/sheet/Unfold.h"
 #include "cad/NonDestructiveBoolean.h"
 
+#include "cad/Integrate.h"
 #include "core/ElementHistory.h"
 
 #include <BRepAdaptor_Curve.hxx>
 #include <BRepAdaptor_Surface.hxx>
 #include <BRepAlgoAPI_Common.hxx>
 #include <BRepAlgoAPI_Cut.hxx>
+#include <BRepAlgoAPI_Fuse.hxx>
 #include <BRepAlgoAPI_Section.hxx>
+#include <BRepBndLib.hxx>
 #include <BRepBuilderAPI_GTransform.hxx>
 #include <BRepBuilderAPI_MakeEdge.hxx>
 #include <BRepBuilderAPI_MakeFace.hxx>
 #include <BRepBuilderAPI_MakePolygon.hxx>
 #include <BRepBuilderAPI_MakeSolid.hxx>
+#include <BRepBuilderAPI_MakeVertex.hxx>
 #include <BRepBuilderAPI_MakeWire.hxx>
 #include <BRepBuilderAPI_Sewing.hxx>
 #include <BRepBuilderAPI_Transform.hxx>
 #include <BRepCheck_Analyzer.hxx>
 #include <BRepClass3d_SolidClassifier.hxx>
+#include <BRepExtrema_DistShapeShape.hxx>
 #include <BRepFill.hxx>
 #include <BRepGProp.hxx>
 #include <BRepLib.hxx>
@@ -28,7 +33,9 @@
 #include <BRepPrimAPI_MakeRevol.hxx>
 #include <BRepTools.hxx>
 #include <BRepTools_WireExplorer.hxx>
+#include <BRep_Builder.hxx>
 #include <BRep_Tool.hxx>
+#include <Bnd_Box.hxx>
 #include <GCPnts_AbscissaPoint.hxx>
 #include <GCPnts_UniformAbscissa.hxx>
 #include <GProp_GProps.hxx>
@@ -49,6 +56,7 @@
 #include <TopTools_HSequenceOfShape.hxx>
 #include <TopTools_IndexedMapOfShape.hxx>
 #include <TopoDS.hxx>
+#include <TopoDS_Compound.hxx>
 #include <TopoDS_Face.hxx>
 #include <TopoDS_Shell.hxx>
 #include <TopoDS_Wire.hxx>
@@ -60,8 +68,14 @@
 #include <limits>
 
 #include <algorithm>
+#include <array>
+#include <cctype>
 #include <cmath>
+#include <cstdio>
 #include <deque>
+#include <functional>
+#include <map>
+#include <numbers>
 #include <set>
 
 namespace sheet {
@@ -911,6 +925,28 @@ std::optional<FlatResult> UnfoldImpl(const Body& body,
       if (!slab.IsValid())
         return fail("bend " + std::to_string(bi + 1) +
                     " has no material left in it to unfold");
+      // The region between the tangent planes runs on past the bend: a tab
+      // folded up out of a plate has the plate beyond its slot in it. Only
+      // material joined to the bend is the bend's; the rest stays with the
+      // parent. (A boss ON the bend is joined to it, and is still refused.)
+      if (slab.SolidCount() > 1) {
+        const CADShape ideal = f.Sector();
+        const double tol = std::max(1e-9, 1e-9 * Volume(ideal));
+        TopoDS_Compound kept;
+        BRep_Builder builder;
+        builder.MakeCompound(kept);
+        int n = 0;
+        for (TopExp_Explorer sx(slab.GetShape(), TopAbs_SOLID); sx.More();
+             sx.Next())
+          if (Volume(Common(CADShape(sx.Current()), ideal)) > tol) {
+            builder.Add(kept, sx.Current());
+            ++n;
+          }
+        if (n == 0)
+          return fail("bend " + std::to_string(bi + 1) +
+                      " has no material left in it to unfold");
+        slab = CADShape(kept);
+      }
 
       std::string why;
       const auto strip = StripFor(f, slab, static_cast<int>(bi + 1), why);
@@ -1068,6 +1104,139 @@ std::optional<FlatResult> UnfoldImpl(const Body& body,
 
 } // namespace
 
+namespace {
+
+// What a caller of FoldCrease may do between building a crease's pieces and
+// fusing them: rename the child's elements, or refuse (a non-empty answer).
+// `rest` is everything but the child and the band, `child` the child already
+// swung round, `sector` the bend, all where they will be fused.
+using BeforeFuse = std::function<std::string(Named& rest, Named& child,
+                                             const CADShape& sector)>;
+
+// One crease lying flat, folded: the band of flat stock under it wrapped
+// into the bend by the neutral-axis map (SectorFor, which carries every
+// through-cut in the band), the child swung round it by the inverse of
+// BendFrame::Local(), every bend the child carries moved with it, and the
+// three fused. What Refold does per crease, and what Fold does to a crease
+// nobody unfolded. `bends[ci]` is the crease; on success it is a bend again,
+// written where its parent sits, and `sectorMap` holds the names the bend's
+// own faces were given (`bendName`/face<i>).
+//
+// The child is the connected material one thickness past the band unless
+// `givenChild` names it: a fold knows its freed piece whole, and a piece
+// that also runs back past the band elsewhere (a plate round a tab, when
+// the plate is what turns) would be cut in two by a half-space.
+bool FoldCrease(Named& work, std::vector<BendRegion>& bends, size_t ci,
+                const SheetMetalRules& rules, uint64_t tag,
+                const std::string& bendName, const Named* givenChild,
+                const BeforeFuse& before, ElementMap* sectorMap,
+                std::string& why) {
+  const BendRegion crease = bends[ci];
+  BendFrame f = FrameOf(crease, rules);
+  const gp_Trsf F = ToTrsf(crease.parentPlace);
+  const gp_Trsf Finv = F.Inverted();
+  const double size = SizeOf(work.shape);
+
+  // The band and the child, where they are now.
+  const gp_Pnt T0 = f.Tf.Transformed(F);
+  const gp_Dir Dn = f.pd.Transformed(F);
+  const gp_Dir Un = f.up.Transformed(F);
+  const gp_Dir An = f.A.Transformed(F);
+  const gp_Pnt T1 = T0.Translated(gp_Vec(Dn) * f.BA);
+
+  // The band is exactly what the unfolder laid down for this bend: the
+  // ideal strip, or -- where a mitre trimmed the bend -- the strip it made
+  // of the trimmed sector. Any plane standing in for that outline is exact
+  // only where it touches it, and whatever falls between is left behind
+  // flat.
+  CADShape sector0 = f.Sector();
+  const double reach = (f.width + f.R + f.t + f.BA) * 4.0 + 100.0;
+  for (const BendRegion::Trim& trim : crease.trims)
+    sector0 = Common(sector0, HalfSpace(P(trim.point), D(trim.normal), reach));
+  CADShape expected = f.Strip();
+  if (!crease.trims.empty()) {
+    const auto trimmed = StripFor(f, sector0, static_cast<int>(ci + 1), why);
+    if (!trimmed)
+      return false;
+    expected = *trimmed;
+  }
+  const CADShape band = Common(work.shape, Transformed(expected, F));
+
+  Named child;
+  if (givenChild != nullptr) {
+    child = *givenChild;
+  } else {
+    const Named side = Intersect(work, HalfSpace(T1, Dn, size), tag);
+    const std::vector<gp_Pnt> probes =
+        Along(T1.Translated(gp_Vec(Dn) * f.t - gp_Vec(Un) * (f.t / 2.0)), An,
+              f.width);
+    if (!ComponentAt(side.shape, side.map, probes, child.shape, child.map)) {
+      why = "crease " + std::to_string(ci + 1) +
+            " has no wall past it to fold up";
+      return false;
+    }
+  }
+
+  const auto sector = SectorFor(f, Transformed(band, Finv), sector0, expected,
+                                static_cast<int>(ci + 1), why);
+  if (!sector)
+    return false;
+
+  // The child swings back about the bend, which stays where the parent put
+  // it: M = F * local^-1 * F^-1.
+  const gp_Trsf M = F * f.Local().Inverted() * Finv;
+
+  // Every other bend the child carries swings with it.
+  for (size_t bi = 0; bi < bends.size(); ++bi) {
+    if (bi == ci)
+      continue;
+    for (const gp_Pnt& p : ProbesOf(bends[bi], rules))
+      if (Contains(child.shape.GetShape(), p)) {
+        Move(bends[bi], M);
+        break;
+      }
+  }
+
+  Named rest = Subtract(Subtract(work, child.shape, tag), band, tag);
+  if (!rest.shape.IsValid()) {
+    why = "crease " + std::to_string(ci + 1) +
+          " could not be separated from its panel";
+    return false;
+  }
+  ElementMap names;
+  topo::NamePrimitiveElements(*sector, bendName, names);
+  Named swung{Transformed(child.shape, M), child.map};
+  const CADShape placed = Transformed(*sector, F);
+  if (before) {
+    if (std::string no = before(rest, swung, placed); !no.empty()) {
+      why = std::move(no);
+      return false;
+    }
+  }
+  if (!Fuse(rest, swung.shape, swung.map, tag) ||
+      !Fuse(rest, placed, names, tag)) {
+    why = "crease " + std::to_string(ci + 1) +
+          " would not fold back into one piece";
+    return false;
+  }
+  work = std::move(rest);
+  if (sectorMap != nullptr)
+    *sectorMap = std::move(names);
+
+  // The crease is a bend again, written where its parent now sits.
+  BendRegion bend = crease;
+  bend.flat = false;
+  bend.allowance = 0.0;
+  bend.unfoldedBy = 0;
+  bend.flatA = bend.flatB = glm::dvec3(0.0);
+  bend.parentPlace = glm::dmat4(1.0);
+  Move(bend, F);
+  bends[ci] = std::move(bend);
+  return true;
+}
+
+} // namespace
+
 std::optional<FlatResult> Refold(const Body& body, const SheetMetalRules& rules,
                                  uint64_t unfoldTag, uint64_t tag,
                                  std::string* error) {
@@ -1089,102 +1258,16 @@ std::optional<FlatResult> Refold(const Body& body, const SheetMetalRules& rules,
     FlatResult result;
     Named work{body.shape, body.elementMap};
     result.bends = body.bends;
-    const double size = SizeOf(body.shape);
 
     // Leaves first: the creases were recorded parents-before-children, so
     // walking them backwards means a crease's child side holds only bends
     // that are already folded again.
     for (auto it = todo.rbegin(); it != todo.rend(); ++it) {
-      const size_t ci = *it;
-      const BendRegion crease = result.bends[ci];
-      BendFrame f = FrameOf(crease, rules);
-      const gp_Trsf F = ToTrsf(crease.parentPlace);
-      const gp_Trsf Finv = F.Inverted();
-
-      // The band and the child, where they are now.
-      const gp_Pnt T0 = f.Tf.Transformed(F);
-      const gp_Dir Dn = f.pd.Transformed(F);
-      const gp_Dir Un = f.up.Transformed(F);
-      const gp_Dir An = f.A.Transformed(F);
-      const gp_Pnt T1 = T0.Translated(gp_Vec(Dn) * f.BA);
-
-      // The band is exactly what the unfolder laid down for this bend: the
-      // ideal strip, or — where a mitre trimmed the bend — the strip it made
-      // of the trimmed sector. Any plane standing in for that outline is
-      // exact only where it touches it, and whatever falls between is left
-      // behind flat.
-      CADShape sector0 = f.Sector();
-      const double reach = (f.width + f.R + f.t + f.BA) * 4.0 + 100.0;
-      for (const BendRegion::Trim& trim : crease.trims)
-        sector0 =
-            Common(sector0, HalfSpace(P(trim.point), D(trim.normal), reach));
-      CADShape expected = f.Strip();
-      if (!crease.trims.empty()) {
-        std::string why;
-        const auto trimmed =
-            StripFor(f, sector0, static_cast<int>(ci + 1), why);
-        if (!trimmed)
-          return fail(why);
-        expected = *trimmed;
-      }
-      const CADShape band = Common(work.shape, Transformed(expected, F));
-
-      Named child;
-      {
-        const Named side = Intersect(work, HalfSpace(T1, Dn, size), tag);
-        const std::vector<gp_Pnt> probes =
-            Along(T1.Translated(gp_Vec(Dn) * f.t - gp_Vec(Un) * (f.t / 2.0)),
-                  An, f.width);
-        if (!ComponentAt(side.shape, side.map, probes, child.shape, child.map))
-          return fail("crease " + std::to_string(ci + 1) +
-                      " has no wall past it to fold up");
-      }
-
       std::string why;
-      const auto sector = SectorFor(f, Transformed(band, Finv), sector0,
-                                    expected, static_cast<int>(ci + 1), why);
-      if (!sector)
+      if (!FoldCrease(work, result.bends, *it, rules, tag,
+                      std::to_string(tag) + "/bend" + std::to_string(*it),
+                      nullptr, {}, nullptr, why))
         return fail(why);
-
-      // The child swings back about the bend, which stays where the parent
-      // put it: M = F * local^-1 * F^-1.
-      const gp_Trsf M = F * f.Local().Inverted() * Finv;
-
-      // Every other bend the child carries swings with it.
-      for (size_t bi = 0; bi < result.bends.size(); ++bi) {
-        if (bi == ci)
-          continue;
-        for (const gp_Pnt& p : ProbesOf(result.bends[bi], rules))
-          if (Contains(child.shape.GetShape(), p)) {
-            Move(result.bends[bi], M);
-            break;
-          }
-      }
-
-      Named rest = Subtract(Subtract(work, child.shape, tag), band, tag);
-
-      if (!rest.shape.IsValid())
-        return fail("crease " + std::to_string(ci + 1) +
-                    " could not be separated from its panel");
-      ElementMap sectorMap;
-      topo::NamePrimitiveElements(
-          *sector, std::to_string(tag) + "/bend" + std::to_string(ci),
-          sectorMap);
-      if (!Fuse(rest, Transformed(child.shape, M), child.map, tag) ||
-          !Fuse(rest, Transformed(*sector, F), sectorMap, tag))
-        return fail("crease " + std::to_string(ci + 1) +
-                    " would not fold back into one piece");
-      work = std::move(rest);
-
-      // The crease is a bend again, written where its parent now sits.
-      BendRegion bend = crease;
-      bend.flat = false;
-      bend.allowance = 0.0;
-      bend.unfoldedBy = 0;
-      bend.flatA = bend.flatB = glm::dvec3(0.0);
-      bend.parentPlace = glm::dmat4(1.0);
-      Move(bend, F);
-      result.bends[ci] = std::move(bend);
     }
 
     result.shape = std::move(work.shape);
@@ -1611,6 +1694,843 @@ std::optional<FlatResult> NormalCut(const Body& body,
     running.bends = out->bends;
   }
   return out;
+}
+
+// ---- Fold ------------------------------------------------------------------
+// (docs/sheetmetal/README.md#fold)
+
+std::optional<Panel> PanelUnder(const std::vector<Body>& bodies,
+                                const glm::dvec3& a3, const glm::dvec3& b3,
+                                double thickness, bool alongLine) {
+  const double t = thickness;
+  const gp_Pnt a = P(a3), b = P(b3);
+  ArmOccSignalHandlers();
+  try {
+    // Pass one: the sheet under the line's middle. Pass two (a fold): the
+    // sheet anywhere along the line carried on both ways, so a line drawn
+    // beside a piece is refused for missing it rather than for being off
+    // the sheet.
+    for (int pass = 0; pass < (alongLine ? 2 : 1); ++pass) {
+      for (size_t bi = 0; bi < bodies.size(); ++bi) {
+        const Body& candidate = bodies[bi];
+        if (!candidate.shape.IsValid() || candidate.reference)
+          continue;
+        std::vector<gp_Pnt> at{gp_Pnt((a.XYZ() + b.XYZ()) / 2.0)};
+        if (pass == 1 && a.Distance(b) > 1e-9) {
+          const gp_Dir e(gp_Vec(a, b));
+          const double reach = SizeOf(candidate.shape);
+          for (int i = -200; i <= 200; ++i)
+            at.push_back(
+                at.front().Translated(gp_Vec(e) * (reach * i / 400.0)));
+        }
+        for (TopExp_Explorer ex(candidate.shape.GetShape(), TopAbs_FACE);
+             ex.More(); ex.Next()) {
+          const TopoDS_Face face = TopoDS::Face(ex.Current());
+          BRepAdaptor_Surface surf(face);
+          if (surf.GetType() != GeomAbs_Plane)
+            continue;
+          const gp_Pln pln = surf.Plane();
+          // A line drawn on the face sits on it to whatever placed the face
+          // (a face placed through float is microns off), not to machine
+          // precision.
+          if (pln.Distance(a) > 1e-4 || pln.Distance(b) > 1e-4)
+            continue;
+          gp_Dir n = pln.Axis().Direction();
+          if (face.Orientation() == TopAbs_REVERSED)
+            n.Reverse();
+          const bool sheet =
+              std::any_of(at.begin(), at.end(), [&](const gp_Pnt& m) {
+                BRepClass3d_SolidClassifier in(
+                    candidate.shape.GetShape(),
+                    m.Translated(gp_Vec(n) * (-t / 2.0)), 1e-6);
+                BRepClass3d_SolidClassifier below(
+                    candidate.shape.GetShape(),
+                    m.Translated(gp_Vec(n) * -(t + t / 2.0)), 1e-6);
+                return in.State() == TopAbs_IN && below.State() != TopAbs_IN;
+              });
+          if (!sheet)
+            continue;
+          // Onto the face exactly: the gap between the plane and the face is
+          // not a coordinate a bend should inherit.
+          Panel out;
+          out.body = bi;
+          out.normal = G(n);
+          const gp_Vec offA(pln.Location(), a), offB(pln.Location(), b);
+          out.a = G(a.Translated(gp_Vec(n) * -offA.Dot(gp_Vec(n))));
+          out.b = G(b.Translated(gp_Vec(n) * -offB.Dot(gp_Vec(n))));
+          return out;
+        }
+      }
+    }
+  } catch (const Standard_Failure&) {
+  }
+  return std::nullopt;
+}
+
+namespace {
+
+// Millimetres as a person reads them: two decimals, no trailing zeros.
+std::string FoldMm(double v) {
+  char buf[32];
+  std::snprintf(buf, sizeof buf, "%.2f", v);
+  std::string s(buf);
+  while (!s.empty() && s.back() == '0')
+    s.pop_back();
+  if (!s.empty() && s.back() == '.')
+    s.pop_back();
+  return s == "-0" ? "0" : s;
+}
+// A distance someone has to MOVE something by to clear a limit: rounded up,
+// so that moving by the number stated clears it.
+std::string FoldMmUp(double v) {
+  return FoldMm(std::ceil(v * 100.0 - 1e-6) / 100.0);
+}
+std::string FoldAt(const gp_Pnt& p) {
+  return "(" + FoldMm(p.X()) + ", " + FoldMm(p.Y()) + ", " + FoldMm(p.Z()) +
+         ")";
+}
+
+// The fold's own coordinates: w along the line from its first point, u
+// across it toward the side that turns, h along the face's outward normal.
+struct FoldFrame {
+  gp_Pnt a;
+  gp_Dir A, pd, N;
+  double len = 0;
+  [[nodiscard]] gp_Pnt At(double w, double u, double h) const {
+    return a.Translated(gp_Vec(A) * w + gp_Vec(pd) * u + gp_Vec(N) * h);
+  }
+  [[nodiscard]] double W(const gp_Pnt& p) const {
+    return gp_Vec(a, p).Dot(gp_Vec(A));
+  }
+  [[nodiscard]] double U(const gp_Pnt& p) const {
+    return gp_Vec(a, p).Dot(gp_Vec(pd));
+  }
+  // A shape's tight extent in these coordinates: [w0, w1, u0, u1].
+  [[nodiscard]] std::array<double, 4> Box(const TopoDS_Shape& s) const {
+    gp_Trsf toLocal;
+    toLocal.SetTransformation(gp_Ax3(a, N, A));
+    const TopoDS_Shape local =
+        BRepBuilderAPI_Transform(s, toLocal, Standard_True).Shape();
+    Bnd_Box box;
+    BRepBndLib::AddOptimal(local, box, Standard_False, Standard_False);
+    if (box.IsVoid())
+      return {0, 0, 0, 0};
+    double x0, y0, z0, x1, y1, z1;
+    box.Get(x0, y0, z0, x1, y1, z1);
+    // Local y is N x A, the LEFT of the line; u runs toward pd.
+    const bool left = gp_Vec(N).Crossed(gp_Vec(A)).Dot(gp_Vec(pd)) > 0.0;
+    return left ? std::array<double, 4>{x0, x1, y0, y1}
+                : std::array<double, 4>{x0, x1, -y1, -y0};
+  }
+};
+
+// A connected piece of the panel inside the zone.
+struct ZonePiece {
+  CADShape solid;
+  double w0 = 0, w1 = 0, u0 = 0, u1 = 0;
+  // Points just outside the zone beside each of the piece's faces on the
+  // zone's two edges -- on the fixed side and on the side that turns.
+  std::vector<gp_Pnt> nearAt, farAt;
+  std::vector<std::pair<double, double>> nearSpans, farSpans; // along w
+  [[nodiscard]] bool Chord() const { return !nearAt.empty() && !farAt.empty(); }
+};
+
+struct FoldBendPlan {
+  std::vector<size_t> chords; // into the plan's pieces
+  // The components that turn on it: one, unless pieces hang from chords
+  // that interleave along the line (a plate's far side and a tab cut in it,
+  // both freed by one line across the plate), which turn as one.
+  std::vector<int> freed;
+  double w0 = 0, w1 = 0; // the span along the line
+};
+
+struct FoldPlan {
+  FoldFrame fr;
+  double t = 0, R = 0, K = 0, BA = 0, u0 = 0, u1 = 0, size = 0;
+  std::vector<ZonePiece> pieces;
+  std::vector<CADShape> comps; // the body cut along the picked chords
+  int fixed = -1;
+  std::vector<FoldBendPlan> bends; // in order along the line
+  double freedVolume = 0;
+};
+
+int ComponentOf(const std::vector<CADShape>& comps, const gp_Pnt& p) {
+  for (size_t i = 0; i < comps.size(); ++i)
+    if (Contains(comps[i].GetShape(), p))
+      return static_cast<int>(i);
+  return -1;
+}
+
+std::vector<CADShape> Solids(const CADShape& s) {
+  std::vector<CADShape> out;
+  if (!s.IsValid())
+    return out;
+  for (TopExp_Explorer ex(s.GetShape(), TopAbs_SOLID); ex.More(); ex.Next())
+    if (CADShape one(ex.Current()); Volume(one) > 1e-12)
+      out.push_back(one);
+  return out;
+}
+
+// The body cut along `chosen`, and for each chosen chord the components its
+// two sides land in.
+struct Parting {
+  std::vector<CADShape> comps;
+  std::vector<std::set<int>> nearOf, farOf;
+};
+Parting PartAlong(const CADShape& body, const std::vector<ZonePiece>& pieces,
+                  const std::vector<size_t>& chosen) {
+  Parting out;
+  CADShape rest = body;
+  for (size_t i : chosen)
+    rest = Cut(rest, pieces[i].solid);
+  out.comps = Solids(rest);
+  for (size_t i : chosen) {
+    std::set<int> n, f;
+    for (const gp_Pnt& p : pieces[i].nearAt)
+      if (const int c = ComponentOf(out.comps, p); c >= 0)
+        n.insert(c);
+    for (const gp_Pnt& p : pieces[i].farAt)
+      if (const int c = ComponentOf(out.comps, p); c >= 0)
+        f.insert(c);
+    out.nearOf.push_back(std::move(n));
+    out.farOf.push_back(std::move(f));
+  }
+  return out;
+}
+
+bool Parts(const Parting& p) {
+  std::set<int> nears, fars;
+  for (size_t i = 0; i < p.nearOf.size(); ++i) {
+    if (p.nearOf[i].empty() || p.farOf[i].empty())
+      return false;
+    for (int c : p.nearOf[i])
+      if (p.farOf[i].count(c) != 0)
+        return false;
+    nears.insert(p.nearOf[i].begin(), p.nearOf[i].end());
+    fars.insert(p.farOf[i].begin(), p.farOf[i].end());
+  }
+  for (int c : nears)
+    if (fars.count(c) != 0)
+      return false;
+  return true;
+}
+
+// Where a cut that enters a chord from one of its edges ends, between that
+// edge's spans: the w of the first gap, and the u the material starts or
+// stops at there.
+std::pair<double, double> CutEnd(const FoldPlan& pl, const ZonePiece& piece,
+                                 bool fromFar) {
+  auto spans = fromFar ? piece.farSpans : piece.nearSpans;
+  std::sort(spans.begin(), spans.end());
+  double w = 0.5 * (piece.w0 + piece.w1);
+  for (size_t i = 1; i < spans.size(); ++i)
+    if (spans[i].first > spans[i - 1].second + 1e-6) {
+      w = 0.5 * (spans[i - 1].second + spans[i].first);
+      break;
+    }
+  const double h = -pl.t / 2.0;
+  double lo = pl.u0 + 1e-4, hi = pl.u1 - 1e-4;
+  // fromFar: material at lo, none at hi. From the near side the other way.
+  for (int it = 0; it < 40; ++it) {
+    const double mid = 0.5 * (lo + hi);
+    const bool in = Contains(piece.solid.GetShape(), pl.fr.At(w, mid, h));
+    if (in == fromFar)
+      lo = mid;
+    else
+      hi = mid;
+  }
+  return {w, 0.5 * (lo + hi)};
+}
+
+std::string CutEndsInZone(const FoldPlan& pl, double w, double uEnd) {
+  const double toFold = uEnd - pl.u0, back = pl.u1 - uEnd;
+  return "a cut ends inside the bend zone at " +
+         FoldAt(pl.fr.At(w, uEnd, 0.0)) + ", " + FoldMm(std::abs(uEnd)) +
+         " mm from the line: the " + FoldMm(pl.BA) +
+         " mm the bend takes would tear beside it. Move the line " +
+         FoldMmUp(toFold + 0.01) + " mm toward the side that folds, or " +
+         FoldMmUp(back + 0.01) + " mm away from it, so the zone clears it";
+}
+
+std::string TooClose(const FoldPlan& pl, bool foldingSide, double have) {
+  const double part = foldingSide ? pl.u1 : -pl.u0;
+  const double need = part + pl.t;
+  return std::string("the fold line is ") + FoldMm(std::max(0.0, have)) +
+         " mm from the edge of the sheet on " +
+         (foldingSide ? "the side that folds" : "the side that stays") +
+         "; this bend needs " + FoldMmUp(need) + " mm there: " + FoldMm(part) +
+         " mm of its " + FoldMm(pl.BA) +
+         " mm allowance on that side, plus one " + FoldMm(pl.t) +
+         " mm thickness of flat sheet past it";
+}
+
+// Plans a fold: the zone, its chords, which the line picks, the pieces they
+// free. Empty string on success, else the refusal.
+std::string PlanFold(const Body& body, const SheetMetalRules& rules,
+                     const FoldSpec& spec, FoldPlan& pl) {
+  pl.t = rules.thickness;
+  pl.R = spec.radius;
+  pl.K = rules.EffectiveKFactor(pl.R);
+  pl.BA = BendAllowance(spec.angle, pl.R, pl.K, pl.t);
+  pl.size = SizeOf(body.shape);
+  const gp_Pnt a = P(spec.a), b = P(spec.b);
+  pl.fr.a = a;
+  pl.fr.len = a.Distance(b);
+  if (pl.fr.len < 1e-9)
+    return "the fold's line has no length";
+  pl.fr.A = gp_Dir(gp_Vec(a, b));
+  pl.fr.N = D(spec.normal);
+  const gp_Dir left(gp_Vec(pl.fr.N).Crossed(gp_Vec(pl.fr.A)));
+  pl.fr.pd = spec.left ? left : left.Reversed();
+  switch (spec.position) {
+  case FoldPosition::Centerline:
+    pl.u0 = -pl.BA / 2.0;
+    break;
+  case FoldPosition::BendStart:
+    pl.u0 = 0.0;
+    break;
+  case FoldPosition::BendEnd:
+    pl.u0 = -pl.BA;
+    break;
+  }
+  pl.u1 = pl.u0 + pl.BA;
+  const double t = pl.t, size = pl.size;
+  const FoldFrame& fr = pl.fr;
+
+  // ---- the zone's pieces: the panel's material between the zone's edges.
+  // From the faces in the sketched plane, each carried one thickness down,
+  // so the start of a bend already on the panel's edge -- whose material
+  // also dips into the sheet's thickness there -- is not mistaken for panel.
+  const double eps = std::max(1e-4, t * 1e-4);
+  const CADShape zone =
+      Block(fr.At(-size, pl.u0, eps), gp_Vec(fr.A) * (2.0 * size),
+            gp_Vec(fr.pd) * pl.BA, gp_Vec(fr.N) * -(t + 2.0 * eps));
+  const double delta = std::max(1e-3, t * 1e-3);
+  for (TopExp_Explorer ex(body.shape.GetShape(), TopAbs_FACE); ex.More();
+       ex.Next()) {
+    const TopoDS_Face face = TopoDS::Face(ex.Current());
+    BRepAdaptor_Surface surf(face);
+    if (surf.GetType() != GeomAbs_Plane)
+      continue;
+    const gp_Pln pln = surf.Plane();
+    gp_Dir n = pln.Axis().Direction();
+    if (face.Orientation() == TopAbs_REVERSED)
+      n.Reverse();
+    if (!n.IsEqual(fr.N, 1e-6) || std::abs(pln.Distance(a)) > 1e-5)
+      continue;
+    const CADShape slab(BRepPrimAPI_MakePrism(face, gp_Vec(fr.N) * -t).Shape());
+    for (const CADShape& solid : Solids(Common(slab, zone))) {
+      ZonePiece piece;
+      piece.solid = solid;
+      const auto box = fr.Box(solid.GetShape());
+      piece.w0 = box[0];
+      piece.w1 = box[1];
+      piece.u0 = box[2];
+      piece.u1 = box[3];
+      for (int side = 0; side < 2; ++side) {
+        const double u = side == 0 ? pl.u0 : pl.u1;
+        for (const TopoDS_Face& f : OnPlane(solid, fr.At(0, u, 0), fr.pd)) {
+          GProp_GProps props;
+          BRepGProp::SurfaceProperties(f, props);
+          if (props.Mass() < 1e-9)
+            continue;
+          const gp_Pnt c = props.CentreOfMass().Translated(
+              gp_Vec(fr.pd) * (side == 0 ? -delta : delta));
+          const auto fb = fr.Box(f);
+          (side == 0 ? piece.nearAt : piece.farAt).push_back(c);
+          (side == 0 ? piece.nearSpans : piece.farSpans)
+              .push_back({fb[0], fb[1]});
+        }
+      }
+      pl.pieces.push_back(std::move(piece));
+    }
+  }
+
+  const auto underLine = [&](const ZonePiece& p) {
+    return p.w1 > 1e-6 && p.w0 < fr.len - 1e-6;
+  };
+  std::vector<size_t> picked;
+  for (size_t i = 0; i < pl.pieces.size(); ++i)
+    if (pl.pieces[i].Chord() && underLine(pl.pieces[i]))
+      picked.push_back(i);
+
+  if (picked.empty()) {
+    for (const ZonePiece& p : pl.pieces) {
+      if (!underLine(p))
+        continue;
+      // Material under the line that reaches only one edge of the zone: the
+      // sheet's edge, or the end of a cut, lies inside it.
+      if (!p.nearAt.empty())
+        return TooClose(pl, true, p.u1);
+      if (!p.farAt.empty())
+        return TooClose(pl, false, -p.u0);
+      return CutEndsInZone(pl, 0.5 * (p.w0 + p.w1), 0.5 * (p.u0 + p.u1));
+    }
+    double best = 1e300;
+    bool atStart = true;
+    for (const ZonePiece& p : pl.pieces) {
+      if (p.w1 <= 1e-6 && -p.w1 < best) {
+        best = -p.w1;
+        atStart = true;
+      }
+      if (p.w0 >= fr.len - 1e-6 && p.w0 - fr.len < best) {
+        best = p.w0 - fr.len;
+        atStart = false;
+      }
+    }
+    if (best > 1e299)
+      return "the fold line does not cross the sheet: nothing of the panel "
+             "lies along it";
+    return "the fold line does not cross the sheet: the nearest material "
+           "along it is " +
+           FoldMm(best) + " mm past its " + (atStart ? "first" : "second") +
+           " point";
+  }
+
+  // A chord whose edge on one side is split while the zone holds it in one
+  // piece: a cut runs into the zone from that side and ends inside it.
+  Parting part = PartAlong(body.shape, pl.pieces, picked);
+  for (size_t k = 0; k < picked.size(); ++k) {
+    const ZonePiece& p = pl.pieces[picked[k]];
+    if (part.farOf[k].empty())
+      return TooClose(pl, true, pl.u1);
+    if (part.nearOf[k].empty())
+      return TooClose(pl, false, -pl.u0);
+    if (part.farOf[k].size() > 1 || part.nearOf[k].size() > 1) {
+      const auto [w, u] = CutEnd(pl, p, part.farOf[k].size() > 1);
+      return CutEndsInZone(pl, w, u);
+    }
+  }
+
+  if (!Parts(part)) {
+    // How far the line would have to reach for the chords it then picks to
+    // part the panel: the nearest chords beyond each end, fewest first.
+    std::vector<size_t> before, after;
+    for (size_t i = 0; i < pl.pieces.size(); ++i) {
+      const ZonePiece& p = pl.pieces[i];
+      if (!p.Chord() || underLine(p))
+        continue;
+      (p.w1 <= 1e-6 ? before : after).push_back(i);
+    }
+    std::sort(before.begin(), before.end(), [&](size_t x, size_t y) {
+      return pl.pieces[x].w1 > pl.pieces[y].w1;
+    });
+    std::sort(after.begin(), after.end(), [&](size_t x, size_t y) {
+      return pl.pieces[x].w0 < pl.pieces[y].w0;
+    });
+    struct Try {
+      size_t i, j;
+      double cost;
+    };
+    std::vector<Try> tries;
+    for (size_t i = 0; i <= before.size(); ++i)
+      for (size_t j = 0; j <= after.size(); ++j) {
+        if (i == 0 && j == 0)
+          continue;
+        const double s = i == 0 ? 0.0 : -pl.pieces[before[i - 1]].w1;
+        const double e = j == 0 ? 0.0 : pl.pieces[after[j - 1]].w0 - fr.len;
+        tries.push_back({i, j, s + e});
+      }
+    std::sort(tries.begin(), tries.end(),
+              [](const Try& x, const Try& y) { return x.cost < y.cost; });
+    std::string how = " and no extension of it along this line would";
+    for (size_t n = 0; n < tries.size() && n < 12; ++n) {
+      std::vector<size_t> more = picked;
+      for (size_t k = 0; k < tries[n].i; ++k)
+        more.push_back(before[k]);
+      for (size_t k = 0; k < tries[n].j; ++k)
+        more.push_back(after[k]);
+      if (!Parts(PartAlong(body.shape, pl.pieces, more)))
+        continue;
+      const double s =
+          tries[n].i == 0 ? 0.0 : -pl.pieces[before[tries[n].i - 1]].w1;
+      const double e =
+          tries[n].j == 0 ? 0.0 : pl.pieces[after[tries[n].j - 1]].w0 - fr.len;
+      how = "; extended ";
+      if (s > 0.0)
+        how += FoldMmUp(s) + " mm past its first point";
+      if (s > 0.0 && e > 0.0)
+        how += " and ";
+      if (e > 0.0)
+        how += FoldMmUp(e) + " mm past its second point";
+      how += " it would";
+      break;
+    }
+    return "the fold line does not part the panel: the material runs round "
+           "the end of the line from the side that stays to the side that "
+           "folds, so nothing would be free to turn" +
+           how;
+  }
+
+  // The fixed side, one piece; each piece the line frees, its chords.
+  std::set<int> fixedSet;
+  for (const std::set<int>& n : part.nearOf)
+    fixedSet.insert(n.begin(), n.end());
+  if (fixedSet.size() > 1)
+    return "the fold would leave the side that stays in " +
+           std::to_string(fixedSet.size()) +
+           " pieces - a fold turns material off one piece of sheet";
+  pl.fixed = *fixedSet.begin();
+  pl.comps = part.comps;
+  std::map<int, FoldBendPlan> byPiece;
+  for (size_t k = 0; k < picked.size(); ++k) {
+    const int c = *part.farOf[k].begin();
+    FoldBendPlan& bp = byPiece[c];
+    bp.freed = {c};
+    bp.chords.push_back(picked[k]);
+  }
+  std::vector<FoldBendPlan> grouped;
+  for (auto& [c, bp] : byPiece) {
+    bp.w0 = 1e300;
+    bp.w1 = -1e300;
+    for (size_t i : bp.chords) {
+      bp.w0 = std::min(bp.w0, pl.pieces[i].w0);
+      bp.w1 = std::max(bp.w1, pl.pieces[i].w1);
+    }
+    grouped.push_back(bp);
+  }
+  std::sort(
+      grouped.begin(), grouped.end(),
+      [](const FoldBendPlan& x, const FoldBendPlan& y) { return x.w0 < y.w0; });
+  // Pieces whose spans interleave share one bend: they turn about the same
+  // line by the same angle, and two bends over one stretch of it cannot be.
+  for (FoldBendPlan& bp : grouped) {
+    if (!pl.bends.empty() && bp.w0 < pl.bends.back().w1 - 1e-6) {
+      FoldBendPlan& into = pl.bends.back();
+      into.chords.insert(into.chords.end(), bp.chords.begin(), bp.chords.end());
+      into.freed.insert(into.freed.end(), bp.freed.begin(), bp.freed.end());
+      into.w1 = std::max(into.w1, bp.w1);
+      continue;
+    }
+    pl.bends.push_back(bp);
+  }
+
+  for (const FoldBendPlan& bp : pl.bends) {
+    // Anything else of the zone inside the bend's span reaches only one of
+    // its edges: the end of a cut, which would tear.
+    for (size_t i = 0; i < pl.pieces.size(); ++i) {
+      const ZonePiece& p = pl.pieces[i];
+      if (std::find(bp.chords.begin(), bp.chords.end(), i) != bp.chords.end())
+        continue;
+      if (p.w1 <= bp.w0 + 1e-6 || p.w0 >= bp.w1 - 1e-6)
+        continue;
+      const double uEnd = !p.nearAt.empty()  ? p.u1
+                          : !p.farAt.empty() ? p.u0
+                                             : 0.5 * (p.u0 + p.u1);
+      return CutEndsInZone(pl, 0.5 * (p.w0 + p.w1), uEnd);
+    }
+    // One thickness of flat sheet past the zone on each side, over the span.
+    const double span = bp.w1 - bp.w0;
+    const CADShape ahead =
+        Block(fr.At(bp.w0, pl.u1, eps), gp_Vec(fr.A) * span,
+              gp_Vec(fr.pd) * size, gp_Vec(fr.N) * -(t + 2.0 * eps));
+    const CADShape behind =
+        Block(fr.At(bp.w0, pl.u0 - size, eps), gp_Vec(fr.A) * span,
+              gp_Vec(fr.pd) * size, gp_Vec(fr.N) * -(t + 2.0 * eps));
+    for (int c : bp.freed) {
+      const CADShape past = Common(pl.comps[c], ahead);
+      const double reach = past.IsValid() ? fr.Box(past.GetShape())[3] : pl.u1;
+      if (reach - pl.u1 < t - 1e-6)
+        return TooClose(pl, true, reach);
+      pl.freedVolume += Volume(pl.comps[c]);
+    }
+    const CADShape before = Common(pl.comps[pl.fixed], behind);
+    const double back = before.IsValid() ? fr.Box(before.GetShape())[2] : pl.u0;
+    if (pl.u0 - back < t - 1e-6)
+      return TooClose(pl, false, -back);
+  }
+  return {};
+}
+
+} // namespace
+
+namespace {
+
+// The names a fold leaves (docs/sheetmetal/README.md#fold). Its splits and
+// fuses append their own modifiers (";M<tag>..."), which say nothing a
+// reader of the part needs: the fixed piece keeps every name it had, the bend
+// is `<tag>/bend<k>/face<i>`, and a face or edge the fold cut across keeps
+// its name on the fixed piece and gains ";F<tag>.<k>" on freed piece k --
+// the mark everything on piece k was given, kept only where the fixed side
+// holds the same name.
+void NamesAfterFold(ElementMap& map, uint64_t tag) {
+  const std::string modifier = ";M" + std::to_string(tag);
+  const std::string freed = ";F" + std::to_string(tag) + ".";
+  const auto pass = [&](std::map<int, std::string>& names) {
+    for (auto& [i, n] : names) {
+      // The mark goes on after whatever the split appended; take it off,
+      // cut the modifiers, and put it back.
+      std::string mark;
+      if (const size_t at = n.find(freed); at != std::string::npos) {
+        size_t end = at + freed.size();
+        while (end < n.size() &&
+               std::isdigit(static_cast<unsigned char>(n[end])))
+          ++end;
+        mark = n.substr(at, end - at);
+        n.erase(at, end - at);
+      }
+      for (size_t at = n.find(modifier); at != std::string::npos;
+           at = n.find(modifier, at + 1)) {
+        const size_t end = at + modifier.size();
+        if (end == n.size() || n[end] == ';' || n[end] == '[' ||
+            n[end] == '#') {
+          n.resize(at);
+          break;
+        }
+      }
+      n += mark;
+    }
+    std::set<std::string> fixedNames;
+    for (const auto& [i, n] : names)
+      if (n.find(freed) == std::string::npos)
+        fixedNames.insert(n);
+    for (auto& [i, n] : names)
+      if (const size_t at = n.find(freed); at != std::string::npos)
+        if (fixedNames.count(n.substr(0, at)) == 0)
+          n.resize(at);
+  };
+  pass(map.names);
+  pass(map.edgeNames);
+}
+
+} // namespace
+
+std::optional<bool> FoldSmallerSideIsLeft(const Body& body,
+                                          const SheetMetalRules& rules,
+                                          const FoldSpec& spec) {
+  // The side whose freed material is the lesser: a tab, not the plate round
+  // it. Where only one side can be folded at all, that one; where neither
+  // can, the half of the sheet either side of the line.
+  if (!body.shape.IsValid())
+    return std::nullopt;
+  ArmOccSignalHandlers();
+  try {
+    FoldSpec l = spec, r = spec;
+    l.left = true;
+    r.left = false;
+    FoldPlan pl, pr;
+    const bool okL = PlanFold(body, rules, l, pl).empty();
+    const bool okR = PlanFold(body, rules, r, pr).empty();
+    if (okL && okR)
+      return pl.freedVolume <= pr.freedVolume;
+    if (okL != okR)
+      return okL;
+    const glm::dvec3 d = spec.b - spec.a;
+    if (glm::length(d) < 1e-9)
+      return std::nullopt;
+    const gp_Dir left(gp_Vec(D(spec.normal)).Crossed(gp_Vec(D(d))));
+    const double size = SizeOf(body.shape);
+    const double vl =
+        Volume(Common(body.shape, HalfSpace(P(spec.a), left, size)));
+    const double vr =
+        Volume(Common(body.shape, HalfSpace(P(spec.a), left.Reversed(), size)));
+    if (vl <= 1e-12 && vr <= 1e-12)
+      return std::nullopt;
+    return vl <= vr;
+  } catch (const Standard_Failure&) {
+    return std::nullopt;
+  }
+}
+
+std::optional<FoldResult> Fold(const Body& body, const SheetMetalRules& rules,
+                               const FoldSpec& spec, uint64_t tag,
+                               std::string* error) {
+  const auto fail = [&](const std::string& why) -> std::optional<FoldResult> {
+    if (error)
+      *error = why;
+    return std::nullopt;
+  };
+  if (!body.shape.IsValid())
+    return fail("the body has no geometry to fold");
+  for (const BendRegion& b : body.bends)
+    if (b.flat)
+      return fail("this body has bends laid flat - refold them before "
+                  "folding it");
+
+  ArmOccSignalHandlers();
+  try {
+    FoldPlan pl;
+    if (std::string why = PlanFold(body, rules, spec, pl); !why.empty())
+      return fail(why);
+    const FoldFrame& fr = pl.fr;
+    const double t = pl.t;
+    const gp_Dir up = spec.reverse ? fr.N.Reversed() : fr.N;
+    const double hFace = spec.reverse ? -t : 0.0;
+
+    FoldResult out;
+    FlatResult& result = out.folded;
+    result.bends = body.bends;
+    Named work{body.shape, body.elementMap};
+
+    // Every crease, written as a crease lying flat, and the freed pieces cut
+    // out whole -- before anything moves.
+    std::vector<size_t> creaseAt;
+    CADShape strips;
+    for (size_t k = 0; k < pl.bends.size(); ++k) {
+      const FoldBendPlan& bp = pl.bends[k];
+      BendRegion crease;
+      crease.featureId = tag;
+      const gp_Pnt Tf = fr.At(bp.w0, pl.u0, hFace);
+      crease.axisOrigin = G(Tf.Translated(gp_Vec(up) * pl.R));
+      crease.axisDir = G(fr.A);
+      crease.radius = pl.R;
+      crease.width = bp.w1 - bp.w0;
+      crease.angle = spec.angle;
+      crease.kFactor = pl.K;
+      crease.kSource = rules.KSource(pl.R);
+      crease.parentDir = G(fr.pd);
+      crease.upDir = G(up);
+      crease.flat = true;
+      crease.allowance = pl.BA;
+      crease.unfoldedBy = tag;
+      crease.flatA = G(fr.At(bp.w0, pl.u0 + pl.BA / 2.0, 0.0));
+      crease.flatB = G(fr.At(bp.w1, pl.u0 + pl.BA / 2.0, 0.0));
+      creaseAt.push_back(result.bends.size());
+      result.bends.push_back(crease);
+      const CADShape strip = FrameOf(crease, rules).Strip();
+      if (!strips.IsValid()) {
+        strips = strip;
+      } else {
+        BRepAlgoAPI_Fuse op;
+        if (!cad::BuildNonDestructive(op, strips.GetShape(), strip.GetShape()))
+          return fail("the fold's bends could not be laid out on the sheet");
+        strips = CADShape(op.Shape());
+      }
+      FoldZone zone;
+      zone.corners[0] = G(fr.At(bp.w0, pl.u0, 0.0));
+      zone.corners[1] = G(fr.At(bp.w1, pl.u0, 0.0));
+      zone.corners[2] = G(fr.At(bp.w1, pl.u1, 0.0));
+      zone.corners[3] = G(fr.At(bp.w0, pl.u1, 0.0));
+      out.zones.push_back(zone);
+    }
+    // Each bend's freed piece, whole and named: everything the strips cut
+    // the sheet into, less every piece that is not it.
+    const Named cutUp = Subtract(work, strips, tag);
+    const std::vector<CADShape> parts = Solids(cutUp.shape);
+    std::vector<Named> freed(pl.bends.size());
+    for (size_t k = 0; k < pl.bends.size(); ++k) {
+      std::vector<gp_Pnt> probes;
+      for (size_t i : pl.bends[k].chords)
+        probes.insert(probes.end(), pl.pieces[i].farAt.begin(),
+                      pl.pieces[i].farAt.end());
+      TopoDS_Compound others;
+      BRep_Builder builder;
+      builder.MakeCompound(others);
+      bool any = false, mine = false;
+      for (const CADShape& s : parts) {
+        const bool here =
+            std::any_of(probes.begin(), probes.end(), [&](const gp_Pnt& p) {
+              return Contains(s.GetShape(), p);
+            });
+        mine = mine || here;
+        if (!here) {
+          builder.Add(others, s.GetShape());
+          any = true;
+        }
+      }
+      if (!mine)
+        return fail("the piece the fold frees could not be cut from the "
+                    "sheet");
+      freed[k] = any ? Subtract(cutUp, CADShape(others), tag) : cutUp;
+      if (!freed[k].shape.IsValid())
+        return fail("the piece the fold frees could not be cut from the "
+                    "sheet");
+    }
+
+    std::vector<std::pair<gp_Pnt, gp_Pnt>> joins;
+    for (size_t k = 0; k < pl.bends.size(); ++k) {
+      const std::string ordinal = std::to_string(k + 1);
+      const std::string suffix = ";F" + std::to_string(tag) + "." + ordinal;
+      const BendFrame f = FrameOf(result.bends[creaseAt[k]], rules);
+      const gp_Pnt mid = fr.At(0.5 * (pl.bends[k].w0 + pl.bends[k].w1), 0, 0);
+      std::string innerName, outerName;
+      const BeforeFuse before = [&](Named& rest, Named& child,
+                                    const CADShape& sector) -> std::string {
+        // Everything on the freed piece is marked as on it; NamesAfterFold
+        // keeps the mark only where the fixed side has the same name.
+        (void)rest;
+        for (auto& [i, n] : child.map.names)
+          n += suffix;
+        for (auto& [i, n] : child.map.edgeNames)
+          n += suffix;
+        // Turned, the piece must not run into the sheet it turned off.
+        const double tol = std::max(1e-6, 1e-6 * Volume(child.shape));
+        const CADShape hit = Common(child.shape, rest.shape);
+        const CADShape hitBend = Common(sector, rest.shape);
+        if (Volume(hit) > tol || Volume(hitBend) > tol) {
+          const CADShape& h = Volume(hit) > tol ? hit : hitBend;
+          const cad::Integral m = cad::Integrate(h.GetShape());
+          return "folded " + FoldMm(spec.angle * 180.0 / std::numbers::pi) +
+                 " degrees, the piece on bend " + ordinal + " (the " +
+                 FoldMm(pl.bends[k].w1 - pl.bends[k].w0) +
+                 " mm of the line from " + FoldMm(pl.bends[k].w0) +
+                 " mm along it) runs into the rest of the sheet: " +
+                 FoldMm(Volume(h)) + " mm3 of overlap around " +
+                 FoldAt(P(m.centerOfMass)) +
+                 ". Fold it less far, or the other way (reverse)";
+        }
+        int fi = 0;
+        TopTools_IndexedMapOfShape sf;
+        TopExp::MapShapes(sector.GetShape(), TopAbs_FACE, sf);
+        for (fi = 1; fi <= sf.Extent(); ++fi) {
+          BRepAdaptor_Surface surf(TopoDS::Face(sf(fi)));
+          if (surf.GetType() != GeomAbs_Cylinder)
+            continue;
+          const std::string name = std::to_string(tag) + "/bend" + ordinal +
+                                   "/face" + std::to_string(fi - 1);
+          const double r = surf.Cylinder().Radius();
+          if (std::abs(r - f.R) < 1e-6)
+            innerName = name;
+          else if (std::abs(r - (f.R + f.t)) < 1e-6)
+            outerName = name;
+        }
+        return {};
+      };
+      std::string why;
+      if (!FoldCrease(work, result.bends, creaseAt[k], rules, tag,
+                      std::to_string(tag) + "/bend" + ordinal, &freed[k],
+                      before, nullptr, why))
+        return fail(why);
+      BendRegion& bend = result.bends[creaseAt[k]];
+      if (!innerName.empty())
+        bend.innerFace = ElementRef{tag, innerName};
+      if (!outerName.empty())
+        bend.outerFace = ElementRef{tag, outerName};
+      // Where the faces it joins are: just short of the bend on the fixed
+      // side, and just past it on the turned piece. Named once the names
+      // are final, below.
+      joins.push_back({mid.Translated(gp_Vec(fr.pd) * (pl.u0 - 1e-3) +
+                                      gp_Vec(fr.N) * hFace),
+                       f.Wrap(mid.Translated(gp_Vec(fr.pd) * (pl.u1 + 1e-3) +
+                                             gp_Vec(fr.N) * hFace))});
+    }
+    result.shape = std::move(work.shape);
+    result.map = std::move(work.map);
+    NamesAfterFold(result.map, tag);
+    Uniquify(result.map);
+    const auto faceAt = [&](const gp_Pnt& p) {
+      int i = 0;
+      const TopoDS_Vertex v = BRepBuilderAPI_MakeVertex(p).Vertex();
+      for (TopExp_Explorer ex(result.shape.GetShape(), TopAbs_FACE); ex.More();
+           ex.Next(), ++i) {
+        BRepExtrema_DistShapeShape d(v, ex.Current());
+        if (d.IsDone() && d.Value() < 1e-6)
+          if (const std::string* name = result.map.NameOf(i))
+            return *name;
+      }
+      return std::string{};
+    };
+    for (size_t k = 0; k < joins.size(); ++k) {
+      BendRegion& bend = result.bends[creaseAt[k]];
+      if (const std::string n = faceAt(joins[k].first); !n.empty())
+        bend.parentFace = ElementRef{tag, n};
+      if (const std::string n = faceAt(joins[k].second); !n.empty())
+        bend.childFace = ElementRef{tag, n};
+    }
+    return out;
+  } catch (const Standard_Failure& e) {
+    return fail(std::string("folding failed: ") + e.GetMessageString());
+  }
 }
 
 glm::dvec3 CreaseNormal(const BendRegion& bend, const glm::dmat4& placement) {

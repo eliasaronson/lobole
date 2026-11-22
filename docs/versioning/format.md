@@ -371,6 +371,7 @@ into the history above, numbered, when the branch lands
 
 | v | Change |
 |---|--------|
+| vNEXT | A feature type `Fold` {sketch_id, angle_deg? (+_expr), radius_mm? (+_expr), position?: centerline \| bend_start \| bend_end, side?: left \| right, reverse?}: the sheet on one side of a line drawn on a panel turned about it, each stretch of the line through material freeing its own piece. `side` is written once it is resolved; `side_at_mm`, which an RPC may send in its place, is never written. An older build refuses the unknown type ([fold](../sheetmetal/README.md#fold)). Golden `vNEXT-fold` |
 
 ## Paths in a project
 

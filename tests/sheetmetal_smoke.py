@@ -240,6 +240,92 @@ def flat_sheet(d, tmp):
     expect(views[flat]["bend_lines"] == 0, views[flat])
 
 
+def fold(d, tmp):
+    """A tab cut on three sides inside a plate, folded over the wire: the
+    refusals in the call's own answer, the side resolved from a point and
+    stored, one bend the tab's width, and the blank's DXF one bend line."""
+    d.call("new_project")
+    d.call("set_sheet_metal_rules", material="aluminum_6061_t6", gauge="1.5mm")
+    outer = [(0, 0), (WIDTH, 0), (WIDTH, DEPTH), (0, DEPTH)]
+    slot = [(38, 15), (40, 15), (40, 40), (60, 40), (60, 15), (62, 15),
+            (62, 42), (38, 42)]
+    entities = []
+    for loop in (outer, slot):
+        for i, a in enumerate(loop):
+            entities.append({"type": "line", "id": len(entities) + 1,
+                             "a": list(a), "b": list(loop[(i + 1) % len(loop)])})
+    sk = d.call("add_feature", feature={
+        "type": "Sketch", "name": "Blank",
+        "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "uAxis": [1, 0, 0]},
+        "entities": entities})["id"]
+    base = d.call("add_feature", feature={
+        "type": "BaseFlange", "name": "Base", "sketch_id": sk})["id"]
+    line = d.call("add_feature", feature={
+        "type": "Sketch", "name": "Tab line",
+        "plane": {"origin": [0, 0, THICKNESS], "normal": [0, 0, 1],
+                  "uAxis": [1, 0, 0]},
+        "entities": [{"type": "line", "id": 1, "a": [42, 20],
+                      "b": [58, 20]}]})["id"]
+    count = len(d.call("get_state")["features"])
+
+    # Refused before anything changes, naming what is accepted.
+    refused(d, "add_feature", "centerline", feature={
+        "type": "Fold", "name": "x", "sketch_id": line, "position": "middle"})
+    refused(d, "add_feature", "lies on the fold's line", feature={
+        "type": "Fold", "name": "x", "sketch_id": line, "side_at_mm": [50, 20]})
+    refused(d, "add_feature", "off the sheet", feature={
+        "type": "Fold", "name": "x", "sketch_id": line, "side_at_mm": [50, 80]})
+    expect(len(d.call("get_state")["features"]) == count,
+           "a refused fold changed the document")
+
+    # Built but broken: the call's own regen says so.
+    r = d.call("add_feature", feature={
+        "type": "Fold", "name": "Too tight", "sketch_id": line,
+        "radius_mm": 1.0})
+    expect(not r["regen"]["ok"] and "tighter than" in str(r["regen"]),
+           r["regen"])
+    d.call("delete_feature", id=r["id"])
+
+    # The tab: its side given by a point on it, and stored as a side.
+    r = d.call("add_feature", feature={
+        "type": "Fold", "name": "Tab", "sketch_id": line,
+        "side_at_mm": [50, 30]})
+    expect(r["regen"]["ok"], r["regen"])
+    feats = d.call("get_state")["features"]
+    tab = next(f for f in feats if f["id"] == r["id"])
+    expect(tab.get("side") == "left" and "side_at_mm" not in tab, tab)
+    bends = d.call("list_bends")
+    expect(bends["count"] == 1, bends)
+    expect(abs(bends["bends"][0]["width_mm"] - 20.0) < 1e-6, bends)
+
+    # The spec read back, a point on the plate's side added: the point
+    # decides over the side the spec carries, and the plate turns instead.
+    # The side by name turns the tab again.
+    def spec_of(fid):
+        f = next(f for f in d.call("get_state")["features"] if f["id"] == fid)
+        return {k: v for k, v in f.items()
+                if k not in ("index", "error", "warning",
+                             "after_earlier_failure")}
+    spec = spec_of(r["id"])
+    spec["side_at_mm"] = [20, 8]
+    m = d.call("modify_feature", feature_id=r["id"], feature=spec)
+    expect(m["regen"]["ok"], m["regen"])
+    expect(spec_of(r["id"]).get("side") == "right", spec_of(r["id"]))
+    spec = spec_of(r["id"])
+    spec["side"] = "left"
+    m = d.call("modify_feature", feature_id=r["id"], feature=spec)
+    expect(m["regen"]["ok"], m["regen"])
+
+    # Its blank: a flat pattern, and the DXF's one bend line.
+    r = d.call("add_feature", feature={
+        "type": "FlatPattern", "name": "Flat", "body_id": base})
+    expect(r["regen"]["ok"], r["regen"])
+    out = os.path.join(tmp, "tab.dxf")
+    d.call("export_dxf", path=out)
+    text = open(out).read()
+    expect(text.count("LINE\n8\nBEND_") == 1, text[:400])
+
+
 def main():
     binary = sys.argv[1]
     env = dict(os.environ)
@@ -436,6 +522,7 @@ def main():
 
         flat_sheet(d, tmp)
         tier2(d)
+        fold(d, tmp)
         print("sheet metal smoke OK")
     finally:
         app.terminate()

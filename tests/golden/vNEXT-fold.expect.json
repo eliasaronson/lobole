@@ -1,0 +1,15 @@
+{
+  "features": 5,
+  "bodies": 1,
+  "volumes": [
+    8784.361725123517
+  ],
+  "sheet_metal": {
+    "material": "aluminum_6061_t6",
+    "gauge": "1.5mm",
+    "thickness": 1.5,
+    "bend_radius": 2.25,
+    "k_factor": 0.41,
+    "relief": "rectangular"
+  }
+}

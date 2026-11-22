@@ -103,6 +103,7 @@ add_executable(designer_tests
     test_follower_check.cpp
     test_sheetmetal.cpp
     test_flange.cpp
+    test_fold.cpp
     test_unfold.cpp
     test_refold.cpp
     test_hem_jog.cpp

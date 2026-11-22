@@ -428,6 +428,17 @@ typed `contract`: every field, its type and its enum values.
   (0 < a <= 90, default 90), "flip"?: bool (which side is carried)}} — the
   bends run the full panel width; a height under (2R + t)(1 - cos a) is
   refused.
+- Fold (turn the sheet on one side of a line drawn on a panel): {{"type":
+  "Fold", "name": str, "sketch_id": <a sketch holding ONE line drawn on the
+  panel face>, "angle_deg"?: num (0 < a <= 180, default 90),
+  "angle_deg_expr"?: str, "radius_mm"?: num (omitted = the rules' bend
+  radius), "radius_mm_expr"?: str, "position"?: "centerline" (default) |
+  "bend_start" | "bend_end", "side"?: "left" | "right" (of the line seen
+  from the face, first point to second) OR "side_at_mm"?: [x, y] (a point
+  in the sketch's plane on the side that turns), "reverse"?: bool (fold
+  away from the face)}} — where a cut-out or the outline interrupts the
+  line each stretch frees its own piece: a tab cut on three sides folds
+  alone. With no side, the side that frees less is chosen once and stored.
 - An EdgeFlange whose edges meet at a corner MITRES the flanges there;
   add "corners": "closed" to carry flanges that only touch at a square
   corner round it and mitre them shut.

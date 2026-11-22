@@ -14,6 +14,7 @@
 #include "core/features/SketchFeature.h"
 
 #include "common/Logger.h"
+#include "core/features/FoldFeature.h"
 #include "core/io/Serialization.h" // FeatureToJson: the regen-cache hash input
 
 #include <algorithm>
@@ -616,6 +617,14 @@ bool Document::Regenerate() {
         fj.erase("path");
         fj["content_hash"] = content;
       }
+    // A Fold's side given as a point (side_at_mm) is never written -- it is
+    // resolved to `side` on the first Execute -- but until then it is an
+    // input: without it two folds that differ only in the point share a key,
+    // and the second is served the first one's side.
+    if (const auto* fold =
+            dynamic_cast<const FoldFeature*>(m_features[i].get()))
+      if (fold->sideAt)
+        fj["side_at_mm"] = {fold->sideAt->x, fold->sideAt->y};
     // A clearance-fitted Hole on a printed part is modelled at the fit plus
     // the process's allowance (HoleFeature::Execute), so the process is one
     // of ITS inputs — and only its: a part with no such hole keeps its

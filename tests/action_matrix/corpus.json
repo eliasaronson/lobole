@@ -1172,6 +1172,11 @@
       "source": "tests/golden/v226-part-keeps-no-studies.json"
     },
     {
+      "design": "golden/vNEXT-fold",
+      "kind": "golden",
+      "source": "tests/golden/vNEXT-fold.json"
+    },
+    {
       "design": "golden/v194-edge-names-by-geometry",
       "kind": "golden",
       "source": "tests/golden/v194-edge-names-by-geometry.json"

@@ -60,9 +60,13 @@ def feature_contracts():
     table = src[src.index("kFeatureTypes[] = {"):]
     table = table[:table.index("\n};")]
     out = {}
-    # A row's version is a number, or 211 on a branch whose format
-    # bump has not landed (docs/versioning/format.md).
-    for m in re.finditer(r'\{\s*"([A-Za-z0-9]+)",\s*(?:\d+|211\d*),((?:\s*"(?:[^"\\]|\\.)*")+)'
+    # A row's version is a number, or the pending constant on a branch
+    # whose format bump has not landed (docs/versioning/format.md). Spelt
+    # in two halves: the landing (tools/format-version.py) numbers that
+    # constant on every line a branch adds, and once numbered here the
+    # pattern stopped matching the next branch's rows.
+    pending = "kVersion" + "NEXT"
+    for m in re.finditer(r'\{\s*"([A-Za-z0-9]+)",\s*(?:\d+|' + pending + r'\d*),((?:\s*"(?:[^"\\]|\\.)*")+)'
                          r'\s*,((?:\s*"(?:[^"\\]|\\.)*")+)\s*\}', table):
         out[m.group(1)] = (f"type:'{m.group(1)}', {common}, "
                            + literal(m.group(3)))

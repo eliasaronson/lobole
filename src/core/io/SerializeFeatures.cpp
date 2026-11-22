@@ -26,6 +26,7 @@
 #include "core/features/FastenerFeature.h"
 #include "core/features/FilletFeature.h"
 #include "core/features/FlatPatternFeature.h"
+#include "core/features/FoldFeature.h"
 #include "core/features/FrameFeature.h"
 #include "core/features/HemFeature.h"
 #include "core/features/HoleFeature.h"
@@ -1853,6 +1854,20 @@ json FeatureToJson(const Feature& feature) {
     WriteExprText(j, "angle_deg", jg->angleDeg.expr);
     if (jg->flip)
       j["flip"] = true;
+  } else if (auto* fo = dynamic_cast<const FoldFeature*>(&feature)) {
+    j["sketch_id"] = fo->sketchId;
+    if (fo->angleDeg != 90.0)
+      j["angle_deg"] = fo->angleDeg.value;
+    WriteExprText(j, "angle_deg", fo->angleDeg.expr);
+    if (fo->radius > 0.0)
+      j["radius_mm"] = fo->radius.value;
+    WriteExprText(j, "radius_mm", fo->radius.expr);
+    if (fo->position != sheet::FoldPosition::Centerline)
+      j["position"] = FoldPositionName(fo->position);
+    if (fo->side != FoldSide::Unset)
+      j["side"] = FoldSideName(fo->side);
+    if (fo->reverse)
+      j["reverse"] = true;
   } else if (auto* cr = dynamic_cast<const CornerReliefFeature*>(&feature)) {
     j["body_id"] = cr->bodyId;
     if (cr->style != CornerReliefStyle::Circular)
@@ -2395,6 +2410,27 @@ static constexpr FeatureTypeInfo kFeatureTypes[] = {
      "(2R + t)(1 - cos angle), is refused",
      "sketch_id:int>=0, height?:number, height_expr?:string, "
      "angle_deg?:number, angle_deg_expr?:string, flip?:bool"},
+    {"Fold", kVersionNEXT,
+     "sketch_id (a sketch holding ONE line drawn on a flat panel face), "
+     "angle_deg? (+_expr, (0, 180], default 90), radius_mm? (+_expr; omitted "
+     "= the rules' bend radius), position?: centerline (default; the line is "
+     "the crease the flat pattern draws) | bend_start (the side that stays "
+     "keeps its tangent line on it) | bend_end, side?: left | right (of the "
+     "line seen from the sketched face, walking from its first point to its "
+     "second; omitted = resolved ONCE, when added, to the side that frees "
+     "less of the sheet, and stored), side_at_mm? [x, y] - a point in the "
+     "sketch's plane on the side that turns, stored as side (it decides over "
+     "a side sent with it), reverse? - fold "
+     "away from the sketched face. Where the panel's outline or a cut-out "
+     "interrupts the line each stretch frees its own piece, so a tab cut on "
+     "three sides inside a plate folds alone. Refused, naming the numbers: a "
+     "line that does not cross or part the panel, a cut ending inside the "
+     "bend zone, less than one thickness of sheet past the zone, a fold that "
+     "runs into the sheet",
+     "sketch_id:int>=0, angle_deg?:number, angle_deg_expr?:string, "
+     "radius_mm?:number, radius_mm_expr?:string, "
+     "position?:'centerline'|'bend_start'|'bend_end', "
+     "side?:'left'|'right', side_at_mm?:number[], reverse?:bool"},
     {"CornerRelief", 113,
      "body_id, style?: circular (default) | rectangular, size? (+_expr) mm - "
      "radius or half-side, omitted = bend radius + thickness. Cuts a relief "
@@ -2931,6 +2967,9 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
             {"Jog",
              {"sketch_id", "height", "height_expr", "angle_deg",
               "angle_deg_expr", "flip"}},
+            {"Fold",
+             {"sketch_id", "angle_deg", "angle_deg_expr", "radius_mm",
+              "radius_mm_expr", "position", "side", "side_at_mm", "reverse"}},
             {"CornerRelief", {"body_id", "style", "size", "size_expr"}},
             {"NormalCut", {"sketch_id", "body_id", "regions"}},
             {"Shell", {"body_id", "thickness", "thickness_expr", "open_faces"}},
@@ -4151,6 +4190,40 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
     jg->angleDeg.expr = ReadExprText(j, "angle_deg");
     jg->flip = j.value("flip", false);
     out = std::move(jg);
+  } else if (type == "Fold") { // vNEXT
+    auto fo =
+        std::make_unique<FoldFeature>(name, IdField(j, "sketch_id", true));
+    fo->angleDeg = j.value("angle_deg", 90.0);
+    fo->angleDeg.expr = ReadExprText(j, "angle_deg");
+    fo->radius = j.value("radius_mm", 0.0);
+    fo->radius.expr = ReadExprText(j, "radius_mm");
+    if (j.contains("position")) {
+      const std::string v = j.at("position").get<std::string>();
+      if (!FoldPositionFromString(v, fo->position))
+        throw std::runtime_error("unknown fold position '" + v +
+                                 "' (expected one of: " + FoldPositionList() +
+                                 ")");
+    }
+    if (j.contains("side")) {
+      const std::string v = j.at("side").get<std::string>();
+      if (!FoldSideFromString(v, fo->side))
+        throw std::runtime_error("unknown fold side '" + v +
+                                 "' (expected one of: " + FoldSideList() + ")");
+    }
+    if (j.contains("side_at_mm")) {
+      const json& at = j.at("side_at_mm");
+      if (!at.is_array() || at.size() != 2 || !at[0].is_number() ||
+          !at[1].is_number())
+        throw std::runtime_error("side_at_mm is a point in the sketch's plane, "
+                                 "[x, y] in mm");
+      // The point decides, over any side it arrives with: modify_feature
+      // merges it into the stored spec, which already holds the side it is
+      // there to change.
+      fo->sideAt = glm::dvec2(at[0].get<double>(), at[1].get<double>());
+      fo->side = FoldSide::Unset;
+    }
+    fo->reverse = j.value("reverse", false);
+    out = std::move(fo);
   } else if (type == "CornerRelief") { // v113
     auto cr = std::make_unique<CornerReliefFeature>(
         name, IdField(j, "body_id", true));

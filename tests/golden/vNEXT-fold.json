@@ -1,0 +1,244 @@
+{
+  "format": "designer-document",
+  "version": 236,
+  "features": [
+    {
+      "type": "Sketch",
+      "name": "Blank",
+      "id": 1,
+      "plane": {
+        "origin": [
+          0,
+          0,
+          0
+        ],
+        "normal": [
+          0,
+          0,
+          1
+        ],
+        "uAxis": [
+          1,
+          0,
+          0
+        ]
+      },
+      "entities": [
+        {
+          "type": "line",
+          "id": 1,
+          "a": [
+            0,
+            0
+          ],
+          "b": [
+            100,
+            0
+          ]
+        },
+        {
+          "type": "line",
+          "id": 2,
+          "a": [
+            100,
+            0
+          ],
+          "b": [
+            100,
+            60
+          ]
+        },
+        {
+          "type": "line",
+          "id": 3,
+          "a": [
+            100,
+            60
+          ],
+          "b": [
+            0,
+            60
+          ]
+        },
+        {
+          "type": "line",
+          "id": 4,
+          "a": [
+            0,
+            60
+          ],
+          "b": [
+            0,
+            0
+          ]
+        },
+        {
+          "type": "line",
+          "id": 5,
+          "a": [
+            38,
+            15
+          ],
+          "b": [
+            40,
+            15
+          ]
+        },
+        {
+          "type": "line",
+          "id": 6,
+          "a": [
+            40,
+            15
+          ],
+          "b": [
+            40,
+            40
+          ]
+        },
+        {
+          "type": "line",
+          "id": 7,
+          "a": [
+            40,
+            40
+          ],
+          "b": [
+            60,
+            40
+          ]
+        },
+        {
+          "type": "line",
+          "id": 8,
+          "a": [
+            60,
+            40
+          ],
+          "b": [
+            60,
+            15
+          ]
+        },
+        {
+          "type": "line",
+          "id": 9,
+          "a": [
+            60,
+            15
+          ],
+          "b": [
+            62,
+            15
+          ]
+        },
+        {
+          "type": "line",
+          "id": 10,
+          "a": [
+            62,
+            15
+          ],
+          "b": [
+            62,
+            42
+          ]
+        },
+        {
+          "type": "line",
+          "id": 11,
+          "a": [
+            62,
+            42
+          ],
+          "b": [
+            38,
+            42
+          ]
+        },
+        {
+          "type": "line",
+          "id": 12,
+          "a": [
+            38,
+            42
+          ],
+          "b": [
+            38,
+            15
+          ]
+        }
+      ]
+    },
+    {
+      "type": "BaseFlange",
+      "name": "Base",
+      "id": 2,
+      "sketch_id": 1
+    },
+    {
+      "type": "Sketch",
+      "name": "Tab line",
+      "id": 3,
+      "plane": {
+        "origin": [
+          0,
+          0,
+          1.5
+        ],
+        "normal": [
+          0,
+          0,
+          1
+        ],
+        "uAxis": [
+          1,
+          0,
+          0
+        ]
+      },
+      "entities": [
+        {
+          "type": "line",
+          "id": 1,
+          "a": [
+            42,
+            20
+          ],
+          "b": [
+            58,
+            20
+          ]
+        }
+      ]
+    },
+    {
+      "type": "Fold",
+      "name": "Tab",
+      "id": 4,
+      "sketch_id": 3,
+      "side": "left"
+    },
+    {
+      "type": "FlatPattern",
+      "name": "Flat",
+      "id": 5,
+      "body_id": 2,
+      "suppressed": true
+    }
+  ],
+  "sheet_metal": {
+    "material": "aluminum_6061_t6",
+    "gauge": "1.5mm",
+    "thickness": 1.5
+  },
+  "configurations": [
+    {
+      "id": 6,
+      "name": "Flat",
+      "unsuppressed_features": [
+        5
+      ]
+    }
+  ]
+}

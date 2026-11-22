@@ -428,6 +428,7 @@ ElementOrigin DecodeElementName(const std::string& qualified) {
     size_t pos = 1;
     switch (step[0]) {
     case 'S': // carried to the far side of a jog: moved, so modified
+    case 'F': // on a piece a fold turned ("F<id>.<k>"): moved, so modified
     case 'M':
       if (const auto id = LeadingId(step, pos))
         o.modifiedBy.push_back(*id);
@@ -508,7 +509,8 @@ std::string RewriteIds(const std::string& name,
           i = e;
           continue;
         }
-      } else if ((c == 'M' || c == 'G' || c == 'S') && i + 1 < name.size() &&
+      } else if ((c == 'M' || c == 'G' || c == 'S' || c == 'F') &&
+                 i + 1 < name.size() &&
                  std::isdigit(static_cast<unsigned char>(name[i + 1]))) {
         const size_t e = digits(i + 1);
         out += c;

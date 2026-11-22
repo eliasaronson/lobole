@@ -96,6 +96,68 @@ Unfold(const Body& body, const SheetMetalRules& rules,
                                                uint64_t unfoldTag, uint64_t tag,
                                                std::string* error);
 
+// Where a sketched line lies on a sheet: the flat face of a body holding both
+// ends of the line, one thickness deep (docs/sheetmetal/README.md#features).
+// `a` and `b` come back taken onto the face exactly, and `normal` is the
+// face's outward normal. What a Jog and a Fold both look for. `alongLine`
+// (a fold) also takes a face whose sheet the line misses at its middle but
+// meets somewhere along it, carried on both ways, so the fold can say where.
+struct Panel {
+  size_t body = 0; // index into the bodies searched
+  glm::dvec3 a{0.0}, b{0.0};
+  glm::dvec3 normal{0.0, 0.0, 1.0};
+};
+[[nodiscard]] std::optional<Panel>
+PanelUnder(const std::vector<Body>& bodies, const glm::dvec3& a,
+           const glm::dvec3& b, double thickness, bool alongLine = false);
+
+// Where the line sits in the bend a Fold makes: on its centreline (where the
+// flat pattern draws the crease), on the fixed side's tangent line, or on the
+// far one.
+enum class FoldPosition { Centerline, BendStart, BendEnd };
+
+// A Fold (docs/sheetmetal/README.md#fold): the material on one side of a line
+// on a panel turned about it. The line lies on the panel's face (PanelUnder).
+struct FoldSpec {
+  glm::dvec3 a{0.0}, b{0.0};        // the line, on the face
+  glm::dvec3 normal{0.0, 0.0, 1.0}; // the face's outward normal
+  double angle = 0.0;               // radians, (0, pi]
+  double radius = 0.0;              // inside, mm
+  FoldPosition position = FoldPosition::Centerline;
+  // Which side turns: left of the line, seen from the face (along `normal`
+  // looking back at it) walking from `a` to `b`, or right of it.
+  bool left = true;
+  bool reverse = false; // fold away from the face instead of toward it
+};
+
+// One bend a fold made, as the preview draws it: the zone on the face (four
+// corners, fixed side first) before the fold.
+struct FoldZone {
+  glm::dvec3 corners[4]{};
+};
+
+struct FoldResult {
+  FlatResult folded;
+  std::vector<FoldZone> zones; // one per bend, in order along the line
+};
+
+// Folds every piece the line frees (docs/sheetmetal/README.md#fold): the
+// chords of the zone under the line part the panel, each piece on the folding
+// side turns on its own bend, named `<tag>/bend<k>` with k its place along the
+// line from `a`. Returns nullopt with `error` set, naming the measured value
+// and what would be accepted.
+[[nodiscard]] std::optional<FoldResult> Fold(const Body& body,
+                                             const SheetMetalRules& rules,
+                                             const FoldSpec& spec, uint64_t tag,
+                                             std::string* error);
+
+// Whether the left side of the line holds less of the sheet than the right
+// (what a Fold turns when no side is named). nullopt when neither side holds
+// any.
+[[nodiscard]] std::optional<bool>
+FoldSmallerSideIsLeft(const Body& body, const SheetMetalRules& rules,
+                      const FoldSpec& spec);
+
 // A cut NORMAL TO THE SHEET everywhere (S10): the planar `profile`, carried
 // along `along` to where it meets the folded body, laid onto the blank —
 // rigidly on a panel, by the neutral map on a bend — cut straight through

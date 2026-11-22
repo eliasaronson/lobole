@@ -425,6 +425,7 @@ set(core_sources
     src/core/features/UnfoldFeature.cpp
     src/core/features/HemFeature.cpp
     src/core/features/JogFeature.cpp
+    src/core/features/FoldFeature.cpp
     src/core/features/CornerReliefFeature.cpp
     src/core/features/NormalCutFeature.cpp
     src/core/features/RefoldFeature.cpp
