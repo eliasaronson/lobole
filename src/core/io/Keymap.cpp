@@ -272,6 +272,7 @@ const Binding kDefaults[] = {
      "Shift+I"},
 
     {"sketch.trim", Context::Sketch, "Trim", "Modify", "M"},
+    {"sketch.split", Context::Sketch, "Split a curve", "Modify", "K"},
     {"sketch.offset", Context::Sketch, "Offset", "Modify", "O"},
     {"sketch.fillet", Context::Sketch, "Fillet a corner", "Modify", "Shift+F"},
     {"sketch.mirror", Context::Sketch, "Mirror", "Modify", "Shift+M"},

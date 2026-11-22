@@ -523,6 +523,7 @@ set(core_sources
     src/core/sketch/SketchSection.cpp
     src/core/sketch/SketchSelection.cpp
     src/core/sketch/SketchFillet.cpp
+    src/core/sketch/SketchSplit.cpp
     src/core/sketch/ExternalPrint.cpp
     src/core/features/ExtrudeFeature.cpp
     src/core/features/BearingFeature.cpp

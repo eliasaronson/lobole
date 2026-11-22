@@ -456,6 +456,18 @@ ToolPrompt SketchToolPrompt(const SketchEditState& edit,
             ? "release to remove every span the path crosses (Esc drops it)"
             : "click a segment to remove it, or drag across several");
     break;
+  case T::Split:
+    // The one place that says what to do; a refusal says only why.
+    if (edit.splitCircle != 0)
+      set("Split", 2, 2,
+          "click the circle again for the second cut (Esc drops the first)");
+    else if (edit.hasSplitPreview && edit.splitPreviewClosed)
+      set("Split", 1, 2, "click where the first cut goes (a circle takes two)");
+    else
+      set("Split", 0, 0,
+          "click a curve to cut it, at a crossing, an end on it or anywhere "
+          "(a circle takes two cuts)");
+    break;
   case T::Text:
     set("Text", 0, 0,
         edit.textEditId != 0 ? "click to place another label (Esc to finish)"

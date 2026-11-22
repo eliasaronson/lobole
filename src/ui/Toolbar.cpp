@@ -856,6 +856,7 @@ void DrawSketchModeToolbar(AppState& state) {
   toolBtn("sketch.point", "Point", SketchTool::Point);
   toolBtn("sketch.text", "Text: click to place a label", SketchTool::Text);
   toolBtn("sketch.trim", "Trim", SketchTool::Trim);
+  toolBtn("sketch.split", "Split a curve", SketchTool::Split);
   toolBtn("sketch.dimension", "Dimension", SketchTool::Dimension);
   Divider();
   toolBtn("sketch.mirror", "Mirror", SketchTool::Mirror);

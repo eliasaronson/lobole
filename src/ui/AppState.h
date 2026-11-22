@@ -163,8 +163,10 @@ enum class SketchTool {
   EllipseArc,      // 5-click: centre, major-axis end, minor radius, start, end
   Image,           // U8 polish: reference-image session (insert/opacity/
                    // calibrate/delete for selectedImageId) in the Tool window
-  Text             // click places a label; the Tool window edits its text,
+  Text,            // click places a label; the Tool window edits its text,
                    // height, font and alignment (docs/sketching/README.md#text)
+  Split            // click a curve to cut it into pieces that stay one curve;
+                   // a circle takes two clicks (docs/sketching/README.md#split)
 };
 
 // Transient state for the active sketch-editing session. The sketch itself
@@ -235,6 +237,19 @@ struct SketchEditState {
   bool hasFilletPreview = false;
   sketch::Arc filletPreviewArc{};
   uint32_t filletPreviewCurves[2] = {0, 0};
+  // The Split tool (docs/sketching/README.md#split). A circle takes two
+  // cuts: the first is held here (0 = none) until the second click.
+  uint32_t splitCircle = 0;
+  glm::dvec2 splitFirstAt{0.0};
+  uint32_t splitFirstCrossing = 0;
+  // What a click would do, under the cursor: the cut marks (the held one
+  // first) and the pieces, drawn in two shades. In plane UV.
+  bool hasSplitPreview = false;
+  std::vector<glm::dvec2> splitPreviewCuts;
+  std::vector<glm::dvec2> splitPreviewTicks; // two per cut: across the curve
+  std::vector<sketch::Entity> splitPreviewPieces;
+  uint32_t splitPreviewCurve = 0;
+  bool splitPreviewClosed = false; // the curve under the cursor is a circle
 
   // Mirror tool is two-step: collect geometry (false), then pick the axis
   // (true). Enter advances; Escape backs out. Selection carries the sources.

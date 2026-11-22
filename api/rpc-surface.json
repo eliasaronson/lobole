@@ -328,6 +328,7 @@
   "set_units": ["angle", "length", "mass"],
   "set_variable": ["comment", "expression", "name", "scope"],
   "solve_assembly": [],
+  "split": ["at", "crossing", "entity_id", "sketch_id"],
   "split_for_printing": ["bed_mm", "body", "cuts", "dry_run", "part", "prefix"],
   "stack_up": ["part", "terms"],
   "study_results": ["id", "layer_normal", "simulation", "study"],

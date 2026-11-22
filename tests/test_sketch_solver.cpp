@@ -368,8 +368,9 @@ TEST_CASE("Split keeps both pieces horizontal and the length spanning",
 
   // Split near the middle; the transferred H (both pieces) + spanning distance
   // must still solve to a straight 6-long horizontal segment pair.
-  uint32_t l1 = s.SplitEntity(l0, {3, 0.2});
-  REQUIRE(l1 != 0);
+  const std::vector<uint32_t> ids = s.SplitEntity(l0, {{{3, 0.2}}});
+  REQUIRE(ids.size() == 2);
+  const uint32_t l1 = ids[1];
 
   sketch::Solver solver;
   solver.Load(s);
@@ -1554,6 +1555,30 @@ TEST_CASE("A midpoint takes the place of the same point on the same line",
   other.a = {line, 1};
   CHECK(sketch::SubsumedBy(s, other).empty());
   CHECK(sketch::SubsumedBy(s, on).empty());
+}
+
+TEST_CASE("A coincident at a curve's end takes the place of the point on it",
+          "[solver][split]") {
+  using K = sketch::ConstraintKind;
+  SketchFeature s = MakeSketch();
+  const uint32_t bar = s.AddEntity(sketch::Line{{0, 0}, {4, 0}});
+  const uint32_t stem = s.AddEntity(sketch::Line{{4, 0}, {4, 3}});
+  const uint32_t arc = s.AddEntity(sketch::Arc{{0, 0}, 4.0, 0.0, M_PI});
+  s.constraints.push_back({K::PointOnLine, {stem, 0}, {bar, 0}, 0.0});
+  s.constraints.push_back({K::PointOnLine, {stem, 0}, {arc, 0}, 0.0});
+  // Either way round, at a line's end or an arc's.
+  CHECK(sketch::SubsumedBy(s, {K::Coincident, {bar, 1}, {stem, 0}, 0.0}) ==
+        std::vector<size_t>{0});
+  CHECK(sketch::SubsumedBy(s, {K::Coincident, {stem, 0}, {bar, 1}, 0.0}) ==
+        std::vector<size_t>{0});
+  CHECK(sketch::SubsumedBy(s, {K::Coincident, {stem, 0}, {arc, 1}, 0.0}) ==
+        std::vector<size_t>{1});
+  // A centre is no end: a point at an arc's centre is not on the arc.
+  CHECK(
+      sketch::SubsumedBy(s, {K::Coincident, {stem, 0}, {arc, 0}, 0.0}).empty());
+  // Another point is left alone.
+  CHECK(
+      sketch::SubsumedBy(s, {K::Coincident, {stem, 1}, {bar, 1}, 0.0}).empty());
 }
 
 TEST_CASE("JudgeAddition refuses what constrains nothing", "[solver][driven]") {

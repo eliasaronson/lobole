@@ -989,29 +989,66 @@ public:
   std::array<uint32_t, 5> AddRectangleCentered(glm::dvec2 center,
                                                glm::dvec2 corner);
 
-  // Splits the line `id` at point P (assumed on the segment). Piece 1 keeps
-  // `id` (its far endpoint becomes P); piece 2 is a new line P -> original-end.
-  // Constraints transfer per the FreeCAD lines-only policy: the far-endpoint
-  // refs move to piece 2, whole-edge distances re-anchor to span both pieces,
-  // H/V/parallel/perpendicular are copied onto piece 2 (so it stays aligned),
-  // and a coincident joins the two pieces at the cut. Returns piece 2's id, or
-  // 0 if `id` isn't a line or P is at an endpoint (degenerate).
-  uint32_t SplitEntity(uint32_t id, glm::dvec2 P);
+  // One cut of SplitEntity: where (sketch mm), and the curve crossing there
+  // (0 = none). With a crossing the cut is that curve's crossing nearest
+  // `at`, and the joint is held on it.
+  struct SplitCut {
+    glm::dvec2 at{0.0};
+    uint32_t crossing = 0;
+  };
+
+  // Splits the line, arc or circle `id` into pieces that stay one curve
+  // (docs/sketching/README.md#split): a line or an arc at one cut, a circle at
+  // two. Piece 1 keeps `id`; the ids come back in order along the curve (a
+  // circle's from the first cut counter-clockwise). A line's pieces are joined
+  // Coincident plus Parallel (or the Horizontal/Vertical the line carried), so
+  // they stay collinear; an arc's Coincident and Concentric, so the radius
+  // follows; a circle's Coincident at both cuts and Tangent at the first, which
+  // makes them one circle. A constraint on an end goes with the piece holding
+  // the end, and so does a tangent joined there; one on the whole curve stays
+  // on piece 1; a whole-edge distance spans the pieces and a midpoint of the
+  // line becomes a symmetric of its outer ends. A joint at another curve's end
+  // (or a point) is made coincident with it, replacing the point-on-curve that
+  // held it there; at a crossing it is held on the crossing curve, so the
+  // degrees of freedom do not change; anywhere else it slides, one more. A cut
+  // without a crossing moves `at` to the nearest point of the curve. Returns
+  // empty with nothing changed and `whyNot` naming the reason: an unknown or
+  // generated entity (GeneratedBy), a point, a label, a spline or an ellipse
+  // (not split yet), the wrong number of cuts, a cut at an end or past a
+  // hundredth of the curve's length from it, a crossing that does not cross, or
+  // an equal length on the line or an arc length on the arc, which two pieces
+  // cannot keep.
+  std::vector<uint32_t> SplitEntity(uint32_t id,
+                                    const std::vector<SplitCut>& cuts,
+                                    std::string* whyNot = nullptr);
+  // Why entity `id` cannot be split wherever it is cut ("" = it can):
+  // SplitEntity's refusals that do not depend on the cuts. For a tool's
+  // first click on a circle.
+  std::string SplitRefusal(uint32_t id) const;
 
   // Trims the line `id` at `clickUV`: removes the sub-segment the click falls
-  // in, bounded by the line's intersections with other lines (via SplitEntity +
-  // DeleteEntity). With no bracketing intersection the whole line is deleted.
-  // Returns true if anything changed. Lines only — circles and arcs are
-  // trimmed by TrimCurveAt.
-  bool TrimLineAt(uint32_t id, glm::dvec2 clickUV);
+  // in, bounded by the line's intersections with other lines (Trim's own
+  // split + DeleteEntity: the survivors keep their own H/V, parallel and
+  // perpendicular, and are not tied to each other). With no bracketing
+  // intersection the whole line is deleted. Returns true if anything changed.
+  // Lines only — circles and arcs are trimmed by TrimCurveAt. An entity a
+  // linked op or the model generates (GeneratedBy) is refused: false, and
+  // `whyNot` says so.
+  bool TrimLineAt(uint32_t id, glm::dvec2 clickUV,
+                  std::string* whyNot = nullptr);
 
   // Trims the circle or arc `id` at `clickUV`: removes the angular span the
   // click falls in, bounded by the curve's intersections with other lines (and
   // the arc's own endpoints). A trimmed circle becomes one arc (the complement
   // of the removed span, keeping the id); a trimmed arc becomes up to two arcs
-  // (the first keeps the id, the rest are new entities). With no bracketing
-  // crossing the whole curve is deleted. Returns true if anything changed.
-  bool TrimCurveAt(uint32_t id, glm::dvec2 clickUV);
+  // (the first keeps the id, the rest are new entities). An arc's middle is
+  // cut out through SplitEntity's transfer, so the far survivor takes the
+  // far end's constraints; a removed end's constraints go with it. The
+  // survivors are not tied to each other. With no bracketing crossing the
+  // whole curve is deleted. Returns true if anything changed; a generated
+  // entity is refused as TrimLineAt refuses it.
+  bool TrimCurveAt(uint32_t id, glm::dvec2 clickUV,
+                   std::string* whyNot = nullptr);
 
   // The span (two UV endpoints) that TrimLineAt would remove for a click on
   // line `id` at `clickUV` — the sub-segment bounded by neighbouring crossings.
@@ -1202,6 +1239,19 @@ private:
   // false if `id` isn't a line.
   bool TrimBracket(uint32_t id, glm::dvec2 clickUV, glm::dvec2& a,
                    glm::dvec2& ab, double& tLo, double& tHi) const;
+  // Trim's split of a line: piece 2 (returned) is P -> the far end, which
+  // takes the far end's refs and copies of the line's H/V/parallel/
+  // perpendicular, joined to piece 1 by a coincident. 0 at an end.
+  uint32_t SplitLineForTrim(uint32_t id, glm::dvec2 P);
+  // SplitEntity's work, the cuts already on the curve. `trim`: no joints, no
+  // refusals of what two pieces cannot keep (Trim deletes a piece next).
+  std::vector<uint32_t> SplitAt(uint32_t id, const std::vector<glm::dvec2>& at,
+                                const std::vector<uint32_t>& crossing,
+                                bool trim);
+  // Drops every constraint naming end `which` of `id` in a point slot, and
+  // a tangent or curvature joined there; coincidences chained through the
+  // end are kept between the others (DeleteEntity's repair).
+  void DropEndRefs(uint32_t id, uint8_t which);
 };
 
 // Resolves a face ElementRef to a work plane (planar faces only): shared by

@@ -1885,6 +1885,7 @@ TEST_CASE("a toolbar glyph means one thing and a feature has one glyph",
       {"part.mirror", "sketch.mirror"},
       {"part.pattern", "sketch.pattern", "drawing.dim_pattern_callout"},
       {"part.fillet", "sketch.fillet", "job.edge"},
+      {"part.split", "sketch.split"},                 // cut in two
       {"view.toggle_planes", "sketch.toggle_glyphs"}, // show or hide
       {"assembly.insert", "drawing.add_view"},        // put a thing in
       {"sim.run", "job.simulate"},                    // run it

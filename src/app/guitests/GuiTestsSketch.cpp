@@ -1,9 +1,11 @@
 // SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+#include "app/GuiTests.h" // GuiTestCaptureDir
 #include "app/guitests/GuiTestsCommon.h"
 #include "common/ChildProcess.h"
 #include "core/sketch/SketchOrientation.h"
+#include "core/sketch/SketchSplit.h"
 #include "render/UnderlayRenderer.h"
 #include "ui/BackgroundJobs.h"
 #include "ui/ImportActions.h"
@@ -26,6 +28,27 @@
 std::string SourceFixture(const std::string& rel) {
   return std::string(LOBOLE_SOURCE_DIR) + "/tests/fixtures/" + rel;
 }
+
+namespace {
+// The window as it stands, saved as `<name>.png` when the run was given
+// --capture-dir, for a person to look at (docs/ui/testing.md); nothing
+// otherwise.
+void GuiShot(ImGuiTestContext* ctx, const char* name) {
+  if (GuiTestCaptureDir().empty())
+    return;
+  ctx->Yield(2);
+  ctx->CaptureReset();
+  ImGuiCaptureArgs* args = ctx->CaptureArgs;
+  std::snprintf(args->InOutputFile, sizeof(args->InOutputFile), "%s/%s.png",
+                GuiTestCaptureDir().c_str(), name);
+  args->InPadding = 0.0f;
+  const ImGuiViewport* vp = ImGui::GetMainViewport();
+  args->InCaptureRect =
+      ImRect(vp->Pos, ImVec2(vp->Pos.x + vp->Size.x, vp->Pos.y + vp->Size.y));
+  IM_CHECK(ctx->CaptureScreenshot(ImGuiCaptureFlags_IncludeOtherWindows |
+                                  ImGuiCaptureFlags_IncludePopups));
+}
+} // namespace
 
 void RegisterSketchGuiTests(ImGuiTestEngine* engine) {
   ImGuiTest* t = nullptr;
@@ -499,6 +522,238 @@ void RegisterSketchGuiTests(ImGuiTestEngine* engine) {
     sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
     IM_CHECK_EQ(sk->entities.size(), (size_t)4);
     IM_CHECK(sk->IndexOfEntity(h) != SIZE_MAX); // piece 1 kept the id
+  };
+
+  // docs/sketching/README.md#split, the owner's use: a line with a circle
+  // drawn over it is split at both crossings and the piece inside is made
+  // construction. The sketch stays solved at the same DOF, the outer pieces
+  // stay collinear with the inner one, and the cut built from the sketch
+  // still builds, to the same volume. Each click is one undo step.
+  t = IM_REGISTER_TEST(engine, "split", "line_over_circle_inner_construction");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    using K = sketch::ConstraintKind;
+    Doc()->AddFeature(std::make_unique<BoxFeature>(
+        "Plate", glm::dvec3(-4, -4, -1), 8.0, 8.0, 1.3));
+    auto own =
+        std::make_unique<SketchFeature>("Profile", SketchPlane(PlaneType::XY));
+    const uint32_t line = own->AddEntity(sketch::Line{{-3, 0}, {3, 0}});
+    const uint32_t circle = own->AddEntity(sketch::Circle{{0, 0}, 1.5});
+    own->constraints.push_back({K::Horizontal, {line, 0}, {0, 0}, 0.0});
+    Doc()->AddFeature(std::move(own));
+    const uint64_t skId = Doc()->GetFeature(1)->GetId();
+    Doc()->AddFeature(
+        std::make_unique<ExtrudeFeature>("Cut", skId, 0.5, ExtrudeMode::Cut));
+    Doc()->Regenerate();
+    IM_CHECK(Doc()->GetFeature(2)->GetError().empty());
+    IM_CHECK_EQ(Doc()->GetBodies().size(), (size_t)1);
+    const double volume = Doc()->GetBodies()[0].shape.Volume();
+    IM_CHECK_LT(volume, 8.0 * 8.0 * 1.3 - 1.0); // the disc is cut out
+    const nlohmann::json original =
+        DocumentIO::FeatureToJson(*Doc()->GetFeature(1));
+
+    s_App->sketchEdit = ui::SketchEditState{};
+    s_App->sketchEdit.activeSketchId = skId;
+    ctx->Yield(2);
+    for (int i = 0; i < 600 && s_App->camera->IsAnimating(); i++)
+      ctx->Yield();
+    s_App->camera->StopAnimation();
+    s_App->camera->SetTarget(glm::vec3(0.0f));
+    s_App->camera->SetUp(glm::vec3(0.0f, 1.0f, 0.0f));
+    s_App->camera->SetPosition(glm::vec3(0.0f, 0.0f, 10.0f));
+    ctx->Yield(2);
+    const auto sketchNow = [] {
+      return dynamic_cast<SketchFeature*>(Doc()->GetFeature(1));
+    };
+    const auto at = [&](glm::vec2 uv) {
+      const glm::vec2 p = ui::SketchUVToScreen(*s_App, sketchNow()->plane, uv);
+      return ImVec2(p.x, p.y);
+    };
+    const int dof0 = s_App->sketchEdit.dof;
+
+    // K arms Split (docs/ui/keybindings.md).
+    ctx->KeyPress(ImGuiKey_K);
+    ctx->Yield();
+    IM_CHECK(s_App->sketchEdit.tool == ui::SketchTool::Split);
+
+    // Hovering the line near the crossing snaps to it and previews the two
+    // pieces. Along the line: where two curves cross, the one nearer the
+    // cursor is the one cut.
+    const size_t undo0 = s_App->commands->UndoDepth();
+    for (const float x : {-1.5f, 1.5f}) {
+      ctx->MouseMoveToPos(at({x + 0.06f, 0.0f}));
+      ctx->Yield(2);
+      const ui::SketchEditState& e = s_App->sketchEdit;
+      IM_CHECK(e.hasSplitPreview);
+      IM_CHECK_EQ(e.splitPreviewCuts.size(), (size_t)1);
+      IM_CHECK_LT(glm::length(e.splitPreviewCuts[0] - glm::dvec2(x, 0.0)),
+                  1e-9);
+      IM_CHECK_EQ(e.splitPreviewPieces.size(), (size_t)2);
+      if (x < 0.0f)
+        GuiShot(ctx, "split_hover_crossing");
+      ctx->MouseClick(ImGuiMouseButton_Left);
+      ctx->Yield(2);
+    }
+    IM_CHECK_EQ(s_App->commands->UndoDepth(), undo0 + 2);
+    IM_CHECK(s_App->sketchEdit.tool == ui::SketchTool::Split); // still on
+    SketchFeature* sk = sketchNow();
+    IM_CHECK_EQ(sk->entities.size(), (size_t)4);   // three pieces + circle
+    IM_CHECK(sk->IndexOfEntity(line) != SIZE_MAX); // piece 1 kept the id
+    IM_CHECK_EQ(s_App->sketchEdit.dof, dof0);
+
+    // A tap in empty space finishes; then select the inner piece, Q.
+    ctx->MouseMoveToPos(at({2.5f, 2.5f}));
+    ctx->MouseClick(ImGuiMouseButton_Left);
+    ctx->Yield();
+    IM_CHECK(s_App->sketchEdit.tool == ui::SketchTool::Select);
+    ctx->MouseMoveToPos(at({0.8f, 0.0f}));
+    ctx->MouseClick(ImGuiMouseButton_Left);
+    ctx->Yield();
+    IM_CHECK_EQ(s_App->sketchEdit.selected.size(), (size_t)1);
+    const uint32_t inner = s_App->sketchEdit.selected[0].entity;
+    ctx->KeyPress(ImGuiKey_Q);
+    ctx->Yield(2);
+    sk = sketchNow();
+    const sketch::Entity& in = sk->entities[sk->IndexOfEntity(inner)];
+    IM_CHECK(sketch::IsConstruction(in));
+    const auto& il = std::get<sketch::Line>(in);
+    IM_CHECK_LT(glm::length(il.a - glm::dvec2(-1.5, 0)) +
+                    glm::length(il.b - glm::dvec2(1.5, 0)),
+                1e-9);
+    // Solved, and every piece still on y = 0.
+    sketch::Solver solver;
+    solver.Load(*sk);
+    const sketch::SolveResult r = solver.Solve();
+    IM_CHECK(r.ok);
+    IM_CHECK(r.conflictingConstraints.empty());
+    IM_CHECK(r.redundantConstraints.empty());
+    IM_CHECK_EQ(r.dof, dof0);
+    for (const sketch::Entity& e : sk->entities)
+      if (const auto* l = std::get_if<sketch::Line>(&e)) {
+        IM_CHECK_LT(std::abs(l->a.y), 1e-9);
+        IM_CHECK_LT(std::abs(l->b.y), 1e-9);
+      }
+    s_App->sketchEdit.selected.clear();
+    ctx->MouseMoveToPos(at({2.5f, 2.5f}));
+    ctx->Yield(2);
+    GuiShot(ctx, "split_inner_construction");
+
+    // The cut still builds, the same disc.
+    s_App->sketchEdit = ui::SketchEditState{};
+    ctx->Yield(2);
+    Doc()->Regenerate();
+    IM_CHECK(Doc()->GetFeature(1)->GetError().empty());
+    IM_CHECK(Doc()->GetFeature(2)->GetError().empty());
+    IM_CHECK_EQ(Doc()->GetBodies().size(), (size_t)1);
+    IM_CHECK_LT(std::abs(Doc()->GetBodies()[0].shape.Volume() - volume), 1e-6);
+
+    // Three undo steps (two cuts, the construction) put the sketch back.
+    for (int i = 0; i < 3; i++)
+      ui::GlobalUndo(*s_App);
+    ctx->Yield();
+    IM_CHECK(DocumentIO::FeatureToJson(*Doc()->GetFeature(1)) == original);
+  };
+
+  // A circle takes two cuts: the first is held (Step 1/2 -> 2/2), Escape
+  // drops it and keeps the tool, and the second click makes two arcs that
+  // join at both cuts, the DOF unchanged at the crossings.
+  t = IM_REGISTER_TEST(engine, "split", "circle_takes_two_clicks");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    EnterSketchOnPlane(ctx, 0);
+    for (int i = 0; i < 600 && s_App->camera->IsAnimating(); i++)
+      ctx->Yield();
+    s_App->camera->StopAnimation();
+    s_App->camera->SetTarget(glm::vec3(0.0f));
+    s_App->camera->SetUp(glm::vec3(0.0f, 1.0f, 0.0f));
+    s_App->camera->SetPosition(glm::vec3(0.0f, 0.0f, 10.0f));
+    ctx->Yield(2);
+    auto* sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    IM_CHECK(sk != nullptr);
+    nlohmann::json before = DocumentIO::FeatureToJson(*sk);
+    const uint32_t circle = sk->AddEntity(sketch::Circle{{0, 0}, 1.5});
+    sk->AddEntity(sketch::Line{{-3, 0.5}, {3, 0.5}});
+    nlohmann::json after = DocumentIO::FeatureToJson(*sk);
+    s_App->commands->Execute(
+        std::make_unique<ModifyFeatureCommand>(0, before, after), *Doc());
+    ctx->Yield(2);
+    const int dof0 = s_App->sketchEdit.dof;
+    const auto at = [&](glm::vec2 uv) {
+      const glm::vec2 p = ui::SketchUVToScreen(
+          *s_App, dynamic_cast<SketchFeature*>(Doc()->GetFeature(0))->plane,
+          uv);
+      return ImVec2(p.x, p.y);
+    };
+    ui::RunCommand(*s_App, "sketch.split");
+    ctx->Yield();
+    const float x = std::sqrt(1.5f * 1.5f - 0.25f);
+    ctx->MouseMoveToPos(at({x, 0.55f}));
+    ctx->Yield(2);
+    IM_CHECK(s_App->sketchEdit.splitPreviewClosed);
+    IM_CHECK_EQ(
+        ui::SketchToolPrompt(s_App->sketchEdit, s_App->ActiveUnits()).step, 1);
+    ctx->MouseClick(ImGuiMouseButton_Left);
+    ctx->Yield();
+    IM_CHECK_EQ(s_App->sketchEdit.splitCircle, circle);
+    IM_CHECK_EQ(
+        ui::SketchToolPrompt(s_App->sketchEdit, s_App->ActiveUnits()).step, 2);
+    // Escape drops the held cut; the tool stays.
+    ctx->KeyPress(ImGuiKey_Escape);
+    ctx->Yield();
+    IM_CHECK_EQ(s_App->sketchEdit.splitCircle, 0u);
+    IM_CHECK(s_App->sketchEdit.tool == ui::SketchTool::Split);
+    ctx->MouseMoveToPos(at({x, 0.55f}));
+    ctx->MouseClick(ImGuiMouseButton_Left);
+    ctx->Yield();
+    ctx->MouseMoveToPos(at({-x, 0.45f}));
+    ctx->Yield(2);
+    IM_CHECK_EQ(s_App->sketchEdit.splitPreviewPieces.size(), (size_t)2);
+    ctx->MouseClick(ImGuiMouseButton_Left);
+    ctx->Yield(2);
+    sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    int arcs = 0;
+    for (const sketch::Entity& e : sk->entities)
+      arcs += std::holds_alternative<sketch::Arc>(e) ? 1 : 0;
+    IM_CHECK_EQ(arcs, 2);
+    IM_CHECK_EQ(s_App->sketchEdit.splitCircle, 0u);
+    IM_CHECK_EQ(s_App->sketchEdit.dof, dof0);
+  };
+
+  // A refusal changes nothing and says why, prefixed as Fillet's are.
+  t = IM_REGISTER_TEST(engine, "split", "refusal_says_why");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    EnterSketchOnPlane(ctx, 0);
+    for (int i = 0; i < 600 && s_App->camera->IsAnimating(); i++)
+      ctx->Yield();
+    s_App->camera->StopAnimation();
+    s_App->camera->SetTarget(glm::vec3(0.0f));
+    s_App->camera->SetUp(glm::vec3(0.0f, 1.0f, 0.0f));
+    s_App->camera->SetPosition(glm::vec3(0.0f, 0.0f, 10.0f));
+    ctx->Yield(2);
+    auto* sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    IM_CHECK(sk != nullptr);
+    nlohmann::json before = DocumentIO::FeatureToJson(*sk);
+    sk->AddEntity(sketch::BSpline{{{-2, 0}, {-1, 1}, {1, -1}, {2, 0}}});
+    nlohmann::json after = DocumentIO::FeatureToJson(*sk);
+    s_App->commands->Execute(
+        std::make_unique<ModifyFeatureCommand>(0, before, after), *Doc());
+    ctx->Yield(2);
+    sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    const glm::dvec2 on =
+        sketch::BSplineEvalUV(std::get<sketch::BSpline>(sk->entities[0]), 0.5);
+    const nlohmann::json held = DocumentIO::FeatureToJson(*sk);
+    ui::RunCommand(*s_App, "sketch.split");
+    ctx->Yield();
+    const glm::vec2 p = ui::SketchUVToScreen(*s_App, sk->plane, glm::vec2(on));
+    ctx->MouseMoveToPos(ImVec2(p.x, p.y));
+    ctx->MouseClick(ImGuiMouseButton_Left);
+    ctx->Yield();
+    IM_CHECK(s_App->sketchEdit.actionMsg.rfind("Not split: spline", 0) == 0);
+    IM_CHECK(s_App->sketchEdit.actionMsg.find("a spline is not split yet") !=
+             std::string::npos);
+    IM_CHECK(s_App->sketchEdit.tool == ui::SketchTool::Split);
+    IM_CHECK(DocumentIO::FeatureToJson(*Doc()->GetFeature(0)) == held);
   };
 
   // Hovering (no click) with the Trim tool computes the preview span for the

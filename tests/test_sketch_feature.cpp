@@ -15,6 +15,7 @@
 #include "core/sketch/SketchFillet.h"
 #include "core/sketch/SketchProfile.h"
 #include "core/sketch/SketchSolver.h"
+#include "core/sketch/SketchSplit.h"
 
 #include <nlohmann/json.hpp>
 
@@ -760,8 +761,10 @@ TEST_CASE("SplitEntity splits a line and transfers its constraints",
   sk.constraints.push_back(
       {K::Distance, {l0, 0}, {l0, 1}, 4.0}); // whole length
 
-  uint32_t l2 = sk.SplitEntity(l0, {2, 0});
-  REQUIRE(l2 != 0);
+  const std::vector<uint32_t> ids = sk.SplitEntity(l0, {{{2, 0}}});
+  REQUIRE(ids.size() == 2);
+  CHECK(ids[0] == l0); // piece 1 keeps the id
+  const uint32_t l2 = ids[1];
   REQUIRE(sk.entities.size() == 3);
 
   auto& p1 = std::get<sketch::Line>(sk.entities[sk.IndexOfEntity(l0)]);
@@ -796,7 +799,9 @@ TEST_CASE("SplitEntity splits a line and transfers its constraints",
     }
   }
   CHECK(coincident == 2); // transferred far join + new cut join
-  CHECK(horizontal == 2); // original on l0 + copy on l2
+  CHECK(horizontal == 2); // original on l0 + copy on l2 (no parallel then)
+  for (const auto& c : sk.constraints)
+    CHECK(c.kind != K::Parallel);
   CHECK(distance == 1);
   CHECK(spanDistance);
   CHECK(farJoinMoved);
@@ -951,15 +956,53 @@ TEST_CASE("TrimLineAt with no crossings deletes the whole line", "[sketch]") {
   CHECK(sk.entities.size() == 1); // only the parallel line remains
 }
 
-TEST_CASE("SplitEntity rejects a non-line or a degenerate cut", "[sketch]") {
+TEST_CASE("SplitEntity refuses, naming why, and changes nothing",
+          "[sketch][split]") {
+  using K = sketch::ConstraintKind;
   SketchFeature sk("S", SketchPlane(PlaneType::XY));
-  uint32_t c0 = sk.AddEntity(sketch::Circle{{0, 0}, 1.0});
-  uint32_t l0 = sk.AddEntity(sketch::Line{{0, 0}, {4, 0}});
-  CHECK(sk.SplitEntity(c0, {1, 0}) == 0);  // not a line
-  CHECK(sk.SplitEntity(l0, {0, 0}) == 0);  // at endpoint a
-  CHECK(sk.SplitEntity(l0, {4, 0}) == 0);  // at endpoint b
-  CHECK(sk.SplitEntity(999, {2, 0}) == 0); // unknown id
-  CHECK(sk.entities.size() == 2);          // nothing added
+  const uint32_t c0 = sk.AddEntity(sketch::Circle{{0, 0}, 1.0});
+  const uint32_t l0 = sk.AddEntity(sketch::Line{{0, 0}, {4, 0}});
+  const uint32_t l1 = sk.AddEntity(sketch::Line{{0, 3}, {4, 3}});
+  const uint32_t a0 = sk.AddEntity(sketch::Arc{{10, 0}, 2.0, 0.0, M_PI});
+  const uint32_t sp =
+      sk.AddEntity(sketch::BSpline{{{10, 5}, {12, 8}, {14, 3}, {16, 5}}});
+  const uint32_t el = sk.AddEntity(sketch::Ellipse{{20, 0}, 3.0, 2.0, 0.0});
+  const uint32_t ea =
+      sk.AddEntity(sketch::EllipseArc{{30, 0}, 3.0, 2.0, 0.0, 0.0, M_PI});
+  const uint32_t pt = sk.AddEntity(sketch::Point{{1, 1}});
+  const uint32_t eqA = sk.AddEntity(sketch::Line{{0, 6}, {4, 6}});
+  const uint32_t eqB = sk.AddEntity(sketch::Line{{0, 7}, {4, 7}});
+  sk.constraints.push_back({K::Equal, {eqA, 0}, {eqB, 0}, 0.0});
+  sketch::Constraint len{K::ArcLength, {a0, 0}, {0, 0}, M_PI * 2.0};
+  sk.constraints.push_back(len);
+  const nlohmann::json before = DocumentIO::FeatureToJson(sk);
+  const auto why = [&](uint32_t id,
+                       const std::vector<SketchFeature::SplitCut>& cuts) {
+    std::string w;
+    CHECK(sk.SplitEntity(id, cuts, &w).empty());
+    CHECK(DocumentIO::FeatureToJson(sk) == before);
+    return w;
+  };
+  const auto has = [](const std::string& w, const std::string& needle) {
+    INFO(w);
+    return w.find(needle) != std::string::npos;
+  };
+  CHECK(has(why(999, {{{2, 0}}}), "no sketch entity with id 999"));
+  CHECK(has(why(l0, {{{0, 0}}}), "at an end of line"));
+  CHECK(has(why(l0, {{{4, 0}}}), "at an end of line"));
+  CHECK(has(why(l0, {{{2, 1}}}), "more than a hundredth of its length"));
+  CHECK(has(why(l0, {{{2, 0}, l1}}), "does not cross line"));
+  CHECK(has(why(l0, {{{2, 0}, l0}}), "cannot cross itself"));
+  CHECK(has(why(l0, {{{1, 0}}, {{3, 0}}}), "takes one cut"));
+  CHECK(has(why(c0, {{{1, 0}}}), "takes two cuts"));
+  CHECK(has(why(c0, {{{1, 0}}, {{1, 0}}}), "are at one point"));
+  CHECK(has(why(sp, {{{12, 6}}}), "a spline is not split yet"));
+  CHECK(has(why(el, {{{23, 0}}, {{17, 0}}}), "an ellipse is not split yet"));
+  CHECK(has(why(ea, {{{33, 0}}}), "an elliptical arc is not split yet"));
+  CHECK(has(why(sp, {{{12, 6}}}), "Split takes lines, arcs and circles"));
+  CHECK(has(why(pt, {{{1, 1}}}), "a point, which has no curve to split"));
+  CHECK(has(why(eqA, {{{2, 6}}}), "carries an equal length (constraint 0)"));
+  CHECK(has(why(a0, {{{10, 2}}}), "carries an arc length (constraint 1)"));
 }
 
 TEST_CASE("Entity ids stay stable across insert and delete", "[sketch]") {
@@ -1531,4 +1574,427 @@ TEST_CASE("CornerAt refuses one curve, a wide side and a straight run",
   const auto straight = sketch::CornerAt(run, {0, 0}, {1, 1}, 0.1);
   REQUIRE(!straight);
   CHECK(straight.error().find("continue each other") != std::string::npos);
+}
+
+// The Trim tool's click refused only a linked pattern's or mirror's
+// instances: a projected or section line went through, and the next
+// regeneration re-stamped it from the model. The core refuses every
+// generated entity now (SketchFeature::GeneratedBy), so the RPC path and
+// the click cannot differ.
+TEST_CASE("Trim refuses a projected or section entity, changing nothing",
+          "[sketch][trim]") {
+  for (const auto kind :
+       {sketch::ExternalKind::Face, sketch::ExternalKind::Section}) {
+    SketchFeature sk("S", SketchPlane(PlaneType::XY));
+    const uint32_t line = sk.AddEntity(sketch::Line{{0, 0}, {6, 0}});
+    const uint32_t circle = sk.AddEntity(sketch::Circle{{3, 0}, 2.0});
+    sk.AddEntity(sketch::Line{{2, -1}, {2, 1}});
+    sk.AddEntity(sketch::Line{{4, -1}, {4, 1}});
+    sketch::ExternalGeom ex;
+    ex.ref = ElementRef{7, "2/cap0"};
+    ex.kind = kind;
+    ex.genIds = {line, circle};
+    sk.external.push_back(ex);
+    const nlohmann::json before = DocumentIO::FeatureToJson(sk);
+    CHECK_FALSE(sk.TrimLineAt(line, {3, 0}));
+    CHECK_FALSE(sk.TrimCurveAt(circle, {3, 2}));
+    CHECK(DocumentIO::FeatureToJson(sk) == before);
+  }
+}
+
+// --- Split (docs/sketching/README.md#split) ---------------------------------
+
+namespace {
+
+int SolvedDof(SketchFeature& sk) {
+  sketch::Solver s;
+  s.Load(sk);
+  const sketch::SolveResult r = s.Solve();
+  REQUIRE(r.ok);
+  CHECK(r.conflictingConstraints.empty());
+  CHECK(r.redundantConstraints.empty());
+  s.WriteBack(sk.entities);
+  return r.dof;
+}
+
+// Every point of `piece` lies on `curve` (a line's line or an arc's circle).
+double OffCurve(const sketch::Entity& piece, const sketch::Entity& curve) {
+  double worst = 0.0;
+  for (const glm::dvec2& p : sketch::TessellateEntity(piece)) {
+    if (const auto* l = std::get_if<sketch::Line>(&curve)) {
+      const glm::dvec2 d = glm::normalize(l->b - l->a), q = p - l->a;
+      worst = std::max(worst, std::abs(q.x * d.y - q.y * d.x));
+    } else {
+      const glm::dvec2 c = std::holds_alternative<sketch::Circle>(curve)
+                               ? std::get<sketch::Circle>(curve).center
+                               : std::get<sketch::Arc>(curve).center;
+      const double r = std::holds_alternative<sketch::Circle>(curve)
+                           ? std::get<sketch::Circle>(curve).radius
+                           : std::get<sketch::Arc>(curve).radius;
+      worst = std::max(worst, std::abs(glm::length(p - c) - r));
+    }
+  }
+  return worst;
+}
+
+bool SameGeometry(const std::vector<sketch::Entity>& a,
+                  const std::vector<sketch::Entity>& b, double tol) {
+  if (a.size() != b.size())
+    return false;
+  for (size_t i = 0; i < a.size(); i++) {
+    const auto pa = sketch::TessellateEntity(a[i]);
+    const auto pb = sketch::TessellateEntity(b[i]);
+    if (pa.size() != pb.size())
+      return false;
+    for (size_t k = 0; k < pa.size(); k++)
+      if (glm::length(pa[k] - pb[k]) > tol)
+        return false;
+  }
+  return true;
+}
+
+// The whole check of one split: two pieces, the first keeping the id, each
+// on the original curve and together as long as it; the sketch solving
+// clean at the DOF it had plus `dofUp`, and nothing moving in the solve;
+// either piece made construction leaving the other where it was; and the
+// ids the same after a round trip through the file.
+void CheckSplit(SketchFeature& sk, uint32_t id,
+                const std::vector<SketchFeature::SplitCut>& cuts, int dofUp) {
+  const int dof0 = SolvedDof(sk);
+  const sketch::Entity original = sk.entities[sk.IndexOfEntity(id)];
+  std::string why;
+  const std::vector<uint32_t> ids = sk.SplitEntity(id, cuts, &why);
+  INFO(why);
+  REQUIRE(ids.size() == 2);
+  CHECK(ids[0] == id);
+  double length = 0.0;
+  for (uint32_t p : ids) {
+    const sketch::Entity& e = sk.entities[sk.IndexOfEntity(p)];
+    CHECK(OffCurve(e, original) < 1e-9);
+    length += sketch::CurveLength(e);
+  }
+  CHECK_THAT(length, WithinAbs(sketch::CurveLength(original), 1e-9));
+  const std::vector<sketch::Entity> cut = sk.entities;
+  CHECK(SolvedDof(sk) == dof0 + dofUp);
+  CHECK(SameGeometry(sk.entities, cut, 1e-9));
+  for (uint32_t p : ids) {
+    SketchFeature c = sk;
+    sketch::SetConstruction(c.entities[c.IndexOfEntity(p)], true);
+    SolvedDof(c);
+    CHECK(SameGeometry(c.entities, cut, 1e-9));
+  }
+  const nlohmann::json j = DocumentIO::FeatureToJson(sk);
+  const auto back = DocumentIO::FeatureFromJson(j);
+  const auto* sk2 = dynamic_cast<const SketchFeature*>(back.get());
+  REQUIRE(sk2 != nullptr);
+  for (uint32_t p : ids)
+    CHECK(sk2->IndexOfEntity(p) != SIZE_MAX);
+}
+
+} // namespace
+
+TEST_CASE("Split a line at a crossing and at a free point", "[sketch][split]") {
+  for (const bool crossing : {true, false}) {
+    INFO((crossing ? "at the crossing" : "free"));
+    SketchFeature sk("S", SketchPlane(PlaneType::XY));
+    const uint32_t l = sk.AddEntity(sketch::Line{{0, 0}, {10, 4}});
+    const uint32_t c = sk.AddEntity(sketch::Line{{5, -3}, {6, 9}});
+    sk.constraints.push_back({FK::Distance, {l, 0}, {l, 1}, std::hypot(10, 4)});
+    if (crossing)
+      CheckSplit(sk, l, {{{5.3, 2.0}, c}}, 0);
+    else
+      CheckSplit(sk, l, {{{3.0, 1.2}}}, 1);
+    // Collinear: piece 2 parallel to piece 1, the whole-edge distance
+    // spanning both.
+    bool parallel = false, spans = false;
+    for (const auto& k : sk.constraints) {
+      parallel |= k.kind == FK::Parallel;
+      spans |= k.kind == FK::Distance && k.a.entity == l && k.b.entity != l;
+    }
+    CHECK(parallel);
+    CHECK(spans);
+  }
+}
+
+TEST_CASE("Split an arc at a crossing and at a free point",
+          "[sketch][split][arc]") {
+  for (const bool crossing : {true, false}) {
+    INFO((crossing ? "at the crossing" : "free"));
+    SketchFeature sk("S", SketchPlane(PlaneType::XY));
+    const uint32_t a = sk.AddEntity(sketch::Arc{{0, 0}, 5.0, 0.0, M_PI});
+    const uint32_t c = sk.AddEntity(sketch::Line{{1, -1}, {-1, 8}});
+    const uint32_t far = sk.AddEntity(sketch::Line{{-5, 0}, {-5, -4}});
+    Join(sk, a, 2, far, 0); // the far end's coincident goes with piece 2
+    sketch::Constraint r{FK::Radius, {a, 0}, {0, 0}, 5.0};
+    sk.constraints.push_back(r);
+    if (crossing)
+      CheckSplit(sk, a, {{{0.2, 4.9}, c}}, 0);
+    else
+      CheckSplit(sk, a, {{{3.5, 3.5}}}, 1);
+    bool moved = false;
+    for (const auto& k : sk.constraints)
+      moved |= k.kind == FK::Coincident && k.b.entity == far &&
+               k.a.entity != a && k.a.which == 2;
+    CHECK(moved);
+  }
+}
+
+TEST_CASE("Split a circle at two crossings and at two free points",
+          "[sketch][split][arc]") {
+  for (const bool crossing : {true, false}) {
+    INFO((crossing ? "at the crossings" : "free"));
+    SketchFeature sk("S", SketchPlane(PlaneType::XY));
+    const uint32_t c = sk.AddEntity(sketch::Circle{{0, 0}, 5.0});
+    const uint32_t l = sk.AddEntity(sketch::Line{{-8, 1}, {8, 1}});
+    sk.constraints.push_back({FK::Diameter, {c, 0}, {0, 0}, 10.0});
+    if (crossing)
+      CheckSplit(sk, c, {{{4.9, 1.0}, l}, {{-4.9, 1.0}, l}}, 0);
+    else
+      CheckSplit(sk, c, {{{4, -3}}, {{-3, 4}}}, 2);
+    // Both pieces are arcs now, the first from the first cut CCW.
+    const auto& p1 = std::get<sketch::Arc>(sk.entities[sk.IndexOfEntity(c)]);
+    const glm::dvec2 start = sketch::ArcPointUV(p1, 1);
+    CHECK(glm::length(start - (crossing ? glm::dvec2(std::sqrt(24.0), 1.0)
+                                        : glm::dvec2(4, -3))) < 1e-9);
+  }
+}
+
+TEST_CASE("The owner's line over a circle: split at both crossings",
+          "[sketch][split]") {
+  SketchFeature sk("S", SketchPlane(PlaneType::XY));
+  const uint32_t l = sk.AddEntity(sketch::Line{{-10, 0}, {10, 0}});
+  const uint32_t c = sk.AddEntity(sketch::Circle{{0, 0}, 4.0});
+  sk.constraints.push_back({FK::Horizontal, {l, 0}, {0, 0}, 0.0});
+  const int dof0 = SolvedDof(sk);
+  const auto first = sk.SplitEntity(l, {{{-4, 0}, c}});
+  REQUIRE(first.size() == 2);
+  const auto second = sk.SplitEntity(first[1], {{{4, 0}, c}});
+  REQUIRE(second.size() == 2);
+  const uint32_t inner = second[0];
+  const std::vector<sketch::Entity> cut = sk.entities;
+  CHECK(SolvedDof(sk) == dof0);
+  CHECK(SameGeometry(sk.entities, cut, 1e-9));
+  // Every piece horizontal (each carries the H the line did).
+  int h = 0;
+  for (const auto& k : sk.constraints)
+    h += k.kind == FK::Horizontal && k.b.entity == 0;
+  CHECK(h == 3);
+  sketch::SetConstruction(sk.entities[sk.IndexOfEntity(inner)], true);
+  CHECK(SolvedDof(sk) == dof0);
+  CHECK(SameGeometry(sk.entities, cut, 1e-9));
+}
+
+TEST_CASE("Split carries a midpoint as a symmetric of the outer ends",
+          "[sketch][split]") {
+  SketchFeature sk("S", SketchPlane(PlaneType::XY));
+  const uint32_t l = sk.AddEntity(sketch::Line{{0, 0}, {8, 0}});
+  const uint32_t m = sk.AddEntity(sketch::Point{{4, 0}});
+  sk.constraints.push_back({FK::Midpoint, {m, 0}, {l, 0}, 0.0});
+  CheckSplit(sk, l, {{{2, 0}}}, 1);
+  bool symmetric = false;
+  for (const auto& k : sk.constraints) {
+    CHECK(k.kind != FK::Midpoint);
+    if (k.kind == FK::Symmetric && k.c.entity == m) {
+      symmetric = true;
+      CHECK(k.a.entity == l);
+      CHECK(k.a.which == 0);
+      CHECK(k.b.which == 1);
+      CHECK(k.b.entity != l);
+    }
+  }
+  CHECK(symmetric);
+  // Still the middle: drag the far end out and the point follows.
+  const size_t far = sk.IndexOfEntity(sk.constraints.back().b.entity);
+  std::get<sketch::Line>(sk.entities[far]).b = {12, 0};
+  SolvedDof(sk);
+  const auto& p = std::get<sketch::Point>(sk.entities[sk.IndexOfEntity(m)]);
+  const auto& a = std::get<sketch::Line>(sk.entities[sk.IndexOfEntity(l)]);
+  const auto& b = std::get<sketch::Line>(sk.entities[far]);
+  CHECK(glm::length(p.p - 0.5 * (a.a + b.b)) < 1e-9);
+}
+
+TEST_CASE("Split at another curve's end joins it there, in place of the "
+          "point-on-line",
+          "[sketch][split]") {
+  SketchFeature sk("S", SketchPlane(PlaneType::XY));
+  const uint32_t bar = sk.AddEntity(sketch::Line{{0, 0}, {10, 0}});
+  const uint32_t stem = sk.AddEntity(sketch::Line{{4, 0}, {4, 5}});
+  sk.constraints.push_back({FK::PointOnLine, {stem, 0}, {bar, 0}, 0.0});
+  // Offered as a crossing too: the end wins.
+  CheckSplit(sk, bar, {{{4, 0}, stem}}, 0);
+  int onLine = 0;
+  bool joined = false;
+  for (const auto& k : sk.constraints) {
+    onLine += k.kind == FK::PointOnLine;
+    joined |= k.kind == FK::Coincident && k.b.entity == stem &&
+              k.b.which == 0 && k.a.entity == bar && k.a.which == 1;
+  }
+  CHECK(onLine == 0);
+  CHECK(joined);
+}
+
+TEST_CASE("Split moves a tangent joined at the far end to piece 2",
+          "[sketch][split]") {
+  SketchFeature sk("S", SketchPlane(PlaneType::XY));
+  const uint32_t l = sk.AddEntity(sketch::Line{{0, 0}, {10, 0}});
+  const uint32_t a = sk.AddEntity(sketch::Arc{{10, 3}, 3.0, -M_PI / 2, 0.0});
+  Join(sk, l, 1, a, 1);
+  sk.constraints.push_back({FK::Tangent, {l, 0}, {a, 0}, 0.0});
+  CheckSplit(sk, l, {{{4, 0}}}, 1);
+  for (const auto& k : sk.constraints)
+    if (k.kind == FK::Tangent)
+      CHECK((k.a.entity != l && k.b.entity == a));
+}
+
+TEST_CASE("Split refuses a generated curve", "[sketch][split]") {
+  SketchFeature sk("S", SketchPlane(PlaneType::XY));
+  const uint32_t l = sk.AddEntity(sketch::Line{{0, 0}, {4, 0}});
+  const auto copies = sk.AddLinearPattern({l}, {0, 5}, 2, true);
+  REQUIRE(copies.size() == 1);
+  const uint32_t proj = sk.AddEntity(sketch::Line{{0, 10}, {4, 10}});
+  sketch::ExternalGeom ex;
+  ex.ref = ElementRef{7, "2/cap0"};
+  ex.genIds = {proj};
+  sk.external.push_back(ex);
+  const nlohmann::json before = DocumentIO::FeatureToJson(sk);
+  std::string why;
+  CHECK(sk.SplitEntity(copies[0], {{{2, 5}}}, &why).empty());
+  CHECK(why.find("is generated by a linked pattern") != std::string::npos);
+  CHECK(sk.SplitEntity(proj, {{{2, 10}}}, &why).empty());
+  CHECK(why.find("is generated by a projection") != std::string::npos);
+  CHECK(DocumentIO::FeatureToJson(sk) == before);
+  // The source splits, and its pattern repeats both pieces.
+  const auto ids = sk.SplitEntity(l, {{{2, 0}}});
+  REQUIRE(ids.size() == 2);
+  CHECK(sk.derived[0].instances.size() == 2);
+}
+
+TEST_CASE("Split is one undo step, and undo restores the ids",
+          "[sketch][split]") {
+  Document doc;
+  auto own = std::make_unique<SketchFeature>("S", SketchPlane(PlaneType::XY));
+  const uint32_t l = own->AddEntity(sketch::Line{{0, 0}, {6, 0}});
+  doc.AddFeature(std::move(own));
+  auto* sk = dynamic_cast<SketchFeature*>(doc.GetFeature(0));
+  const nlohmann::json before = DocumentIO::FeatureToJson(*sk);
+  REQUIRE(sk->SplitEntity(l, {{{2, 0}}}).size() == 2);
+  const nlohmann::json after = DocumentIO::FeatureToJson(*sk);
+  CommandStack stack;
+  stack.Execute(std::make_unique<ModifyFeatureCommand>(0, before, after), doc);
+  sk = dynamic_cast<SketchFeature*>(doc.GetFeature(0));
+  CHECK(sk->entities.size() == 2);
+  stack.Undo(doc);
+  sk = dynamic_cast<SketchFeature*>(doc.GetFeature(0));
+  CHECK(DocumentIO::FeatureToJson(*sk) == before);
+  CHECK(sk->IndexOfEntity(l) != SIZE_MAX);
+  stack.Redo(doc);
+  sk = dynamic_cast<SketchFeature*>(doc.GetFeature(0));
+  CHECK(DocumentIO::FeatureToJson(*sk) == after);
+}
+
+TEST_CASE("A trimmed arc's far end keeps its coincident",
+          "[sketch][split][trim][arc]") {
+  // An arc from (5, 0) over the top to (-5, 0), its far end joined to a
+  // line; two lines cross its middle, which is trimmed out.
+  SketchFeature sk("S", SketchPlane(PlaneType::XY));
+  const uint32_t a = sk.AddEntity(sketch::Arc{{0, 0}, 5.0, 0.0, M_PI});
+  const uint32_t tail = sk.AddEntity(sketch::Line{{-5, 0}, {-5, -4}});
+  const uint32_t head = sk.AddEntity(sketch::Line{{5, 0}, {5, -4}});
+  Join(sk, a, 2, tail, 0);
+  Join(sk, a, 1, head, 0);
+  sk.AddEntity(sketch::Line{{-2, -1}, {-2, 8}});
+  sk.AddEntity(sketch::Line{{2, -1}, {2, 8}});
+  SolvedDof(sk);
+  REQUIRE(sk.TrimCurveAt(a, {0, 5}));
+  // Two arcs: the first keeps the id and the start's coincident, the second
+  // took the far end's.
+  uint32_t second = 0;
+  for (const auto& k : sk.constraints)
+    if (k.kind == FK::Coincident && k.b.entity == tail)
+      second = k.a.entity;
+  REQUIRE(second != 0);
+  CHECK(second != a);
+  REQUIRE(std::holds_alternative<sketch::Arc>(
+      sk.entities[sk.IndexOfEntity(second)]));
+  const std::vector<sketch::Entity> trimmed = sk.entities;
+  SolvedDof(sk);
+  CHECK(SameGeometry(sk.entities, trimmed, 1e-9));
+  const auto& far =
+      std::get<sketch::Arc>(sk.entities[sk.IndexOfEntity(second)]);
+  CHECK(glm::length(sketch::ArcPointUV(far, 2) - glm::dvec2(-5, 0)) < 1e-9);
+  const auto& near = std::get<sketch::Arc>(sk.entities[sk.IndexOfEntity(a)]);
+  CHECK(glm::length(sketch::ArcPointUV(near, 1) - glm::dvec2(5, 0)) < 1e-9);
+  // The survivors are not tied to each other.
+  for (const auto& k : sk.constraints)
+    CHECK(!(k.kind == FK::Concentric));
+}
+
+TEST_CASE("Trimming an arc's end drops that end's constraints",
+          "[sketch][trim][arc]") {
+  SketchFeature sk("S", SketchPlane(PlaneType::XY));
+  const uint32_t a = sk.AddEntity(sketch::Arc{{0, 0}, 5.0, 0.0, M_PI});
+  const uint32_t tail = sk.AddEntity(sketch::Line{{-5, 0}, {-5, -4}});
+  Join(sk, a, 2, tail, 0);
+  sk.AddEntity(sketch::Line{{-2, -1}, {-2, 8}});
+  SolvedDof(sk);
+  REQUIRE(sk.TrimCurveAt(a, {-4, 3})); // the span from the crossing to the end
+  for (const auto& k : sk.constraints)
+    CHECK(!(k.kind == FK::Coincident &&
+            (k.a.entity == tail || k.b.entity == tail)));
+  const std::vector<sketch::Entity> trimmed = sk.entities;
+  SolvedDof(sk);
+  CHECK(SameGeometry(sk.entities, trimmed, 1e-9)); // nothing pulls it back
+}
+
+TEST_CASE("Crossings finds where any curve crosses a line, arc or circle",
+          "[sketch][split]") {
+  const sketch::Entity line = sketch::Line{{-10, 0}, {10, 0}};
+  const auto near = [](const std::vector<glm::dvec2>& xs, glm::dvec2 p) {
+    for (const glm::dvec2& x : xs)
+      if (glm::length(x - p) < 1e-12)
+        return true;
+    return false;
+  };
+  const auto circle = sketch::Crossings(line, sketch::Circle{{0, 0}, 4.0});
+  CHECK(circle.size() == 2);
+  CHECK(near(circle, {4, 0}));
+  CHECK(near(circle, {-4, 0}));
+  CHECK(
+      sketch::Crossings(line, sketch::Ellipse{{0, 0}, 5.0, 2.0, 0.0}).size() ==
+      2);
+  const auto spline = sketch::Crossings(
+      line, sketch::BSpline{{{-6, -3}, {-2, 6}, {2, -6}, {6, 3}}});
+  CHECK(spline.size() == 3);
+  for (const glm::dvec2& x : spline)
+    CHECK(std::abs(x.y) < 1e-12);
+  // Off the arc's sweep, and past the line's end, no crossing.
+  CHECK(sketch::Crossings(sketch::Arc{{0, 0}, 4.0, 0.0, M_PI},
+                          sketch::Line{{-10, -1}, {10, -1}})
+            .empty());
+  CHECK(sketch::Crossings(line, sketch::Line{{20, -1}, {20, 1}}).empty());
+}
+TEST_CASE("A circle split at opposite points stays one circle",
+          "[sketch][split][arc]") {
+  // Cut where a line through the centre crosses it: the two arcs' joints
+  // are a diameter apart, where an equal radius would let the second arc
+  // flip over to the mirror circle.
+  SketchFeature sk("S", SketchPlane(PlaneType::XY));
+  const uint32_t c = sk.AddEntity(sketch::Circle{{0, 0}, 5.0});
+  const uint32_t l = sk.AddEntity(sketch::Line{{-8, 0}, {8, 0}});
+  CheckSplit(sk, c, {{{5, 0.1}, l}, {{-5, 0.1}, l}}, 0);
+  // Pull the second arc's centre away and solve: the joints bring it back
+  // onto the first arc's circle.
+  uint32_t other = 0;
+  for (const sketch::Entity& e : sk.entities)
+    if (std::holds_alternative<sketch::Arc>(e) && sketch::EntityId(e) != c)
+      other = sketch::EntityId(e);
+  REQUIRE(other != 0);
+  const auto ids = std::vector<uint32_t>{c, other};
+  auto& second = std::get<sketch::Arc>(sk.entities[sk.IndexOfEntity(ids[1])]);
+  second.center += glm::dvec2(0.3, 0.4);
+  SolvedDof(sk);
+  const auto& a1 = std::get<sketch::Arc>(sk.entities[sk.IndexOfEntity(c)]);
+  const auto& a2 = std::get<sketch::Arc>(sk.entities[sk.IndexOfEntity(ids[1])]);
+  CHECK(glm::length(a1.center - a2.center) < 1e-9);
+  CHECK(std::abs(a1.radius - a2.radius) < 1e-9);
 }

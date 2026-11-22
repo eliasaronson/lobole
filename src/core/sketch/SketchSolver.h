@@ -143,10 +143,13 @@ struct AddVerdict {
 };
 // The constraints of `sketch` that adding `c` makes unnecessary, to be taken
 // out as it goes in: a Midpoint says everything a PointOnLine of the same
-// point on the same line says. Left in, the solver reads the pair as
-// redundant and the Midpoint is refused as "already fixed" while the point
-// is still free to slide: a circle drawn with its centre snapped onto a line
-// could never be put on that line's middle. Indices ascending.
+// point on the same line says, and a Coincident of a point with a curve's
+// end everything a PointOnLine of that point on that curve says (a Split's
+// joint at another curve's end, docs/sketching/README.md#split). Left in, the
+// solver reads the pair as redundant and the Midpoint is refused as "already
+// fixed" while the point is still free to slide: a circle drawn with its centre
+// snapped onto a line could never be put on that line's middle. Indices
+// ascending.
 std::vector<size_t> SubsumedBy(const SketchFeature& sketch,
                                const Constraint& c);
 // `solved`, when given, is left loaded with `after` and solved, for the

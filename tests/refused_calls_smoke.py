@@ -349,6 +349,45 @@ def main():
                       needle=needle, tab=part["name"])
             d.call("delete_feature", feature_id=fil["id"])
 
+            # A sketch split (docs/sketching/README.md#split): every refusal
+            # read and checked before the first entity changes.
+            spl = d.call("add_feature", feature={
+                "type": "Sketch", "name": "Split probe",
+                "plane": {"origin": [0, 0, 700], "normal": [0, 0, 1],
+                          "uAxis": [1, 0, 0]},
+                "entities": [
+                    {"type": "line", "a": [0, 0], "b": [10, 0]},
+                    {"type": "circle", "center": [20, 0], "radius": 3},
+                    {"type": "spline",
+                     "poles": [[30, 0], [32, 3], [34, -2], [36, 0]]},
+                    {"type": "line", "a": [0, 5], "b": [10, 5]},
+                    {"type": "line", "a": [0, 8], "b": [10, 8]}]})
+            sl, sc, ssp, sfar, seq = spl["entity_ids"]
+            d.call("add_constraint", sketch_id=spl["id"], kind="equal",
+                   refs=[[sfar, 0], [seq, 0]])
+            for label, params, needle in [
+                    ("split at an end", {"entity_id": sl, "at": [0, 0]},
+                     "at an end"),
+                    ("split off the curve", {"entity_id": sl, "at": [5, 2]},
+                     "a hundredth of its length"),
+                    ("split a circle once", {"entity_id": sc, "at": [23, 0]},
+                     "takes two cuts"),
+                    ("split a spline", {"entity_id": ssp, "at": [32, 1]},
+                     "a spline is not split yet"),
+                    ("split a crossing that does not cross",
+                     {"entity_id": sl, "at": [5, 0], "crossing": sfar},
+                     "does not cross"),
+                    ("split an equal length",
+                     {"entity_id": sfar, "at": [5, 5]}, "equal length"),
+                    ("split crossing per cut, wrong count",
+                     {"entity_id": sl, "at": [5, 0], "crossing": [sc, sc]},
+                     "crossing is an entity id"),
+                    ("split at not a point",
+                     {"entity_id": sl, "at": [5]}, "at is [u, v]")]:
+                check(label, "split", dict(sketch_id=spl["id"], **params),
+                      needle=needle, tab=part["name"])
+            d.call("delete_feature", feature_id=spl["id"])
+
             # Imports (docs/interchange/README.md#up-axis,
             # docs/sketching/README.md#importing-dxf-and-svg): every one read
             # and checked before a feature, a sketch or a tab exists.

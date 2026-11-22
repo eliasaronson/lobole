@@ -433,6 +433,31 @@ std::vector<PrimVertex> BuildActiveSketchPrimitives(AppState& state,
       AppendPrimLine(sk->plane.PlaneToWorld(poly[i]),
                      sk->plane.PlaneToWorld(poly[i + 1]), 3.0f, hov, prims);
   }
+  // Split preview (docs/sketching/README.md#split): the pieces a click here
+  // makes, in two shades, and a tick across the curve at each cut. A
+  // circle's first cut lights the whole circle.
+  if (edit.tool == SketchTool::Split && edit.hasSplitPreview) {
+    const glm::vec4 shade[2] = {hov, glm::vec4(1.00f, 0.50f, 0.85f, 1.0f)};
+    const auto draw = [&](const sketch::Entity& e, const glm::vec4& col) {
+      const std::vector<glm::dvec2> poly = sketch::TessellateEntity(e);
+      for (size_t i = 0; i + 1 < poly.size(); i++)
+        AppendPrimLine(sk->plane.PlaneToWorld(poly[i]),
+                       sk->plane.PlaneToWorld(poly[i + 1]), 3.0f, col, prims);
+    };
+    if (edit.splitPreviewPieces.empty()) {
+      const size_t i = sk->IndexOfEntity(edit.splitPreviewCurve);
+      if (i != SIZE_MAX)
+        draw(sk->entities[i], shade[0]);
+    }
+    for (size_t k = 0; k < edit.splitPreviewPieces.size(); k++)
+      draw(edit.splitPreviewPieces[k], shade[k % 2]);
+    for (size_t k = 0; k + 1 < edit.splitPreviewTicks.size(); k += 2)
+      AppendPrimLine(sk->plane.PlaneToWorld(edit.splitPreviewTicks[k]),
+                     sk->plane.PlaneToWorld(edit.splitPreviewTicks[k + 1]),
+                     2.2f, trim, prims);
+    for (const glm::dvec2& p : edit.splitPreviewCuts)
+      AppendPrimDot(sk->plane.PlaneToWorld(p), 4.5f, trim, prims);
+  }
   // Trim by dragging: every span the path has crossed, and the path itself.
   if (edit.trimPathActive) {
     for (const sketch::Entity& e : edit.trimPathPreview) {

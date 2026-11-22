@@ -769,6 +769,55 @@ def main():
                and abs(tl[1]) < 1e-9,
                f"the line was trimmed to its tangent point: {dents[dl]}")
 
+        phase("Split a line at a circle's crossings, and a circle twice")
+        # docs/sketching/README.md#split: the pieces stay one curve, the
+        # first keeps the id, and a cut at a crossing costs no DOF.
+        d.call("new_project")
+        sks = d.call("add_feature", feature={
+            "type": "Sketch", "name": "Sketch S",
+            "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1],
+                      "uAxis": [1, 0, 0]},
+            "entities": [{"type": "line", "a": [-10, 0], "b": [10, 0]},
+                         {"type": "circle", "center": [0, 0], "radius": 4}]})
+        sl, sc = sks["entity_ids"]
+        s1 = d.call("split", sketch_id=sks["id"], entity_id=sl, at=[-3.9, 0.1],
+                    crossing=sc)
+        expect(len(s1["entity_ids"]) == 2 and s1["entity_ids"][0] == sl,
+               f"split returns both pieces, the first keeping the id: {s1}")
+        s2 = d.call("split", sketch_id=sks["id"], entity_id=s1["entity_ids"][1],
+                    at=[4, 0], crossing=sc)
+        expect(s2["dof"] == s1["dof"], f"a cut at a crossing costs no DOF: "
+               f"{s1['dof']} -> {s2['dof']}")
+        sents = {e["id"]: e for e in
+                 d.call("get_state")["features"][0]["entities"]}
+        inner = sents[s2["entity_ids"][0]]
+        expect(abs(inner["a"][0] + 4) < 1e-9 and abs(inner["b"][0] - 4) < 1e-9,
+               f"the inner piece runs between the crossings: {inner}")
+        s3 = d.call("split", sketch_id=sks["id"], entity_id=sc,
+                    at=[[0, 4], [0, -4]])
+        expect(s3["dof"] == s2["dof"] + 2,
+               f"two free cuts slide, one DOF each: {s2['dof']} -> "
+               f"{s3['dof']}")
+        sents = {e["id"]: e for e in
+                 d.call("get_state")["features"][0]["entities"]}
+        expect(all(sents[i]["type"] == "arc" for i in s3["entity_ids"]),
+               "a split circle is two arcs")
+        for args, why in [
+                # The circle is two arcs now, and an arc is cut once.
+                ({"entity_id": sc, "at": [[-4, 0], [-3, -2.6]]},
+                 "takes one cut"),
+                ({"entity_id": sl, "at": [-10, 0]}, "at an end"),
+                ({"entity_id": sl, "at": [-5, 3]},
+                 "more than a hundredth of its length"),
+                ({"entity_id": sl, "at": [-5, 0], "crossing": sl},
+                 "cannot cross itself"),
+                ({"entity_id": sl, "at": [-5]}, "at is [u, v]")]:
+            try:
+                d.call("split", sketch_id=sks["id"], **args)
+                expect(False, f"split should error ({why})")
+            except RuntimeError as e:
+                expect(why in str(e), f"split error explains: {why} ({e})")
+
         phase("Linked linear pattern, then edit its count via modify_feature")
         # Linked linear pattern, then edit its count via modify_feature.
         d.call("new_project")

@@ -818,6 +818,8 @@ void SetSketchTool(AppState& state, SketchTool tool) {
     TextToolActivated(state); // default height; a selected label to edit
   edit.filletFirst = 0;
   edit.hasFilletPreview = false;
+  edit.splitCircle = 0;
+  edit.hasSplitPreview = false;
   if (tool == SketchTool::Fillet)
     FilletToolActivated(state); // default radius: one grid cell
 }

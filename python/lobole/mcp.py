@@ -1486,6 +1486,14 @@ _reference("fillet", "Round the corner two sketch curves (lines or arcs) "
           "fits. Returns the arc's entity id (arc_id).")
 
 
+_reference("split", "Cut a sketch line, arc or circle into pieces that "
+          "stay one curve: entity_id, at=[u, v] in sketch mm (a circle takes "
+          "two, [[u, v], [u, v]]), and crossing=<entity id> to cut where that "
+          "curve crosses and hold the joint on it. A line's pieces stay "
+          "collinear, an arc's concentric. Returns entity_ids in order along "
+          "the curve, the first keeping the id, and the sketch's dof.")
+
+
 _reference("pattern", "Repeat sketch entities in a linear or circular "
           "pattern. sources: entity ids; count includes the originals. "
           "Linear: step=[du,dv] spacing in mm. Circular: circular=true, "

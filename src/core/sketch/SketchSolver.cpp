@@ -6,6 +6,7 @@
 #include "common/Logger.h"
 #include "core/Angles.h"
 #include "core/sketch/ConstraintEndCurvature.h"
+#include "core/sketch/SketchFillet.h" // EndsOf
 #include "core/sketch/SketchOrientation.h"
 #include "core/sketch/SketchText.h"
 
@@ -1968,13 +1969,35 @@ std::string IndexList(const std::vector<size_t>& indices) {
 std::vector<size_t> SubsumedBy(const SketchFeature& sketch,
                                const Constraint& c) {
   std::vector<size_t> out;
-  if (c.kind != ConstraintKind::Midpoint || c.driven)
+  if (c.driven)
     return out;
+  const auto pointOn = [](const Constraint& t, const PointRef& p,
+                          uint32_t curve) {
+    return t.kind == ConstraintKind::PointOnLine && !t.driven &&
+           t.a.entity == p.entity && t.a.which == p.which &&
+           t.b.entity == curve;
+  };
+  if (c.kind == ConstraintKind::Midpoint) {
+    for (size_t k = 0; k < sketch.constraints.size(); k++)
+      if (pointOn(sketch.constraints[k], c.a, c.b.entity))
+        out.push_back(k);
+    return out;
+  }
+  if (c.kind != ConstraintKind::Coincident)
+    return out;
+  // `end` is an end of its curve: the point coincident with it is on it.
+  const auto isEnd = [&](const PointRef& end) {
+    const size_t i = sketch.IndexOfEntity(end.entity);
+    if (i == static_cast<size_t>(-1))
+      return false;
+    const std::vector<uint8_t> ends = EndsOf(sketch.entities[i]);
+    return std::find(ends.begin(), ends.end(), end.which) != ends.end();
+  };
+  const bool aEnd = isEnd(c.a), bEnd = isEnd(c.b);
   for (size_t k = 0; k < sketch.constraints.size(); k++) {
     const Constraint& t = sketch.constraints[k];
-    if (t.kind == ConstraintKind::PointOnLine && !t.driven &&
-        t.a.entity == c.a.entity && t.a.which == c.a.which &&
-        t.b.entity == c.b.entity)
+    if ((bEnd && pointOn(t, c.a, c.b.entity)) ||
+        (aEnd && pointOn(t, c.b, c.a.entity)))
       out.push_back(k);
   }
   return out;

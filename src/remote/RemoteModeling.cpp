@@ -950,6 +950,21 @@ static constexpr MethodDoc ModelingMethods[] = {
      "when the two share two ends (refused without it). A radius too large "
      "is refused naming the largest that fits. Returns arc_id.",
      "entity1, entity2, near, radius, sketch_id", remote::NeedsPart},
+    {"split",
+     "Sketch split: cut a line, an arc or a circle into pieces that stay "
+     "one curve {sketch_id, entity_id, at: [u, v] (sketch mm; a circle "
+     "takes two: [[u, v], [u, v]]), crossing?: entity id (or one per cut, "
+     "null for none)}. With `crossing` a cut is that curve's crossing "
+     "nearest its `at` and the joint is held on it, so the DOF does not "
+     "change; at another curve's end the joint becomes coincident with it; "
+     "elsewhere `at` moves to the nearest point of the curve (refused past "
+     "a hundredth of its length) and the joint slides, one more DOF. A "
+     "line's pieces stay collinear, an arc's concentric. A spline, an "
+     "ellipse or an elliptical arc, a generated entity, a cut at an end, an "
+     "equal length on the line and an arc_length on the arc are refused by "
+     "name. Returns entity_ids in order along the curve (the first keeps "
+     "the id), dof, regen, digest.",
+     "at, crossing, entity_id, sketch_id", remote::NeedsPart},
     {"offset",
      "Offset a closed sketch chain {sketch_id, chain: [entity ids], distance "
      "(mm; the sign picks the side), join_arc?}. entity1/entity2/near/"
@@ -2775,6 +2790,97 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
     if (replaced > 0)
       resp["replaced"] = replaced;
     return resp;
+  }
+  if (m == "split") {
+    // docs/sketching/README.md#split. Everything is read and checked before
+    // the sketch changes: SplitEntity refuses with nothing changed.
+    size_t index = 0;
+    Feature* f =
+        doc->FindFeatureById(p.at("sketch_id").get<uint64_t>(), &index);
+    auto* sk = dynamic_cast<SketchFeature*>(f);
+    if (!sk)
+      throw std::runtime_error(
+          "no sketch with id " +
+          std::to_string(p.at("sketch_id").get<uint64_t>()) +
+          ". Sketches here: " + FeatureCandidates(*doc, true) +
+          " (ids come from add_feature results / get_state)");
+    const uint32_t id = p.at("entity_id").get<uint32_t>();
+    const auto point = [](const json& a) -> std::optional<glm::dvec2> {
+      if (!a.is_array() || a.size() != 2 || !a[0].is_number() ||
+          !a[1].is_number())
+        return std::nullopt;
+      return glm::dvec2(a[0].get<double>(), a[1].get<double>());
+    };
+    const json& atJ = p.at("at");
+    std::vector<SketchFeature::SplitCut> cuts;
+    if (const auto one = point(atJ)) {
+      cuts.push_back({*one, 0});
+    } else if (atJ.is_array() && !atJ.empty()) {
+      for (const json& a : atJ) {
+        const auto q = point(a);
+        if (!q)
+          throw std::runtime_error(
+              "split: at is [u, v] in sketch mm, or [[u, v], [u, v]] for a "
+              "circle's two cuts; got " +
+              atJ.dump());
+        cuts.push_back({*q, 0});
+      }
+    } else {
+      throw std::runtime_error("split: at is [u, v] in sketch mm, or [[u, v], "
+                               "[u, v]] for a circle's two cuts; got " +
+                               atJ.dump());
+    }
+    if (p.contains("crossing")) {
+      const json& cj = p.at("crossing");
+      const auto idOf = [](const json& v) -> std::optional<uint32_t> {
+        if (v.is_null())
+          return 0u;
+        if (v.is_number_unsigned() && v.get<uint64_t>() > 0 &&
+            v.get<uint64_t>() <= UINT32_MAX)
+          return v.get<uint32_t>();
+        return std::nullopt;
+      };
+      const std::string shape = "split: crossing is an entity id, or one per "
+                                "cut (null for none); got " +
+                                cj.dump();
+      if (cj.is_array()) {
+        if (cj.size() != cuts.size())
+          throw std::runtime_error(shape + " for " +
+                                   std::to_string(cuts.size()) + " cut(s)");
+        for (size_t i = 0; i < cuts.size(); i++) {
+          const auto c = idOf(cj[i]);
+          if (!c)
+            throw std::runtime_error(shape);
+          cuts[i].crossing = *c;
+        }
+      } else {
+        const auto c = idOf(cj);
+        if (!c || *c == 0)
+          throw std::runtime_error(shape);
+        for (SketchFeature::SplitCut& cut : cuts)
+          cut.crossing = *c;
+      }
+    }
+    json before = DocumentIO::FeatureToJson(*sk);
+    std::string why;
+    const std::vector<uint32_t> ids = sk->SplitEntity(id, cuts, &why);
+    if (ids.empty())
+      throw std::runtime_error("split failed: " + why);
+    sketch::Solver solver;
+    solver.Load(*sk);
+    const sketch::SolveResult solved = solver.Solve();
+    if (solved.ok)
+      solver.WriteBack(sk->entities);
+    sk->RegenerateDerived();
+    doc->Regenerate();
+    json after = DocumentIO::FeatureToJson(*sk);
+    const json preDigest = BodyDigestJson(*doc);
+    state.commands->Execute(
+        std::make_unique<ModifyFeatureCommand>(index, before, after), *doc);
+    return json{{"entity_ids", ids},
+                {"dof", solved.dof},
+                {"regen", RegenSummaryJson(*doc)},
+                {"digest", DigestJson(preDigest, *doc)}};
   }
   if (m == "mirror" || m == "fillet" || m == "pattern" || m == "offset") {
     // Generative op on a sketch (by id), solve, and commit one edit.

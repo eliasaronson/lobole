@@ -86,6 +86,7 @@ constexpr std::array kIcons = std::to_array<CommandIconEntry>({
     {"sketch.point", ICON_FA_CIRCLE_DOT},
     {"sketch.text", ICON_FA_FONT},
     {"sketch.trim", ICON_FA_SCISSORS},
+    {"sketch.split", ICON_DS_SPLIT},
     {"sketch.dimension", ICON_FA_RULER_COMBINED},
     {"sketch.mirror", ICON_DS_MIRROR},
     {"sketch.fillet", ICON_DS_FILLET},

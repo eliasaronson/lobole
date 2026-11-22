@@ -625,6 +625,7 @@ const std::vector<Command>& Table() {
     tool("sketch.text", SketchTool::Text);
     tool("sketch.project", SketchTool::Project);
     tool("sketch.trim", SketchTool::Trim);
+    tool("sketch.split", SketchTool::Split);
     tool("sketch.offset", SketchTool::Offset);
     tool("sketch.fillet", SketchTool::Fillet);
     tool("sketch.mirror", SketchTool::Mirror);
