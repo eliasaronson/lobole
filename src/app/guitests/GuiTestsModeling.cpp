@@ -2796,6 +2796,145 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
     std::filesystem::remove(stl);
   };
 
+  // Best fit's Pairs (docs/interchange/README.md#laying-a-scan-onto-a-body):
+  // the same 40 x 20 x 10 box twice, the scan turned and moved off. A box is
+  // its own half turn about each axis, so the shape alone cannot say which
+  // way it lies, and the note says to pick three Pairs. Picked -- the
+  // scan's +X end onto the model's -X end, its +Y side onto the -Y side,
+  // its top onto the top: a half turn about Z -- each a slot row of the tool
+  // window armed in turn, the fit lands on the attitude they name. Three in
+  // a line show the core's refusal in the window.
+  t = IM_REGISTER_TEST(engine, "align", "best_fit_pairs_name_the_attitude");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    const auto stl =
+        std::filesystem::temp_directory_path() /
+        ("lobole_gui_pairs_" + std::to_string(proc::CurrentPid()) + ".stl");
+    const glm::vec3 half(20.0f, 10.0f, 5.0f);
+    WriteNoisyBoxStl(stl, 2.0f * half, 8, 0.0f, -half);
+    for (const char* name : {"model", "scan"}) {
+      auto imp = std::make_unique<ImportFeature>(name, stl.string());
+      imp->upAxis = interchange::UpAxis::None;
+      imp->representation = mesh::Representation::Mesh;
+      imp->keepOrigin = true;
+      if (std::string(name) == "scan") {
+        imp->placement.rotateDeg = {17.0, -24.0, 38.0};
+        imp->placement.translateMm = {-80.0, 15.0, 8.0};
+      }
+      Doc()->AddFeature(std::move(imp));
+    }
+    Doc()->Regenerate();
+    ctx->Yield(2);
+    const uint64_t modelId = Doc()->GetFeature(0)->GetId(),
+                   scanId = Doc()->GetFeature(1)->GetId();
+    const auto scan = [&] {
+      return dynamic_cast<const ImportFeature*>(Doc()->FindFeatureById(scanId));
+    };
+    const glm::dmat4 stood = scan()->placement.Matrix();
+
+    // Looks at `at` from `out` along its outward normal and clicks it.
+    const auto clickAt = [&](const glm::dvec3& at, const glm::dvec3& out) {
+      s_App->camera->StopAnimation();
+      s_App->camera->SetTarget(glm::vec3(at));
+      const glm::vec3 up =
+          std::abs(out.z) > 0.9 ? glm::vec3(0, 1, 0) : conv::kWorldUpF;
+      s_App->camera->SetUp(up);
+      s_App->camera->SetPosition(glm::vec3(at + 30.0 * out));
+      ctx->Yield(2);
+      ctx->MouseMoveToPos(WorldToWindow(glm::vec3(at)));
+      ctx->MouseClick(ImGuiMouseButton_Left);
+      ctx->Yield(2);
+    };
+    const auto onScan = [&](const glm::dvec3& local) {
+      return glm::dvec3(stood * glm::dvec4(local, 1.0));
+    };
+    const auto scanNormal = [&](const glm::dvec3& local) {
+      return glm::normalize(glm::dvec3(stood * glm::dvec4(local, 0.0)));
+    };
+
+    ToolbarClick(ctx, "###tb_align");
+    ctx->Yield();
+    ctx->SetRef("//###ToolWindow");
+    ctx->ComboClick("##align_mode/Best fit");
+    ctx->SetRef("//##MainMenuBar");
+    ctx->Yield(2);
+    clickAt({20.0, 3.0, 1.0}, {1.0, 0.0, 0.0}); // the onto pick: the model
+    IM_CHECK_EQ(s_App->alignTool.ontoId, modelId);
+    IM_CHECK(WaitForJobs(ctx, "align"));
+    ctx->Yield(2);
+    // The note says what to do here, not an RPC parameter.
+    IM_CHECK(s_App->alignTool.summary.find("pick three Pairs") !=
+             std::string::npos);
+    IM_CHECK(s_App->alignTool.summary.find("pairs_mm") == std::string::npos);
+
+    // Pair 1 armed from its row; each pick arms the next.
+    ctx->ItemClick("//###ToolWindow/**/###align_pair20");
+    ctx->Yield();
+    IM_CHECK(!s_App->alignTool.preview.has_value()); // back where it stood
+    const glm::dvec3 scanLocal[3] = {
+        {20.0, 2.0, 1.0}, {3.0, 10.0, -1.0}, {-6.0, 4.0, 5.0}};
+    const glm::dvec3 scanOut[3] = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}};
+    // A half turn about Z: (x, y, z) -> (-x, -y, z).
+    for (int i = 0; i < 3; i++) {
+      IM_CHECK_EQ(s_App->slotPick.slot, 20 + i);
+      clickAt(onScan(scanLocal[i]), scanNormal(scanOut[i]));
+      IM_CHECK(s_App->alignTool.pairScan[size_t(i)].has_value());
+      IM_CHECK_EQ(s_App->slotPick.slot, 30 + i);
+      const glm::dvec3 l = scanLocal[i];
+      clickAt({-l.x, -l.y, l.z}, {-scanOut[i].x, -scanOut[i].y, scanOut[i].z});
+      IM_CHECK(s_App->alignTool.pairBody[size_t(i)].has_value());
+    }
+    IM_CHECK(WaitForJobs(ctx, "align"));
+    ctx->Yield(2);
+    ctx->LogInfo("pairs: %s", s_App->alignTool.summary.c_str());
+    IM_CHECK(s_App->alignTool.error.empty());
+    IM_CHECK(s_App->alignTool.preview.has_value());
+    IM_CHECK(s_App->alignTool.summary.find("from the pairs") !=
+             std::string::npos);
+    const glm::dmat4 laid = s_App->alignTool.preview->Matrix();
+    for (const glm::dvec3& l : scanLocal) {
+      const glm::dvec3 got(laid * glm::dvec4(l, 1.0));
+      IM_CHECK(glm::length(got - glm::dvec3(-l.x, -l.y, l.z)) < 0.05);
+    }
+    s_App->camera->SetTarget(glm::vec3(0.0f));
+    s_App->camera->SetUp(conv::kWorldUpF);
+    s_App->camera->SetPosition(glm::vec3(70.0f, -90.0f, 60.0f));
+    ctx->Yield(3);
+    ctx->MouseMoveToPos(ImVec2(700.0f, 660.0f)); // off every tooltip
+    ctx->Yield(2);
+    FilletShot(ctx, "align_best_fit_pairs");
+
+    // Three in a line on the body: the core's refusal, in the window. A
+    // click lands within a pixel of a line, never on it, so the third pick
+    // is delivered as the picker delivers one, at a point exactly on it.
+    s_App->alignTool.pairBody[0] = glm::dvec3(-10.0, 0.0, 5.0);
+    s_App->alignTool.pairBody[1] = glm::dvec3(0.0, 2.0, 5.0);
+    ctx->ItemClick("//###ToolWindow/**/###align_pair32");
+    ctx->Yield();
+    IM_CHECK_EQ(s_App->slotPick.slot, 32);
+    s_App->slotPick.hitPoint = glm::dvec3(10.0, 4.0, 5.0);
+    ui::SelectionItem onModel;
+    onModel.kind = ui::SelectionItem::Kind::Face;
+    onModel.element.featureId = modelId;
+    ui::AlignPointPicked(*s_App, onModel);
+    ctx->Yield(2);
+    ctx->LogInfo("line: %s", s_App->alignTool.error.c_str());
+    IM_CHECK(s_App->alignTool.error.find("in a line") != std::string::npos);
+    IM_CHECK(s_App->alignTool.error.rfind("Pairs: ", 0) == 0);
+    IM_CHECK(!s_App->alignTool.preview.has_value());
+    ctx->Yield(3);
+    ctx->MouseMoveToPos(ImVec2(700.0f, 660.0f)); // off every tooltip
+    ctx->Yield(2);
+    FilletShot(ctx, "align_best_fit_pairs_in_a_line");
+
+    ctx->ItemClick("//###ToolWindow/###tw_cancel");
+    ctx->Yield(2);
+    IM_CHECK(!s_App->alignTool.open);
+    std::filesystem::remove(stl);
+  };
+
   // Compare to scan (docs/inspect/README.md#how-far-a-body-is-from-a-scan):
   // a scan of a 40 x 30 x 20 box read as a mesh body, and the model, a B-Rep
   // box whose top stands 0.20 proud of the scan's and whose bottom is 0.15

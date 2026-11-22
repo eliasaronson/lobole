@@ -2051,6 +2051,10 @@ struct AppState {
     // Best fit: the feature whose body the import goes onto, and the fit
     // running on an `align` job (ui/AlignTool.cpp), landed by its finish.
     uint64_t ontoId = 0;
+    // Best fit's Pairs, optional: three points on the import (where it
+    // stands at `original`) and where each goes on the body; all three
+    // name the one start (`pairs_mm`).
+    std::array<std::optional<glm::dvec3>, 3> pairScan, pairBody;
     uint64_t jobId = 0;
     std::shared_ptr<struct AlignToolRun> run;
   } alignTool;

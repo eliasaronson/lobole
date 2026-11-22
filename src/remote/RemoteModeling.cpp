@@ -796,7 +796,9 @@ static constexpr MethodDoc ModelingMethods[] = {
      "share with no surface facing its way within the cap), samples, "
      "starts, winner (placement | principal | pairs), score_mm, runner_up? "
      "{score_mm, turn_deg, move_mm} (the best start that ended elsewhere), "
-     "note? (when it comes close: the shape barely tells the two apart)}), "
+     "note? (when it comes close: the shape barely tells the two apart), "
+     "ambiguous? (true with that note), pairs_scale_differ? (the share by "
+     "which the picked pairs' distances differ, past 5%)}), "
      "regen and digest.",
      "feature_id:int>=0, mode:string, "
      "point_mm?:number[3], points_mm?:any[], distance_mm?:number, "

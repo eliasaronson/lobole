@@ -376,11 +376,12 @@ that made no body. The fit is `importalign::BestFit`
   file's precision, finer than a fit settles to)
   and `within` (the share inside it), `unmatched`, `samples`, `starts`,
   `winner` (placement | principal | pairs), `score_mm`, `runner_up`?
-  {`score_mm`, `turn_deg`, `move_mm`}, `note`?, `chord_mm`?}. `runner_up` is
+  {`score_mm`, `turn_deg`, `move_mm`}, `note`?, `ambiguous`?,
+  `pairs_scale_differ`?, `chord_mm`?}. `runner_up` is
   the best kept start that ended at another attitude or a tenth of the part
   away. When it scores within the noise (or half the winner's score) of the
-  winner, `note` says the shape barely tells them apart and that three
-  `pairs_mm` say which: a box is its own half turn about each of its axes,
+  winner, `ambiguous` is true and `note` says the shape barely tells them
+  apart and that three `pairs_mm` say which: a box is its own half turn about each of its axes,
   and is laid in one of the four, its runner-up scoring what the winner
   does; a turned part is told round its axis only by what is not turned
   (the post's lump: 44° away at 0.048 mm against 0.037). Against a winner
@@ -395,6 +396,19 @@ that made no body. The fit is `importalign::BestFit`
   wait](../architecture.md#requests-that-wait)); a `batch` runs it in
   place. Cancelled, it is refused and changes nothing; an import moved,
   removed or closed while it ran is refused the same way.
+- **In the Align tool**, Best fit runs as soon as the body is picked, from
+  the import where it stands, and its result reads in the document's unit,
+  three figures, with a floor ("under 0.001 mm"), wrapped only at spaces.
+  Its optional **Pairs** are three rows, each a point on the import and
+  where it goes on the body, picked with the slot picker the other modes
+  use (each row picks again, and its `x` clears it; a pick arms the next,
+  and arming one puts the import back where it stood, since laid on the
+  body the two surfaces cannot be told apart by a click). With all three
+  the fit starts from them alone; with some, it waits for the rest. Where
+  the shape barely tells two attitudes apart the tool says to pick three
+  Pairs, rather than the RPC's `pairs_mm`; three in a line show the core's
+  refusal in the window. `align/best_fit_pairs_name_the_attitude` lays a
+  box, its own half turn, on the attitude the picked pairs name.
 - **It costs** about 3 CPU s for a 30k-triangle scan onto a 340k-triangle
   body, most of it the screen, and 1.2 to 1.6 CPU s for a 500k-triangle scan
   onto the same body (fewer passes: the denser scan settles sooner); the

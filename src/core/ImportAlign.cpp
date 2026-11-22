@@ -545,11 +545,13 @@ bool BestFit(const BestFitInput& in, const importplace::Placement& current,
                    b = glm::length(to[(i + 1) % 3] - to[i]);
       worst = std::max(worst, std::abs(a - b) / std::max(b, 1e-12));
     }
-    if (worst > 0.05)
+    if (worst > 0.05) {
+      out.report["pairs_scale_differ"] = worst;
       pairNote = "the picked pairs' distances differ by up to " +
                  Mm(100.0 * worst) +
                  "% between the import and the body: a best fit is rigid, "
                  "so a wrong scale stays (align_import mode scale fixes it)";
+    }
     starts.push_back(*start);
   } else {
     starts.push_back(mesh::Rigid{}); // the placement as it stands
@@ -593,7 +595,8 @@ bool BestFit(const BestFitInput& in, const importplace::Placement& current,
     moved = std::max(moved, glm::length(pose(v) - v));
 
   nlohmann::json& rep = out.report;
-  rep = nlohmann::json::object();
+  const nlohmann::json early = rep.is_object() ? rep : nlohmann::json::object();
+  rep = early;
   rep["onto"] = in.ontoName;
   rep["rotate_deg"] = Json(importplace::EulerDeg(pose.rotation));
   rep["translate_mm"] = Json(pose.translation);
@@ -639,12 +642,14 @@ bool BestFit(const BestFitInput& in, const importplace::Placement& current,
         {"turn_deg", turn},
         {"move_mm", glm::length(s.pose(centre) - w.pose(centre))}};
     rep["score_mm"] = w.scoreMm;
-    if (s.scoreMm < w.scoreMm + std::max(withinMm, 0.5 * w.scoreMm))
+    if (s.scoreMm < w.scoreMm + std::max(withinMm, 0.5 * w.scoreMm)) {
+      rep["ambiguous"] = true;
       rep["note"] =
           "another attitude, " + Mm(turn) +
           " deg from this one, lies nearly as close (a capped mean of " +
           Mm(s.scoreMm) + " mm against " + Mm(w.scoreMm) +
           "): the shape barely tells them apart; three pairs_mm say which";
+    }
   }
   if (!pairNote.empty())
     rep["note"] = rep.contains("note")

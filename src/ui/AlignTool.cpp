@@ -10,6 +10,7 @@
 #include "ui/BackgroundJobs.h"
 #include "ui/ExprInput.h"
 #include "ui/FeatureEditor.h" // kAlignToolSlot
+#include "ui/LengthText.h"    // ReadableLength
 #include "ui/PanelLayout.h"   // LeftLabel
 #include "ui/PreviewFeature.h"
 #include "ui/Widgets.h" // DrawJobProgress
@@ -41,6 +42,13 @@ constexpr const char* kModeLabels[] = {"Floor", "Three points",
 constexpr int kModes = 5;
 // The slot of the best fit's onto pick, past every point's.
 constexpr int kOntoSlot = 10;
+// Best fit's pairs: pair i's point on the import, and where it goes on the
+// body.
+constexpr int kPairScanSlot = 20, kPairBodySlot = 30;
+bool IsPairSlot(int slot) {
+  return (slot >= kPairScanSlot && slot < kPairScanSlot + 3) ||
+         (slot >= kPairBodySlot && slot < kPairBodySlot + 3);
+}
 
 ImportFeature* AlignedImport(AppState& state, size_t* index = nullptr) {
   const auto& t = state.alignTool;
@@ -111,6 +119,54 @@ std::string Prompt(Mode mode, size_t i) {
   return "";
 }
 
+std::string PairPrompt(int slot) {
+  if (slot >= kPairBodySlot)
+    return "Align: click where pair " +
+           std::to_string(slot - kPairBodySlot + 1) +
+           "'s point goes on the body";
+  return "Align: click pair " + std::to_string(slot - kPairScanSlot + 1) +
+         "'s point on the import";
+}
+
+void ArmPair(AppState& state, int slot) {
+  // Picked where the import stood, not where a fit laid it over the body:
+  // there the two surfaces lie on each other and a click cannot tell them
+  // apart.
+  auto& t = state.alignTool;
+  if (ImportFeature* imp = AlignedImport(state); imp != nullptr && t.preview) {
+    StopFit(state);
+    Show(state, *imp, t.original);
+    t.preview.reset();
+    t.summary.clear();
+  }
+  state.slotPick = {};
+  state.slotPick.featureId = kAlignToolSlot;
+  state.slotPick.slot = slot;
+  state.slotPick.kinds = SelectionKindBit(SelectionItem::Kind::Face);
+  state.slotPick.prompt = PairPrompt(slot);
+}
+
+// Pairs picked: none, some, or all three of each.
+size_t PairsPicked(const AppState::AlignTool& t) {
+  size_t n = 0;
+  for (int i = 0; i < 3; i++)
+    n += (t.pairScan[i].has_value() ? 1 : 0) +
+         (t.pairBody[i].has_value() ? 1 : 0);
+  return n;
+}
+
+// The next unpicked pair point, in the order a person gives them: pair 1 on
+// the import, then on the body, then pair 2.
+std::optional<int> NextPairSlot(const AppState::AlignTool& t) {
+  for (int i = 0; i < 3; i++) {
+    if (!t.pairScan[i])
+      return kPairScanSlot + i;
+    if (!t.pairBody[i])
+      return kPairBodySlot + i;
+  }
+  return std::nullopt;
+}
+
 void Arm(AppState& state, size_t i) {
   state.slotPick = {};
   state.slotPick.featureId = kAlignToolSlot;
@@ -137,49 +193,107 @@ void ArmNext(AppState& state) {
     state.slotPick = {};
 }
 
-std::string Summary(Mode mode, const nlohmann::json& r) {
-  char buf[256] = {};
+// What an alignment fitted, a line a fact, for the tool window: lengths in
+// the document's unit with a floor (ui/LengthText.h), never an exponent.
+// The reply's note names RPC parameters; the tool says what to do here.
+std::string Summary(Mode mode, const nlohmann::json& r,
+                    const units::System& sys) {
+  const auto len = [&](const char* key) {
+    return ReadableLength(r.value(key, 0.0), sys);
+  };
+  const auto pct = [&](double share) {
+    char buf[32];
+    std::snprintf(buf, sizeof buf, "%.0f%%", 100.0 * share);
+    return std::string(buf);
+  };
+  std::string out;
   switch (mode) {
   case Mode::Floor:
     if (r.value("fitted", std::string()) == "boundary_loop")
-      std::snprintf(buf, sizeof buf,
-                    "Fitted the rim: %zu vertices, %.3g mm RMS (%.3g max)",
-                    r.value("loop_vertices", size_t{0}), r.value("rms_mm", 0.0),
-                    r.value("max_mm", 0.0));
+      out = "Fitted the rim: " +
+            std::to_string(r.value("loop_vertices", size_t{0})) +
+            " vertices\nRMS " + len("rms_mm") + ", max " + len("max_mm");
     else
-      std::snprintf(buf, sizeof buf,
-                    "Fitted %zu triangles, %.4g mm2: %.3g mm RMS (%.3g max) "
-                    "within %.3g mm",
-                    r.value("triangles", size_t{0}), r.value("area_mm2", 0.0),
-                    r.value("rms_mm", 0.0), r.value("max_mm", 0.0),
-                    r.value("tolerance_mm", 0.0));
+      out = "Fitted " + std::to_string(r.value("triangles", size_t{0})) +
+            " triangles, " + units::FormatNumber(r.value("area_mm2", 0.0), 4) +
+            " " + units::AreaSuffix(sys) + "\nRMS " + len("rms_mm") + ", max " +
+            len("max_mm") + ", within " + len("tolerance_mm");
     break;
   case Mode::ThreePoints:
-    std::snprintf(buf, sizeof buf, "The plane through the three points");
+    out = "The plane through the three points";
     break;
   case Mode::Principal: {
     const auto s = r.value("spread_mm", std::vector<double>{0, 0, 0});
-    std::snprintf(buf, sizeof buf, "Spread %.3g / %.3g / %.3g mm along X/Y/Z",
-                  s.at(0), s.at(1), s.at(2));
+    out = "Spread along X, Y, Z: " + ReadableLength(s.at(0), sys) + ", " +
+          ReadableLength(s.at(1), sys) + ", " + ReadableLength(s.at(2), sys);
     break;
   }
   case Mode::Scale:
-    std::snprintf(buf, sizeof buf, "Measured %.4g mm: scaled by %.6g",
-                  r.value("measured_mm", 0.0), r.value("factor", 1.0));
+    out = "Measured " + len("measured_mm") + ": scaled by " +
+          units::FormatNumber(r.value("factor", 1.0), 6);
     break;
   case Mode::BestFit:
-    std::snprintf(buf, sizeof buf,
-                  "Laid onto '%s': mean %.3g mm, %.0f%% within %.3g mm "
-                  "(moved up to %.4g mm)",
-                  r.value("onto", std::string()).c_str(),
-                  r.value("mean_mm", 0.0), 100.0 * r.value("within", 0.0),
-                  r.value("within_mm", 0.0), r.value("moved_mm", 0.0));
+    out =
+        "Laid onto '" + r.value("onto", std::string()) + "'" +
+        (r.value("winner", std::string()) == "pairs" ? " from the pairs" : "") +
+        "\nMean " + len("mean_mm") + ", " + pct(r.value("within", 0.0)) +
+        " within " + len("within_mm") + "\nMoved up to " + len("moved_mm");
+    if (r.value("ambiguous", false) && r.contains("runner_up"))
+      out += "\nAnother attitude, " +
+             units::FormatAngle(
+                 std::round(r.at("runner_up").value("turn_deg", 0.0)), sys) +
+             " from this one, lies nearly as close: the shape barely tells "
+             "them apart. If this is the wrong one, pick three Pairs below "
+             "-- a point on the import and where it goes on the body -- to "
+             "say which.";
+    if (r.contains("pairs_scale_differ"))
+      out += "\nThe pairs' distances differ by up to " +
+             pct(r.at("pairs_scale_differ").get<double>()) +
+             " between the import and the body: a best fit is rigid, so a "
+             "wrong scale stays (the Scale mode fixes it).";
     break;
   }
-  std::string out = buf;
-  if (r.contains("note"))
+  if (mode != Mode::BestFit && r.contains("note"))
     out += "\n" + r.at("note").get<std::string>();
   return out;
+}
+
+// `text` wrapped at its spaces only, to `width` pixels, each line dim or in
+// `colour`: ImGui's own wrap breaks after a full stop, and "0." / "00458 mm"
+// is a number nobody reads. A line break in `text` is kept.
+void Wrapped(const std::string& text, float width,
+             const ImVec4* colour = nullptr) {
+  const auto draw = [&](const std::string& line) {
+    if (colour != nullptr)
+      ImGui::TextColored(*colour, "%s", line.c_str());
+    else
+      ImGui::TextDisabled("%s", line.c_str());
+  };
+  size_t start = 0;
+  while (start <= text.size()) {
+    size_t nl = text.find('\n', start);
+    if (nl == std::string::npos)
+      nl = text.size();
+    const std::string para = text.substr(start, nl - start);
+    std::string line;
+    size_t i = 0;
+    while (i <= para.size()) {
+      size_t sp = para.find(' ', i);
+      if (sp == std::string::npos)
+        sp = para.size();
+      const std::string word = para.substr(i, sp - i);
+      const std::string tryLine = line.empty() ? word : line + " " + word;
+      if (!line.empty() && ImGui::CalcTextSize(tryLine.c_str()).x > width) {
+        draw(line);
+        line = word;
+      } else {
+        line = tryLine;
+      }
+      i = sp + 1;
+    }
+    draw(line);
+    start = nl + 1;
+  }
 }
 
 // Lands a best fit that finished: previewed, or why not. Only the run the
@@ -201,7 +315,7 @@ void LandFit(AppState& state, const std::shared_ptr<AlignToolRun>& run) {
     t.error = "Cancelled: the import stays where it stood";
     return;
   }
-  t.summary = Summary(Mode::BestFit, run->result.report);
+  t.summary = Summary(Mode::BestFit, run->result.report, state.ActiveUnits());
   Show(state, *imp, run->result.placement);
   t.preview = run->result.placement;
 }
@@ -223,8 +337,14 @@ void StartFit(AppState& state, const ImportFeature& imp) {
           importalign::ImportBodies(*state.document, imp), bodies));
   importalign::Request rq;
   rq.mode = Mode::BestFit;
-  if (const std::string why = importalign::CheckBestFit(*input, rq);
-      !why.empty()) {
+  // The pairs, when all three are picked: the one start they name.
+  if (PairsPicked(t) == 6)
+    for (int i = 0; i < 3; i++)
+      rq.pairsMm.push_back({*t.pairScan[i], *t.pairBody[i]});
+  if (std::string why = importalign::CheckBestFit(*input, rq); !why.empty()) {
+    // The reply names its parameter; here it is the Pairs rows.
+    if (why.rfind("pairs_mm: ", 0) == 0)
+      why = "Pairs: " + why.substr(10);
     t.error = why;
     return;
   }
@@ -274,7 +394,10 @@ void Recompute(AppState& state) {
   t.preview.reset();
   StopFit(state);
   if (mode == Mode::BestFit) {
-    if (t.ontoId != 0)
+    // Some pairs picked and not all: nothing to fit until they are, or
+    // they are cleared.
+    const size_t pairs = PairsPicked(t);
+    if (t.ontoId != 0 && (pairs == 0 || pairs == 6))
       StartFit(state, *imp);
     return;
   }
@@ -298,7 +421,7 @@ void Recompute(AppState& state) {
     t.error = e.what();
     return;
   }
-  t.summary = Summary(mode, res.report);
+  t.summary = Summary(mode, res.report, state.ActiveUnits());
   // Re-resolved: the regeneration above may have moved the feature list's
   // storage, never the feature itself, but ask again rather than assume.
   imp = AlignedImport(state);
@@ -428,6 +551,34 @@ void AlignPointPicked(AppState& state, const SelectionItem& item) {
     state.slotPick = {};
     return;
   }
+  if (IsPairSlot(state.slotPick.slot)) {
+    const int slot = state.slotPick.slot;
+    const bool onBody = slot >= kPairBodySlot;
+    const uint64_t want = onBody ? t.ontoId : t.featureId;
+    if (item.kind != SelectionItem::Kind::Face ||
+        item.element.featureId != want) {
+      const Feature* onto = state.document->FindFeatureById(t.ontoId);
+      state.slotPick.miss =
+          onBody ? "that is not on '" +
+                       (onto != nullptr ? onto->GetName() : std::string()) +
+                       "': click where the point goes on it"
+                 : "that is not on '" + imp->GetName() +
+                       "': click a point on the import";
+      return;
+    }
+    // The import's point where it stood before the preview moved it, which
+    // is where the fit starts from; the body does not move.
+    glm::dvec3 p = state.slotPick.hitPoint;
+    if (!onBody && t.preview)
+      p = glm::dvec3(t.original.Matrix() * glm::inverse(t.preview->Matrix()) *
+                     glm::dvec4(p, 1.0));
+    (onBody ? t.pairBody : t.pairScan)[size_t(slot % 10)] = p;
+    state.slotPick = {};
+    if (const std::optional<int> next = NextPairSlot(t))
+      ArmPair(state, *next);
+    Recompute(state);
+    return;
+  }
   if (state.slotPick.slot == kOntoSlot) {
     const uint64_t id =
         item.kind == SelectionItem::Kind::Face ? item.element.featureId : 0;
@@ -439,6 +590,8 @@ void AlignPointPicked(AppState& state, const SelectionItem& item) {
                                   "import onto";
       return;
     }
+    if (id != t.ontoId)
+      t.pairBody = {}; // they were on the other body
     t.ontoId = id;
     state.slotPick = {};
     Recompute(state);
@@ -489,6 +642,8 @@ void DrawAlignToolWindow(AppState& state) {
     t.points.clear();
     t.distanceMm = 0.0;
     t.ontoId = 0;
+    t.pairScan = {};
+    t.pairBody = {};
     ArmNext(state);
     Recompute(state); // principal needs no point: it previews at once
   }
@@ -536,6 +691,61 @@ void DrawAlignToolWindow(AppState& state) {
       if (DrawJobProgress(bar))
         (void)CancelBackgroundJobById(state, t.jobId, "cancelled in the tool");
     }
+    // Pairs, optional: three points on the import and where each goes on
+    // the body, which name the attitude when the shape does not.
+    if (onto != nullptr) {
+      ImGui::Spacing();
+      ImGui::TextUnformatted("Pairs");
+      ImGui::SameLine();
+      ImGui::TextDisabled("optional: which way it lies");
+      if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Three points on the import, each with where it "
+                          "goes on '%s': the fit starts from them alone",
+                          onto->GetName().c_str());
+      const auto point = [&](const char* side, int slot,
+                             const std::optional<glm::dvec3>& p) {
+        const bool armed = state.slotPick.featureId == kAlignToolSlot &&
+                           state.slotPick.slot == slot;
+        const std::string label = std::string(side) +
+                                  (armed ? ": click it"
+                                   : p   ? ": picked"
+                                         : ": pick") +
+                                  "###align_pair" + std::to_string(slot);
+        const bool pressed = ImGui::Button(label.c_str());
+        if (p && ImGui::IsItemHovered()) {
+          char at[96];
+          std::snprintf(at, sizeof at, "%.4g, %.4g, %.4g (click to pick again)",
+                        p->x, p->y, p->z);
+          ImGui::SetTooltip("%s", at);
+        }
+        if (pressed)
+          ArmPair(state, slot);
+      };
+      for (int i = 0; i < 3; i++) {
+        ImGui::PushID(i);
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextDisabled("%d", i + 1);
+        ImGui::SameLine();
+        point("Import", kPairScanSlot + i, t.pairScan[size_t(i)]);
+        ImGui::SameLine();
+        point("Body", kPairBodySlot + i, t.pairBody[size_t(i)]);
+        ImGui::SameLine();
+        const bool any = t.pairScan[size_t(i)] || t.pairBody[size_t(i)];
+        ImGui::BeginDisabled(!any);
+        const std::string clear = "x###align_pair_clear" + std::to_string(i);
+        if (ImGui::SmallButton(clear.c_str())) {
+          t.pairScan[size_t(i)].reset();
+          t.pairBody[size_t(i)].reset();
+          if (IsPairSlot(state.slotPick.slot))
+            state.slotPick = {};
+          Recompute(state);
+        }
+        ImGui::EndDisabled();
+        if (any && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+          ImGui::SetTooltip("Clear pair %d", i + 1);
+        ImGui::PopID();
+      }
+    }
   }
   if (m == Mode::Floor) {
     bool own = t.ownTolerance;
@@ -573,22 +783,22 @@ void DrawAlignToolWindow(AppState& state) {
     ImGui::TextColored(ImVec4(0.95f, 0.6f, 0.3f, 1.0f), "%s",
                        state.slotPick.miss.c_str());
   if (!t.error.empty()) {
-    ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + 360.0f);
-    ImGui::TextColored(ImVec4(0.9f, 0.4f, 0.4f, 1.0f), "%s", t.error.c_str());
-    ImGui::PopTextWrapPos();
+    const ImVec4 red(0.9f, 0.4f, 0.4f, 1.0f);
+    Wrapped(t.error, 360.0f, &red);
   } else if (!t.summary.empty()) {
-    ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + 360.0f);
-    ImGui::TextDisabled("%s", t.summary.c_str());
-    ImGui::PopTextWrapPos();
+    Wrapped(t.summary, 360.0f);
   }
   ImGui::Separator();
   const bool ready = t.preview.has_value() && !(*t.preview == t.original);
   if (!ready && t.error.empty()) {
-    if (m == Mode::BestFit)
+    if (m == Mode::BestFit) {
+      const size_t pairs = PairsPicked(t);
       ImGui::TextDisabled(t.ontoId == 0  ? "Pick the body to lay it onto"
                           : t.jobId != 0 ? "Fitting..."
-                                         : "It stands this way already");
-    else if (t.points.size() < need)
+                          : pairs > 0 && pairs < 6
+                              ? "Pick the rest of the pairs, or clear them"
+                              : "It stands this way already");
+    } else if (t.points.size() < need)
       ImGui::TextDisabled("Pick point %zu to continue", t.points.size() + 1);
     else if (m == Mode::Scale)
       ImGui::TextDisabled("Type the true distance to continue");
