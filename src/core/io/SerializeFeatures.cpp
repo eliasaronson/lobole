@@ -119,7 +119,7 @@ json EntityToJson(const sketch::Entity& entity) {
           json sp = {{"type", "spline"},
                      {"poles", std::move(poles)},
                      {"degree", e.degree}};
-          // vNEXT: written only when not the clamped-uniform vector an
+          // v232: written only when not the clamped-uniform vector an
           // absent `knots` means, so every older spline writes as it did.
           if (!e.knots.empty() &&
               e.knots !=
@@ -287,7 +287,7 @@ sketch::Entity EntityFromJson(const json& j) {
     for (const auto& pj : j.at("poles"))
       bs.poles.push_back(Vec2FromJson(pj));
     bs.degree = j.value("degree", 3);
-    if (j.contains("knots")) { // vNEXT
+    if (j.contains("knots")) { // v232
       const json& kj = j.at("knots");
       if (!kj.is_array())
         throw std::runtime_error("spline knots must be an array of numbers");
@@ -446,7 +446,7 @@ const char* ConstraintKindToString(sketch::ConstraintKind k) {
     return "curvature";
   case K::ArcLength: // v191
     return "arc_length";
-  case K::SplineJoint: // vNEXT2
+  case K::SplineJoint: // v233
     return "smooth";
   }
   return "coincident";

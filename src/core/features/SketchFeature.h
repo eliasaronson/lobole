@@ -96,7 +96,7 @@ struct EllipseArc {
 // The curve interpolates its first and last poles (clamped), so those poles
 // ARE its ends; a spline whose first and last poles are equal is closed.
 // `degree` is cubic, reduced to poles-1 when there are too few poles
-// (BSplineDegree). `knots` (vNEXT) is the full knot vector, poles + degree + 1
+// (BSplineDegree). `knots` (v232) is the full knot vector, poles + degree + 1
 // values, non-decreasing, clamped at both ends and no interior value more
 // than `degree` times; EMPTY means clamped-uniform, as every spline was
 // before (docs/sketching/README.md#representation). Read it only through
@@ -880,7 +880,7 @@ enum class ConstraintKind {
   // (docs/sketching/README.md#curvature-continuity).
   Curvature,
   ArcLength, // a.entity is a circular arc: r x sweep = value (mm)
-  // Smooth (vNEXT2): a, b are the meeting ENDS (first or last pole) of two
+  // Smooth (v233): a, b are the meeting ENDS (first or last pole) of two
   // splines of one degree that a Coincident joins: the first and, from
   // degree 3, second derivatives agree there, each in its own spline's
   // parameter -- what keeps the two pieces of a cut spline the one curve

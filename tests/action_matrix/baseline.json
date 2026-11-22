@@ -5028,7 +5028,7 @@
               "edge:2/*;U*": "edge.frame*2",
               "face:2/g11": "-face.delete -face.delete_feature"
             },
-            "golden/vNEXT-spline-knots": {
+            "golden/v232-spline-knots": {
               "body:2":
                   "body.mirror body.pattern_circular body.pattern_linear body.split",
               "edge:2/*;U*": "edge.chamfer*6 edge.fillet*6",
@@ -5040,7 +5040,7 @@
               "face:2/g1":
                   "-face.delete -face.delete_feature face.draft face.extrude_add face.extrude_cut face.frame face.hole -face.offset_in -face.offset_out -face.replace face.shell face.sketch"
             },
-            "golden/vNEXT2-spline-smooth": {
+            "golden/v233-spline-smooth": {
               "body:2":
                   "body.mirror body.pattern_circular body.pattern_linear body.split",
               "edge:2/*;U*": "edge.chamfer*14 edge.fillet*14",

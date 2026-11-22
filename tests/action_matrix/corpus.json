@@ -1122,14 +1122,14 @@
       "source": "tests/golden/v231-datum-fit-torus.json"
     },
     {
-      "design": "golden/vNEXT-spline-knots",
+      "design": "golden/v232-spline-knots",
       "kind": "golden",
-      "source": "tests/golden/vNEXT-spline-knots.json"
+      "source": "tests/golden/v232-spline-knots.json"
     },
     {
-      "design": "golden/vNEXT2-spline-smooth",
+      "design": "golden/v233-spline-smooth",
       "kind": "golden",
-      "source": "tests/golden/vNEXT2-spline-smooth.json"
+      "source": "tests/golden/v233-spline-smooth.json"
     },
     {
       "design": "golden/v216-u-name-by-fewer-edges",

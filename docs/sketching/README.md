@@ -472,7 +472,7 @@ when only they changed. `tests/test_spline_knots.cpp` checks degrees 1–3,
 uniform and not, open and closed, against `Geom2d_BSplineCurve` on the same
 knots to 1e-9, forwards and reversed, and a polyline's full-multiplicity
 corners (and a cubic's knot of multiplicity 3) through extrude and mass
-properties. Golden `vNEXT-spline-knots`.
+properties. Golden `v232-spline-knots`.
 
 #### A spline cut exactly
 
@@ -1619,8 +1619,8 @@ There is no RPC to delete a single constraint, trim, paste or break a link; `mod
   `tests/test_spline_smooth.cpp` — the two-piece cut against the parent,
   the DOF it adds, a drag against the uncut spline with the knot inserted,
   Smooth's refusals, the closed spline, the owner's split extruding to the
-  same volume, the fillet leaving one spline. Goldens `vNEXT-spline-knots`,
-  `vNEXT2-spline-smooth`.
+  same volume, the fillet leaving one spline. Goldens `v232-spline-knots`,
+  `v233-spline-smooth`.
 - `tests/test_reference_image.cpp` — placement, calibration, asset storage in
   both formats, regen-hash exclusion, `show_always` round trip.
 - `tests/underlay_show_always_smoke.py` — a show-always underlay in a quick
