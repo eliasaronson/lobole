@@ -384,6 +384,9 @@ struct SketchEditState {
     glm::dvec2 at{0.0};
   };
   std::vector<DrawnGlyph> glyphsDrawn;
+  // The sketch modes flyout's face carries its dot this frame: a mode is
+  // off its default (SketchModesFlyout). For tests.
+  bool modesDot = false;
   uint32_t calibImageId = 0;
   glm::dvec2 calibP1{0.0, 0.0};
   glm::dvec2 calibP2{0.0, 0.0};

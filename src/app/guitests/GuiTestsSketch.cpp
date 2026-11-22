@@ -1108,6 +1108,37 @@ void RegisterSketchGuiTests(ImGuiTestEngine* engine) {
     ctx->Yield();
   };
 
+  // The sketch modes flyout (###tb_sk_modes) carries a dot while a toggle
+  // inside it is off its default, so a hidden mode shows without opening
+  // it: none at the defaults, one after a flip, none after the flip back.
+  t = IM_REGISTER_TEST(engine, "sketch", "modes_flyout_dot");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    EnterSketchOnPlane(ctx, 0);
+    ctx->Yield(2);
+    IM_CHECK(!s_App->sketchEdit.modesDot);
+    const bool autoOn = s_App->sketchEdit.autoConstrain;
+    const auto flip = [&]() {
+      ctx->SetRef("//##DockHost");
+      ctx->ItemClick("**/###tb_sk_modes");
+      ctx->Yield(2);
+      ctx->ItemClick("//$FOCUSED/###tb_sk_autocon");
+      ctx->Yield(2);
+      ctx->PopupCloseAll();
+      ctx->MouseMoveToPos(ImGui::GetMainViewport()->GetCenter());
+      ctx->Yield(2);
+    };
+    flip();
+    IM_CHECK(s_App->sketchEdit.autoConstrain != autoOn);
+    IM_CHECK(s_App->sketchEdit.modesDot);
+    GuiShot(ctx, "sketch_modes_dot");
+    flip();
+    IM_CHECK(s_App->sketchEdit.autoConstrain == autoOn);
+    IM_CHECK(!s_App->sketchEdit.modesDot);
+    ctx->KeyPress(ImGuiKey_Escape);
+    ctx->Yield();
+  };
+
   // Hovering (no click) with the Trim tool computes the preview span for the
   // segment under the cursor.
   t = IM_REGISTER_TEST(engine, "trim", "preview_highlights_span");

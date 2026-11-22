@@ -1368,9 +1368,12 @@ or an agent opens the flyout (`cutgrp/###more`) and clicks the row.
 The three **modes** — auto-constrain, constraint glyphs, slice — are check
 items in one more flyout (`###tb_sk_modes`, rows `###tb_sk_autocon`,
 `###tb_sk_glyphs`, `###tb_sk_slice`). They are set once a session rather
-than reached for, so they do not get three buttons; instead the face is
-**lit while any of them is off its default** (a fresh `SketchEditState`'s,
-and slice off), and its tooltip names all three states. Their keys
+than reached for, so they do not get three buttons; instead the face
+**carries a dot while any of them is off its default** (a fresh
+`SketchEditState`'s, and slice off) -- the state dot a list row wears
+(`DrawStateDot`, `src/ui/Widgets.cpp`), in the accent -- and its tooltip
+names all three states. A lit face would read as an armed tool, which it is
+not (`sketch/modes_flyout_dot`). Their keys
 (Shift+S, Y, F7) work as before. Reference image sits beside Project: both
 bring something from outside the sketch into it.
 

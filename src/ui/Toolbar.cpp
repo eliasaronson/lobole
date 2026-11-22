@@ -28,6 +28,7 @@
 #include "ui/ScanCompareTool.h" // ScanCompareRefusal
 #include "ui/SketchInteraction.h"
 #include "ui/SketchToolbar.h" // BeginSketchExtrude/Revolve (U8a)
+#include "ui/Theme.h"         // AccentColor (the modes dot)
 #include "ui/ViewActions.h"
 #include "ui/Widgets.h"
 
@@ -763,10 +764,10 @@ void DrawModelToolbar(AppState& state) {
 namespace {
 // The sketch's mode toggles (were the Sketch panel's checkboxes, U8a), in one
 // flyout: three lit-or-not buttons were most of a row, and they are set once
-// a session rather than reached for. The face is lit while any of them is
-// off its default, so a mode left on (or off) still shows at a glance; the
-// tooltip names every state, and each row is a check item with its
-// command's chord, answering to the "###tb_sk_*" id it had as a button.
+// a session rather than reached for. The face carries a dot while any of
+// them is off its default, so a mode left on (or off) still shows at a
+// glance; the tooltip names every state, and each row is a check item with
+// its command's chord, answering to the "###tb_sk_*" id it had as a button.
 void SketchModesFlyout(AppState& state) {
   SketchEditState& edit = state.sketchEdit;
   // The defaults are a fresh session's; a slice starts every session off.
@@ -782,12 +783,17 @@ void SketchModesFlyout(AppState& state) {
                 "slice %s",
                 onOff(edit.autoConstrain), onOff(edit.showConstraintGlyphs),
                 onOff(state.sketchSlice));
-  if (unusual)
-    ImGui::PushStyleColor(ImGuiCol_Button,
-                          ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
   const bool clicked = ToolButton(ICON_FA_TOGGLE_ON "###tb_sk_modes", tip);
-  if (unusual)
-    ImGui::PopStyleColor();
+  // The state dot list rows wear, in the accent, inside the face's corner:
+  // a lit face reads as an armed tool, which this is not.
+  edit.modesDot = unusual;
+  if (unusual) {
+    const ImVec2 pad = ImGui::GetStyle().FramePadding;
+    const ImVec2 lo = ImGui::GetItemRectMin(), hi = ImGui::GetItemRectMax();
+    DrawStateDot(ImGui::GetWindowDrawList(), lo,
+                 ImVec2(hi.x - pad.x * 0.35f, hi.y - pad.y * 0.2f),
+                 AccentColor(), ImGui::GetColorU32(ImGuiCol_Button));
+  }
   if (clicked)
     ImGui::OpenPopup("sketch_modes");
   if (!ImGui::BeginPopup("sketch_modes"))

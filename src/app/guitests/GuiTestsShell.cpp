@@ -846,10 +846,11 @@ void RegisterShellGuiTests(ImGuiTestEngine* engine) {
       ctx->PopupCloseAll();
       ctx->Yield(2);
     }
-    // A mode off its default lights the modes face (looked at by eye).
+    // A mode off its default puts a dot on the modes face (looked at by eye;
+    // sketch/modes_flyout_dot asserts it).
     s_App->sketchEdit.autoConstrain = !s_App->sketchEdit.autoConstrain;
     ctx->MouseMoveToPos(ImGui::GetMainViewport()->GetCenter());
-    GuiShot(ctx, "sketch_toolbar_modes_lit");
+    GuiShot(ctx, "sketch_toolbar_modes_dot");
     s_App->sketchEdit.autoConstrain = !s_App->sketchEdit.autoConstrain;
     ctx->ItemClick("**/###tb_sk_finish");
     ctx->Yield(2);

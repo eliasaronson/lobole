@@ -104,6 +104,12 @@ struct ListRowResult {
   bool tailClicked = false; // the tail glyph, when it is a button
 };
 ListRowResult ListRow(const ListRowSpec& row);
+// The small state dot, on the lower right of the box `lo`..`hi` (an item's
+// rect), ringed in `ring` so it reads against what it overlaps: a list row's
+// `dotColor`, and a toolbar face holding a state the bar does not show (the
+// sketch modes flyout with a mode off its default).
+void DrawStateDot(ImDrawList* dl, ImVec2 lo, ImVec2 hi, ImVec4 color,
+                  ImU32 ring);
 // Opens or closes a row's disclosure (by its `disclosureId`) in the current
 // window: a click that makes a setup the active one also shows what is in it.
 void SetListRowOpen(const std::string& disclosureId, bool open);
