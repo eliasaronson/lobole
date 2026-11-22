@@ -458,8 +458,8 @@ outside the test engine, which also means a stray click on a file-dialog
 button during a test opens a real picker on the developer's desktop. The
 `import/*` tests call the action behind it (`ui::StartImport`) with a
 fixture and click everything after; the readers are covered headlessly. Also the sketch toolbar's reference
-image button and its display toggles (`###tb_sk_image`, `###tb_sk_autocon`,
-`###tb_sk_glyphs`).
+image button and its display toggles (`###tb_sk_image`, and
+`###tb_sk_autocon` and `###tb_sk_glyphs` in the modes flyout).
 
 `parity/clicking_and_scripting_agree` builds the same part and drawing sheet by
 clicking and over the script surface and compares them.

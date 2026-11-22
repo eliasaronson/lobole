@@ -760,6 +760,66 @@ void DrawModelToolbar(AppState& state) {
   ImGui::NewLine();
 }
 
+namespace {
+// The sketch's mode toggles (were the Sketch panel's checkboxes, U8a), in one
+// flyout: three lit-or-not buttons were most of a row, and they are set once
+// a session rather than reached for. The face is lit while any of them is
+// off its default, so a mode left on (or off) still shows at a glance; the
+// tooltip names every state, and each row is a check item with its
+// command's chord, answering to the "###tb_sk_*" id it had as a button.
+void SketchModesFlyout(AppState& state) {
+  SketchEditState& edit = state.sketchEdit;
+  // The defaults are a fresh session's; a slice starts every session off.
+  const SketchEditState fresh{};
+  const bool unusual =
+      edit.autoConstrain != fresh.autoConstrain ||
+      edit.showConstraintGlyphs != fresh.showConstraintGlyphs ||
+      state.sketchSlice;
+  const auto onOff = [](bool b) { return b ? "on" : "off"; };
+  char tip[256];
+  std::snprintf(tip, sizeof(tip),
+                "Sketch modes: auto-constrain %s, constraint glyphs %s, "
+                "slice %s",
+                onOff(edit.autoConstrain), onOff(edit.showConstraintGlyphs),
+                onOff(state.sketchSlice));
+  if (unusual)
+    ImGui::PushStyleColor(ImGuiCol_Button,
+                          ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+  const bool clicked = ToolButton(ICON_FA_TOGGLE_ON "###tb_sk_modes", tip);
+  if (unusual)
+    ImGui::PopStyleColor();
+  if (clicked)
+    ImGui::OpenPopup("sketch_modes");
+  if (!ImGui::BeginPopup("sketch_modes"))
+    return;
+  const auto row = [&](const char* tbId, const char* id, const char* label,
+                       bool on, const char* why) {
+    const std::string item = std::string(CommandIcon(id)) + "   " +
+                             WithChord(state, id, label) + tbId;
+    const bool enabled = CommandEnabled(state, id);
+    if (ImGui::MenuItem(item.c_str(), nullptr, on, enabled))
+      RunCommand(state, id);
+    if (why != nullptr &&
+        ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+      ImGui::SetTooltip("%s", why);
+  };
+  row("###tb_sk_autocon", "sketch.toggle_autoconstrain", "Auto-constrain",
+      edit.autoConstrain,
+      "Snap and add constraints while drawing (hold Ctrl to place freely)");
+  row("###tb_sk_glyphs", "sketch.toggle_glyphs", "Constraint glyphs",
+      edit.showConstraintGlyphs, "Show constraint glyphs");
+  // Slice at the sketch plane: what helps when the sketch is INSIDE existing
+  // material, where there is no consuming feature for the automatic rollback
+  // to stop before. Greyed with a reason rather than clicking to no effect.
+  row("###tb_sk_slice", "sketch.toggle_slice", "Slice at the sketch plane",
+      state.sketchSlice,
+      (state.sketchSlice || CanSketchSlice(state))
+          ? "Hide everything between the camera and the sketch"
+          : "No clip plane free: all four section planes are in use");
+  ImGui::EndPopup();
+}
+} // namespace
+
 // The sketch-mode toolbar: draw tools, generative ops, and constraints — the
 // icon ribbon that replaces the model tools while a sketch is being edited.
 void DrawSketchModeToolbar(AppState& state) {
@@ -817,12 +877,18 @@ void DrawSketchModeToolbar(AppState& state) {
         current = i;
         break;
       }
+    const std::string face =
+        std::string(CommandIcon(v[current].id)) + kSketchId + id;
+    // The face and its caret wrap as one, so a caret never opens a row.
+    WrapIfNeeded(ImGui::CalcTextSize(face.c_str(), nullptr, true).x +
+                 ImGui::GetStyle().FramePadding.x * 2.0f +
+                 std::floor(ImGui::GetFrameHeight() * 0.45f) +
+                 ImGui::GetStyle().ItemSpacing.x);
     ImGui::PushID(id);
     if (groupActive)
       ImGui::PushStyleColor(ImGuiCol_Button,
                             ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
-    if (ImGui::Button(
-            (std::string(CommandIcon(v[current].id)) + kSketchId + id).c_str()))
+    if (ImGui::Button(face.c_str()))
       RunCommand(state, v[current].id);
     if (groupActive)
       ImGui::PopStyleColor();
@@ -833,8 +899,11 @@ void DrawSketchModeToolbar(AppState& state) {
       ImGui::OpenPopup("variants");
     if (ImGui::BeginPopup("variants")) {
       for (int i = 0; i < n; i++) {
+        // Each row answers to its command's "###tb_sk_<command>", the id
+        // the tool would have as a button of its own.
         const std::string item = std::string(CommandIcon(v[i].id)) + "   " +
-                                 WithChord(state, v[i].id, v[i].label);
+                                 WithChord(state, v[i].id, v[i].label) +
+                                 skId(v[i].id);
         if (ImGui::Selectable(item.c_str(), i == current)) {
           current = i;
           RunCommand(state, v[i].id);
@@ -849,6 +918,7 @@ void DrawSketchModeToolbar(AppState& state) {
   static int circleVariant = 0;
   static int rectVariant = 0;
   static int arcVariant = 0;
+  static int cutVariant = 0;
 
   toolBtn("sketch.line", "Line", SketchTool::Line);
   toolGroup("circlegrp", circleVariant,
@@ -868,8 +938,11 @@ void DrawSketchModeToolbar(AppState& state) {
   toolBtn("sketch.spline", "Spline", SketchTool::Spline);
   toolBtn("sketch.point", "Point", SketchTool::Point);
   toolBtn("sketch.text", "Text: click to place a label", SketchTool::Text);
-  toolBtn("sketch.trim", "Trim", SketchTool::Trim);
-  toolBtn("sketch.split", "Split a curve", SketchTool::Split);
+  // Trim and Split both cut a curve where it crosses another; one takes the
+  // piece away, the other keeps both.
+  toolGroup("cutgrp", cutVariant,
+            {{"sketch.trim", "Trim", SketchTool::Trim},
+             {"sketch.split", "Split a curve", SketchTool::Split}});
   toolBtn("sketch.dimension", "Dimension", SketchTool::Dimension);
   Divider();
   toolBtn("sketch.mirror", "Mirror", SketchTool::Mirror);
@@ -879,6 +952,12 @@ void DrawSketchModeToolbar(AppState& state) {
   toolBtn("sketch.project",
           "Project geometry — click a body edge/face -> live reference",
           SketchTool::Project);
+  // Insert reference image (U8 polish): file dialog, then the fresh image's
+  // session (opacity/calibrate/delete) opens in the Tool window. Editing
+  // later: double-click the image's Operations row in the Model panel. Next
+  // to Project: both bring something from outside the sketch into it.
+  CommandButton(state, "###tb_sk_image", "sketch.image",
+                "Insert reference image\xe2\x80\xa6");
   Divider();
 
   // Constraints act on the current selection (validated in
@@ -943,33 +1022,7 @@ void DrawSketchModeToolbar(AppState& state) {
 
   CommandButton(state, "###tb_sk_construction", "sketch.toggle_construction",
                 "Construction — reference geometry, dashed");
-  Divider();
-
-  // Mode toggles (were the Sketch panel's checkboxes, U8a).
-  CommandButton(state, "###tb_sk_autocon", "sketch.toggle_autoconstrain",
-                "Auto-constrain — snap and add constraints while drawing "
-                "(hold Ctrl to place freely)",
-                edit.autoConstrain);
-  CommandButton(state, "###tb_sk_glyphs", "sketch.toggle_glyphs",
-                "Show constraint glyphs", edit.showConstraintGlyphs);
-  // Slice at the sketch plane: what helps when the sketch is INSIDE existing
-  // material, where there is no consuming feature for the automatic rollback
-  // to stop before. Greyed with a reason rather than clicking to no effect.
-  const std::string sliceTip =
-      (state.sketchSlice || CanSketchSlice(state))
-          ? "Slice at the sketch plane \xe2\x80\x94 hide everything between "
-            "the camera and the sketch"
-          : "Slice at the sketch plane \xe2\x80\x94 no clip plane free, all "
-            "four section planes are in use";
-  CommandButton(state, "###tb_sk_slice", "sketch.toggle_slice",
-                sliceTip.c_str(), state.sketchSlice);
-  Divider();
-
-  // Insert reference image (U8 polish): file dialog, then the fresh image's
-  // session (opacity/calibrate/delete) opens in the Tool window. Editing
-  // later: double-click the image's Operations row in the Model panel.
-  CommandButton(state, "###tb_sk_image", "sketch.image",
-                "Insert reference image\xe2\x80\xa6");
+  SketchModesFlyout(state);
   Divider();
 
   // Extrude/Revolve straight from the sketch (were panel buttons, U8a);

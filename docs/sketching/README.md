@@ -1258,6 +1258,25 @@ makes a project variable and drives the dimension by it
 ([numeric input](../ui/numeric-input.md#a-new-variable)). Labels drag to
 reposition (`labelOffset`).
 
+### The toolbar
+
+The sketch toolbar (`DrawSketchModeToolbar`, `src/ui/Toolbar.cpp`) is one
+row at 1280 px (`toolbar/every_tool_is_reachable` asserts it). Tools that are
+one idea share a **flyout**: the face shows the variant last used and runs
+it, the caret lists them all — Circle/Ellipse, Rectangle/Centre rectangle,
+the three arcs, and Trim/Split. Every flyout row answers to the id its tool
+would have as a button (`###tb_sk_trim`, `###tb_sk_ellipse`, …), so a test
+or an agent opens the flyout (`cutgrp/###more`) and clicks the row.
+
+The three **modes** — auto-constrain, constraint glyphs, slice — are check
+items in one more flyout (`###tb_sk_modes`, rows `###tb_sk_autocon`,
+`###tb_sk_glyphs`, `###tb_sk_slice`). They are set once a session rather
+than reached for, so they do not get three buttons; instead the face is
+**lit while any of them is off its default** (a fresh `SketchEditState`'s,
+and slice off), and its tooltip names all three states. Their keys
+(Shift+S, Y, F7) work as before. Reference image sits beside Project: both
+bring something from outside the sketch into it.
+
 ### The first dimension
 
 A sketch drawn by eye keeps its shape when its first length is given:
@@ -1297,7 +1316,7 @@ the next regeneration.
 ### Split
 
 The Split tool (`SketchTool::Split`, `sketch.split`, K, `###tb_sk_split`
-after Trim, the part Split's glyph) cuts the curve under a click — a line,
+in Trim's flyout, the part Split's glyph) cuts the curve under a click — a line,
 an arc, a circle, an ellipse, an elliptical arc or a spline — into pieces
 that stay one curve (`SplitEntity`,
 [Operations](#operations-on-the-entity-list)). Hovering snaps the cut to a

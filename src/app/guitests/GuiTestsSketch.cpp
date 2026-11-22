@@ -29,27 +29,6 @@ std::string SourceFixture(const std::string& rel) {
   return std::string(LOBOLE_SOURCE_DIR) + "/tests/fixtures/" + rel;
 }
 
-namespace {
-// The window as it stands, saved as `<name>.png` when the run was given
-// --capture-dir, for a person to look at (docs/ui/testing.md); nothing
-// otherwise.
-void GuiShot(ImGuiTestContext* ctx, const char* name) {
-  if (GuiTestCaptureDir().empty())
-    return;
-  ctx->Yield(2);
-  ctx->CaptureReset();
-  ImGuiCaptureArgs* args = ctx->CaptureArgs;
-  std::snprintf(args->InOutputFile, sizeof(args->InOutputFile), "%s/%s.png",
-                GuiTestCaptureDir().c_str(), name);
-  args->InPadding = 0.0f;
-  const ImGuiViewport* vp = ImGui::GetMainViewport();
-  args->InCaptureRect =
-      ImRect(vp->Pos, ImVec2(vp->Pos.x + vp->Size.x, vp->Pos.y + vp->Size.y));
-  IM_CHECK(ctx->CaptureScreenshot(ImGuiCaptureFlags_IncludeOtherWindows |
-                                  ImGuiCaptureFlags_IncludePopups));
-}
-} // namespace
-
 void RegisterSketchGuiTests(ImGuiTestEngine* engine) {
   ImGuiTest* t = nullptr;
   (void)t;

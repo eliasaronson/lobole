@@ -50,14 +50,14 @@ static const char* const kSketchTools[] = {
     "###tb_sk_spline",
     "###tb_sk_point",
     "###tb_sk_text",
-    "###tb_sk_trim",
-    "###tb_sk_split",
+    "###tb_sk_cutgrp",
     "###tb_sk_dimension",
     "###tb_sk_mirror",
     "###tb_sk_fillet",
     "###tb_sk_pattern",
     "###tb_sk_offset",
     "###tb_sk_project",
+    "###tb_sk_image",
     "###tb_sk_constraint_horizontal",
     "###tb_sk_constraint_vertical",
     "###tb_sk_constraint_coincident",
@@ -65,14 +65,27 @@ static const char* const kSketchTools[] = {
     "###tb_sk_constraint_perpendicular",
     "###tb_sk_more_constraints",
     "###tb_sk_construction",
-    "###tb_sk_autocon",
-    "###tb_sk_glyphs",
-    "###tb_sk_slice",
-    "###tb_sk_image",
+    "###tb_sk_modes",
     "###tb_sk_extrude",
     "###tb_sk_revolve",
     "###tb_sk_hole",
     "###tb_sk_fit",
+};
+
+// What each sketch flyout holds, by the id its opener answers to: every row
+// keeps the "###tb_sk_<command>" it would have as a button of its own.
+struct SketchFlyout {
+  const char* opener;
+  std::initializer_list<const char*> rows;
+};
+static const SketchFlyout kSketchFlyouts[] = {
+    {"circlegrp/###more", {"###tb_sk_circle", "###tb_sk_ellipse"}},
+    {"rectgrp/###more", {"###tb_sk_rectangle", "###tb_sk_rectangle_center"}},
+    {"arcgrp/###more",
+     {"###tb_sk_arc_3point", "###tb_sk_arc_center", "###tb_sk_ellipse_arc"}},
+    {"cutgrp/###more", {"###tb_sk_trim", "###tb_sk_split"}},
+    {"###tb_sk_modes",
+     {"###tb_sk_autocon", "###tb_sk_glyphs", "###tb_sk_slice"}},
 };
 
 namespace {
@@ -86,8 +99,7 @@ uint32_t LeadingIcon(const char* label) {
 }
 
 // What a toolbar item IS, for telling a duplicate from the same command met
-// twice: its "###" id where it has one, its visible text otherwise (a sketch
-// flyout's rows carry no id).
+// twice: its "###" id where it has one, its visible text otherwise.
 std::string ItemIdentity(const char* label) {
   const char* hash = std::strstr(label, "###");
   if (hash != nullptr)
@@ -799,10 +811,9 @@ void RegisterShellGuiTests(ImGuiTestEngine* engine) {
       IM_CHECK_SILENT(ctx->ItemExists((std::string("**/") + id).c_str()));
 
     // The sketch bar the same way: it fits the window's width (it wraps
-    // rather than scroll a button out of reach) and every button is there.
-    // It takes two rows at this width (1280 px): Extrude, Revolve, Hole and
-    // Fit wrap, which is logged rather than asserted until the bar is
-    // rearranged.
+    // rather than scroll a button out of reach), every button is there, and
+    // at this width (1280 px) it is ONE row -- the mode toggles and Trim /
+    // Split are flyouts so that it is (docs/sketching/README.md#the-toolbar).
     EnterSketchOnPlane(ctx, 0);
     ctx->Yield(2);
     ctx->LogInfo("sketch toolbar content %.0f px in %.0f px",
@@ -819,6 +830,26 @@ void RegisterShellGuiTests(ImGuiTestEngine* engine) {
       IM_CHECK_SILENT(ctx->ItemExists(ref.c_str()));
     }
     ctx->LogInfo("sketch toolbar: %d row(s)", static_cast<int>(rows.size()));
+    GuiShot(ctx, "sketch_toolbar_1280");
+    IM_CHECK_EQ(static_cast<int>(rows.size()), 1);
+    // Every flyout row is there under its own id, one click from the bar.
+    for (const SketchFlyout& f : kSketchFlyouts) {
+      ctx->SetRef("//##DockHost");
+      ctx->ItemClick((std::string("**/") + f.opener).c_str());
+      ctx->Yield(2);
+      if (std::string(f.opener) == "###tb_sk_modes")
+        GuiShot(ctx, "sketch_toolbar_modes");
+      for (const char* row : f.rows)
+        IM_CHECK_SILENT(
+            ctx->ItemExists((std::string("//$FOCUSED/") + row).c_str()));
+      ctx->PopupCloseAll();
+      ctx->Yield(2);
+    }
+    // A mode off its default lights the modes face (looked at by eye).
+    s_App->sketchEdit.autoConstrain = !s_App->sketchEdit.autoConstrain;
+    ctx->MouseMoveToPos(ImGui::GetMainViewport()->GetCenter());
+    GuiShot(ctx, "sketch_toolbar_modes_lit");
+    s_App->sketchEdit.autoConstrain = !s_App->sketchEdit.autoConstrain;
     ctx->ItemClick("**/###tb_sk_finish");
     ctx->Yield(2);
   };
@@ -857,9 +888,8 @@ void RegisterShellGuiTests(ImGuiTestEngine* engine) {
       EnterSketchOnPlane(ctx, 0);
       Seen sketch;
       CollectToolbarIcons(ctx, "//##DockHost", "sketch", sketch, {"grp"});
-      for (const char* g : {"circlegrp", "rectgrp", "arcgrp"})
-        CollectFlyout(ctx, (std::string(g) + "/###more").c_str(), "sketch",
-                      sketch);
+      for (const SketchFlyout& f : kSketchFlyouts)
+        CollectFlyout(ctx, f.opener, "sketch", sketch);
       IM_CHECK_GT((int)sketch.size(), 25);
       ctx->SetRef("//##DockHost");
       ctx->ItemClick("**/###tb_sk_finish");

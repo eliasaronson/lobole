@@ -257,6 +257,9 @@ const ToolCase* FindToolCase(const char* testName);
 // A file under tests/fixtures/ in the source tree ("images/checker16x12.png").
 // Defined in GuiTestsSketch.cpp, the one file that knows the source dir.
 std::string SourceFixture(const std::string& rel);
+// The window as it stands, saved as `<name>.png` when the run was given
+// --capture-dir (docs/ui/testing.md); nothing otherwise.
+void GuiShot(ImGuiTestContext* ctx, const char* name);
 
 void EnterHoleSketchOnPlane(ImGuiTestContext* ctx, int planeIdx);
 void EnterSketchOnPlane(ImGuiTestContext* ctx, int planeIdx);

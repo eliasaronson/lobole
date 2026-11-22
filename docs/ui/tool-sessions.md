@@ -379,7 +379,8 @@ The sketcher's tool sessions use the same tool window: Mirror, Sketch Fillet,
 Sketch Pattern, Offset, Linked Copy, Reference Image, Calibrate Image,
 Dimension and the Hole's point sketch. Select and the drawing tools need no
 window; the prompt pill is enough. There is no Sketch panel: its toggles
-(auto-constrain, constraint glyphs) are on the sketch toolbar, Extrude,
+(auto-constrain, constraint glyphs) are in the sketch toolbar's modes flyout
+([the toolbar](../sketching/README.md#the-toolbar)), Extrude,
 Revolve and the finish check mark (`###tb_sk_finish`) are on the sketch
 toolbar, and two sections sit at the bottom of the Model panel while a sketch
 is edited (`DrawSketchModelSections`): **Operations** (reference images,
