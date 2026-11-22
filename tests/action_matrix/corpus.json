@@ -1137,9 +1137,9 @@
       "source": "tests/golden/v234-section-pieces.json"
     },
     {
-      "design": "golden/vNEXT-expect-kinds",
+      "design": "golden/v235-expect-kinds",
       "kind": "golden",
-      "source": "tests/golden/vNEXT-expect-kinds.json"
+      "source": "tests/golden/v235-expect-kinds.json"
     },
     {
       "design": "golden/v216-u-name-by-fewer-edges",
