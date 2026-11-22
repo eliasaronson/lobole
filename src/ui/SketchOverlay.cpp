@@ -393,12 +393,25 @@ std::vector<PrimVertex> BuildActiveSketchPrimitives(AppState& state,
                           : isDefined ? defined
                                       : base;
     const float halfPx = (s || h) ? 3.0f : (constr ? 1.3f : 1.8f);
+    // A construction line ON a datum axis: the axis's red or green filled
+    // the gaps of its dashes and it read as the axis. A dark band under it
+    // hides the axis where the line is, so its dashes read as a line of
+    // their own (docs/sketching/README.md#gui).
+    bool onAxis = false;
+    if (const auto* l = std::get_if<sketch::Line>(&e); l != nullptr && constr) {
+      const double tol = 1e-6 * (1.0 + glm::length(l->b - l->a));
+      onAxis = (std::abs(l->a.y) < tol && std::abs(l->b.y) < tol) ||
+               (std::abs(l->a.x) < tol && std::abs(l->b.x) < tol);
+    }
+    const glm::vec4 band(0.09f, 0.10f, 0.13f, 0.95f);
     // One polyline for most entities; one per glyph contour for a label.
     for (const std::vector<glm::dvec2>& poly :
          sketch::TessellateEntityPolylines(e)) {
       for (size_t i = 0; i + 1 < poly.size(); i++) {
         glm::vec3 wa = sk->plane.PlaneToWorld(poly[i]);
         glm::vec3 wb = sk->plane.PlaneToWorld(poly[i + 1]);
+        if (onAxis)
+          AppendPrimLine(wa, wb, halfPx + 1.6f, band, prims);
         if (constr && !s && !h)
           AppendPrimDashedLine(wa, wb, halfPx, col, prims);
         else

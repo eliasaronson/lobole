@@ -1572,7 +1572,11 @@ box); Ctrl adds. Datum hits rank below real geometry, and construction
 (a projection's, a section's, or drawn so) ranks as if 4 px further away
 than it is (`PickSketchCandidates`): a line traced over a section's line
 lying exactly under it takes the first click, the section's the second,
-while a construction line clearly nearer the cursor still wins.
+while a construction line clearly nearer the cursor still wins. A
+construction line drawn ON a datum axis takes the click before the axis,
+and draws over a dark band (`BuildActiveSketchPrimitives`): its dashes were
+grey on the axis's red or green, which filled their gaps, and it read as
+the axis (`sketch/construction_on_an_axis_reads`).
 
 **Auto-constraints while drawing** (`sketch::InferPoint`, on by default,
 Shift+S toggles, Ctrl suppresses for one click): the point snaps and, on

@@ -1477,6 +1477,87 @@ void RegisterSketchGuiTests(ImGuiTestEngine* engine) {
 
   // Guided mirror across the Y datum axis (NF1): the axis is pickable even
   // though it isn't an entity.
+  // A construction line drawn on a datum axis (docs/sketching/README.md#gui)
+  // reads as itself, not as the axis it lies on: drawn over the axis with a
+  // dark band under its dashes, so the axis's red does not fill the gaps,
+  // and a click on it takes the line before the axis.
+  t = IM_REGISTER_TEST(engine, "sketch", "construction_on_an_axis_reads");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    EnterSketchOnPlane(ctx, 0);
+    for (int i = 0; i < 600 && s_App->camera->IsAnimating(); i++)
+      ctx->Yield();
+    s_App->camera->StopAnimation();
+    s_App->camera->SetTarget(glm::vec3(0.0f));
+    s_App->camera->SetUp(glm::vec3(0.0f, 1.0f, 0.0f));
+    s_App->camera->SetPosition(glm::vec3(0.0f, 0.0f, 10.0f));
+    ctx->Yield(2);
+    auto* sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    IM_CHECK(sk != nullptr);
+    nlohmann::json before = DocumentIO::FeatureToJson(*sk);
+    sketch::Line onAxis{{-3.0, 0.0}, {3.0, 0.0}};
+    onAxis.construction = true;
+    const uint32_t line = sk->AddEntity(onAxis);
+    sketch::Line offAxis{{-3.0, 1.5}, {3.0, 1.5}};
+    offAxis.construction = true;
+    const uint32_t other = sk->AddEntity(offAxis);
+    nlohmann::json after = DocumentIO::FeatureToJson(*sk);
+    s_App->commands->Execute(
+        std::make_unique<ModifyFeatureCommand>(0, before, after), *Doc());
+    ctx->Yield(2);
+    sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    s_App->sketchEdit.tool = ui::SketchTool::Select;
+    s_App->sketchEdit.selected.clear();
+    // Away from both, so neither is drawn hovered.
+    const glm::vec2 away =
+        ui::SketchUVToScreen(*s_App, sk->plane, glm::vec2(1.0f, -2.5f));
+    ctx->MouseMoveToPos(ImVec2(away.x, away.y));
+    ctx->Yield(2);
+    GuiShot(ctx, "construction_on_axis");
+
+    // What is drawn: the line on the axis has its band, the one off it
+    // does not -- the band is for where something already draws.
+    const std::vector<PrimVertex> prims =
+        ui::BuildActiveSketchPrimitives(*s_App, sk->GetId());
+    const auto bandAt = [&](float v) {
+      int n = 0;
+      for (const PrimVertex& p : prims)
+        if (p.params.y == 0.0f && p.color.a > 0.5f &&
+            p.color.r + p.color.g + p.color.b < 0.6f &&
+            std::abs(p.posThis.y - v) < 1e-4f &&
+            std::abs(p.posOther.y - v) < 1e-4f)
+          n++;
+      return n;
+    };
+    IM_CHECK_GT(bandAt(0.0f), 0);
+    IM_CHECK_EQ(bandAt(1.5f), 0);
+
+    // What is picked: the line, before the axis under it.
+    const glm::vec2 on =
+        ui::SketchUVToScreen(*s_App, sk->plane, glm::vec2(2.0f, 0.0f));
+    const std::vector<ui::SketchPick> picks =
+        ui::PickSketchCandidates(*s_App, *sk, on, 8.0f);
+    IM_CHECK_GE(picks.size(), (size_t)2);
+    if (picks.size() >= 2) {
+      IM_CHECK_EQ(picks[0].ref.entity, line);
+      IM_CHECK(picks[0].body);
+      bool axisAfter = false;
+      for (size_t i = 1; i < picks.size(); i++)
+        axisAfter |= picks[i].ref.entity == sketch::kAxisX;
+      IM_CHECK(axisAfter);
+    }
+    ctx->MouseMoveToPos(ImVec2(on.x, on.y));
+    ctx->MouseClick(ImGuiMouseButton_Left);
+    ctx->Yield(2);
+    IM_CHECK_EQ(s_App->sketchEdit.selected.size(), (size_t)1);
+    if (!s_App->sketchEdit.selected.empty())
+      IM_CHECK_EQ(s_App->sketchEdit.selected[0].entity, line);
+    (void)other;
+    s_App->sketchEdit.selected.clear();
+    ctx->KeyPress(ImGuiKey_Escape);
+    ctx->Yield();
+  };
+
   t = IM_REGISTER_TEST(engine, "mirror", "across_datum_axis");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
