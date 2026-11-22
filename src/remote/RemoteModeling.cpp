@@ -966,11 +966,15 @@ static constexpr MethodDoc ModelingMethods[] = {
      "listed. Read-only. Refused for a sketch with no section, or nothing "
      "traced over it (trace_section).",
      "sketch_id:int>=1, max_sigmas?:number>0", remote::NeedsPart,
-     "candidates:object[]"},
+     "candidates:{key:string, kind:string, entities:int[], datum?:string, "
+     "off_mm?:number, off_deg?:number, sigma_mm?:any, sigma_deg?:any, "
+     "sigmas:number, measured_mm?:number, measured_deg?:number, "
+     "nominal_mm?:number, nominal_deg?:number}[]"},
     {"accept_candidates",
      "Add sketch_candidates' rows as ordinary constraints and driving "
-     "dimensions (each at its nominal), fewest sigmas first, solving after "
-     "each (docs/sketching/README.md#accepting-them): one the solver cannot "
+     "dimensions (each at its nominal), relations before sizes and each "
+     "fewest sigmas first, solving after each "
+     "(docs/sketching/README.md#accepting-them): one the solver cannot "
      "meet or reads as redundant is taken back, and so is one that moves a "
      "traced entity further off its section points than `max_move_mm` "
      "(default three times that entity's own sigma; measured on the curve "
