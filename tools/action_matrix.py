@@ -13,6 +13,7 @@ over the RPC, each outcome held to a committed baseline.
     tools/action_matrix.py bless --from DIR    # merge shard outputs
     tools/action_matrix.py replay CASE.json    # one action, judged
     tools/action_matrix.py self-test
+    tools/action_matrix.py reformat-baseline   # its own shape, same content
     tools/action_matrix.py export-breps DIR [--design PAT] [--jobs N]
 
 The corpus is tests/action_matrix/corpus.json; the baseline
@@ -2087,6 +2088,16 @@ def self_test():
     if parse_line(toks["d"][fam]) != {"edge.fillet": {"pass": 1, "fail": 1,
                                                       "refuse": 0}}:
         problems.append(f"family line {toks['d'][fam]!r} does not parse back")
+    # The committed baseline is in the shape this tool writes it, one line
+    # per entity, so a diff names the entity that moved. A formatter that
+    # reflowed it once (clang-format's JSON mode, from a bare
+    # `git clang-format`) left a file every bless then rewrote whole.
+    with open(BASELINE, encoding="utf-8") as f:
+        text = f.read()
+    if dump_baseline(json.loads(text)) != text:
+        problems.append(f"{os.path.relpath(BASELINE, ROOT)} is not in the "
+                        "shape dump_baseline writes; restore it with "
+                        "tools/action_matrix.py reformat-baseline")
     if problems:
         print("action_matrix self-test: FAILED")
         for p in problems:
@@ -2169,6 +2180,9 @@ def main():
     b = sub.add_parser("bless")
     b.add_argument("--from", dest="from_dir", required=True)
     sub.add_parser("self-test")
+    sub.add_parser("reformat-baseline",
+                   help="rewrite the baseline in the tool's own shape, its "
+                        "content unchanged")
     rp_ = sub.add_parser("replay")
     rp_.add_argument("case", help="a JSON reproduction, or one JSONL row")
     rp_.add_argument("--binary", default=default_binary())
@@ -2202,6 +2216,12 @@ def main():
         return cmd_bless(args)
     if args.cmd == "self-test":
         return self_test()
+    if args.cmd == "reformat-baseline":
+        with open(BASELINE, encoding="utf-8") as f:
+            base = json.load(f)
+        with open(BASELINE, "w", encoding="utf-8") as f:
+            f.write(dump_baseline(base))
+        return 0
     if args.cmd == "replay":
         return cmd_replay(args)
     if args.cmd == "export-breps":

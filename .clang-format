@@ -1,3 +1,25 @@
 BasedOnStyle: LLVM
 PointerAlignment: Left
 ColumnLimit: 80
+# C and C++ only. A bare `git clang-format` formats every staged file of
+# every extension it knows, JSON and JavaScript among them, and once reflowed
+# tests/action_matrix/baseline.json out of the shape its tool writes: every
+# other language clang-format reads is left exactly as it is.
+---
+Language: Json
+DisableFormat: true
+---
+Language: JavaScript
+DisableFormat: true
+---
+Language: Proto
+DisableFormat: true
+---
+Language: TextProto
+DisableFormat: true
+---
+Language: Java
+DisableFormat: true
+---
+Language: CSharp
+DisableFormat: true

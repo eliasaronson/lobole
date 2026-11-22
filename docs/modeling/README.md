@@ -2537,7 +2537,11 @@ refuses a partial one (`--sample`, `--design`, `--actions`, `--shard`);
 every K. Both refuse while a finding is not in the `known` table: it wants a
 fix, or a bug entry, a reproduction and a `known` row first. The `known`
 table and the corpus are edited by hand; everything else in the baseline is
-written by `bless`.
+written by `bless`, in one shape, one line per entity, so a diff names the
+entity that moved. `action_matrix_selftest` fails on a baseline in any
+other shape (a formatter once reflowed it), and `reformat-baseline`
+rewrites it in the tool's own, its content unchanged; `.clang-format`
+leaves JSON alone.
 
 The tests (`tests/action_matrix_smoke.py`): `action_matrix_sample` (the
 headless suite and `test-fast.sh`), `action_matrix_full_0`..`7` and
