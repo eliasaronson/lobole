@@ -48,6 +48,12 @@ struct IntegrateOptions {
   // face unconverged, its uncertainty the gap between the fixed rule and the
   // first estimate.
   int maxHalvings = DefaultHalvings();
+  // The surface evaluations one face's second estimate may make, every
+  // level together: a halving that would pass it is not taken, and the
+  // face is reported unconverged. Measured: the hardest face of the
+  // integrator's tests, a cam's planar cap bounded by 360 spans, makes
+  // 650 000; a thread's, 270 000.
+  long maxEvaluations = 4'000'000;
   // Two successive estimates of a face agree when every figure moves by no
   // more than this fraction of the body's scale: the sum of the faces'
   // volumes' magnitudes (times the box's half diagonal for a moment, its
@@ -79,6 +85,7 @@ struct FaceReport {
   bool volumeReplaced = false; // the second estimate replaced the fixed one
   bool areaReplaced = false;
   double seconds = 0.0; // CPU time of the second estimate
+  long evaluations = 0; // surface evaluations the second estimate made
   // The volume's change at each level as a fraction of the body's volume
   // scale: the first from the fixed rule to the knot-split estimate, then
   // one per halving.

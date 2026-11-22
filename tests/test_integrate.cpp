@@ -11,6 +11,8 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
 #include "SameCore.h"
+#include "TestIO.h"
+#include "TestPaths.h"
 #include "cad/CADKernel.h"
 #include "cad/Integrate.h"
 #include "core/Document.h"
@@ -226,6 +228,7 @@ struct Spread {
   double gap = 0.0;
   int maxHalvings = 0;
   double secondSeconds = 0.0;
+  long maxEvaluations = 0;
 };
 Spread SpreadOf(const cad::Integral& r) {
   Spread s;
@@ -235,6 +238,7 @@ Spread SpreadOf(const cad::Integral& r) {
     s.gap = std::max(s.gap, std::abs(f.fixed.volume - f.second.volume) /
                                 r.scale.volume);
     s.maxHalvings = std::max(s.maxHalvings, f.halvings);
+    s.maxEvaluations = std::max(s.maxEvaluations, f.evaluations);
     s.secondSeconds += f.seconds;
   }
   return s;
@@ -251,11 +255,11 @@ void Report(const char* name, double truth, const Today& today, const Run& run,
   std::printf("[integrate] %-34s true %.9f %s | today %.9f (%+.2e) %.4f s | "
               "integrator %.9f (%+.2e) +- %.2e %.4f s | second %.9f | "
               "suspect %d/%zu, halvings <= %d, max gap %.2e of scale, "
-              "second estimates %.4f s\n",
+              "second estimates %.4f s, at most %ld evaluations a face\n",
               name, truth, unit, today.volume, today.volume - truth,
               today.seconds, r.volume, r.volume - truth, r.volumeUncertainty,
               run.seconds, second, r.suspectFaces, r.faces.size(),
-              s.maxHalvings, s.gap, s.secondSeconds);
+              s.maxHalvings, s.gap, s.secondSeconds, s.maxEvaluations);
   for (const cad::FaceReport& f : r.faces) {
     if (!f.suspect)
       continue;
@@ -1202,4 +1206,41 @@ TEST_CASE("a meshed thread body is not refused for its volume",
   CHECK(fem::MeshVolumeRefusal(*mesh, mesh->stats.shapeVolumeMm3,
                                mesh->stats.shapeVolumeErrorMm3)
             .empty());
+}
+
+TEST_CASE("an extruded 360-knot cam with a hole through its side",
+          "[integrate]") {
+  // tests/golden/v198-cam-profile.json: a cam whose profile is a cubic
+  // spline of 360 spans, padded 6 mm. A hole through its side leaves the
+  // side face, an extrusion of the spline, bounded by B-spline p-curves.
+  // Cutting the inner integral across u at every one of its knots, for
+  // every point of the outer rule, took 0.74 s for the first estimate and
+  // four times that a halving, and the action matrix's hole timed out; the
+  // inner integral runs across v there, which has none.
+  auto doc = testio::Load(std::string(TestSourceDir()) +
+                          "/tests/golden/v198-cam-profile.json");
+  REQUIRE(doc != nullptr);
+  REQUIRE(doc->GetBodies().size() == 1);
+  const gp_Pnt at(9.25, 16.020, 3.0);
+  const gp_Dir n(0.8660254037844402, -0.5, 0.0);
+  const TopoDS_Shape bore =
+      BRepPrimAPI_MakeCylinder(gp_Ax2(at.Translated(gp_Vec(n) * -20.0), n), 1.5,
+                               40.0)
+          .Shape();
+  const TopoDS_Shape s = Placed(
+      BRepAlgoAPI_Cut(doc->GetBodies()[0].shape.GetShape(), bore).Shape());
+  const SameCore held;
+  const Today today = TodaysRule(s);
+  const Run run = Measure(s);
+  Report("extruded 360-knot cam with a hole", today.volume, today, run);
+  CHECK(run.result.suspectFaces > 0);
+  CHECK(run.result.unconverged.empty());
+  // The fixed rule reads the side face 0.062 mm^3 off; the two estimates
+  // agree to well inside the 1e-9 the cases hold a figure to.
+  CHECK(std::abs(run.result.volume - today.volume) > 1e-2);
+  CHECK(run.result.volumeUncertainty < 1e-9 * run.result.volume);
+  // Measured at 0.17 s against 0.013 s for today's three passes, the
+  // planar caps' 360 spans and three halvings most of it; once, then
+  // cached.
+  CHECK(run.seconds < 0.5);
 }

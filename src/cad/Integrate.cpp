@@ -225,6 +225,26 @@ struct Edge {
   int order = 10;
 };
 
+// Where an inner integral across [lo, hi] is cut: at the knots inside it,
+// and, along a closed direction, into pieces of a quarter period or less.
+std::vector<double> Cuts(const std::vector<double>& knots, double lo, double hi,
+                         bool periodic, double period) {
+  std::vector<double> out = knots;
+  if (periodic && period > 0.0) {
+    std::vector<double> ends{lo};
+    ends.insert(ends.end(), knots.begin(), knots.end());
+    ends.push_back(hi);
+    for (size_t i = 0; i + 1 < ends.size(); i++) {
+      const int n =
+          int(std::ceil((ends[i + 1] - ends[i]) / (0.25 * period) - 1e-9));
+      for (int k = 1; k < n; k++)
+        out.push_back(ends[i] + (ends[i + 1] - ends[i]) * k / n);
+    }
+  }
+  std::sort(out.begin(), out.end());
+  return out;
+}
+
 // The second estimate of one face: the same Green's-theorem integral the
 // fixed rule computes (an outer rule along each p-curve, an inner one across
 // u from the face's lower u bound), with each p-curve cut at its own knots
@@ -241,25 +261,25 @@ public:
     SurfaceKnots(s, uk, vk);
     uKnots_ = Inside(uk, u1_, u2_);
     vKnots_ = Inside(vk, v1_, v2_);
-    // A closed u direction (an angle) is cut into quarter turns or less, so
-    // the inner rule starts on spans its trigonometry converges on.
-    if (s.IsUPeriodic() && s.UPeriod() > 0.0) {
-      std::vector<double> cuts{u1_};
-      cuts.insert(cuts.end(), uKnots_.begin(), uKnots_.end());
-      cuts.push_back(u2_);
-      std::vector<double> more;
-      for (size_t i = 0; i + 1 < cuts.size(); i++) {
-        const int n = int(
-            std::ceil((cuts[i + 1] - cuts[i]) / (0.25 * s.UPeriod()) - 1e-9));
-        for (int k = 1; k < n; k++)
-          more.push_back(cuts[i] + (cuts[i + 1] - cuts[i]) * k / n);
-      }
-      innerCuts_ = uKnots_;
-      innerCuts_.insert(innerCuts_.end(), more.begin(), more.end());
-      std::sort(innerCuts_.begin(), innerCuts_.end());
-    } else {
-      innerCuts_ = uKnots_;
-    }
+    // The inner integral runs across u from the face's lower u bound, as
+    // the fixed rule's does, unless v has fewer knot lines inside the face:
+    // an extrusion of a B-spline curve has its knots along u and none along
+    // v, and cutting the span across u at each of 360 knots, for every point
+    // of the outer rule, took seconds a face. A closed direction (an angle)
+    // is also cut into quarter turns or less, so the rule starts on spans its
+    // trigonometry converges on.
+    alongV_ = vKnots_.size() < uKnots_.size();
+    // Across a plane, or along the rulings of an extrusion, the integrand
+    // is a polynomial of low degree in the inner parameter, which the
+    // inner rule integrates exactly: halving it there only multiplies the
+    // cost (a cam's planar cap bounded by 360 spans took 0.47 s).
+    const GeomAbs_SurfaceType type = s.GetType();
+    innerExact_ = type == GeomAbs_Plane ||
+                  (alongV_ && type == GeomAbs_SurfaceOfExtrusion);
+    innerCuts_ = alongV_ ? Cuts(vKnots_, v1_, v2_, s.IsVPeriodic(),
+                                s.IsVPeriodic() ? s.VPeriod() : 0.0)
+                         : Cuts(uKnots_, u1_, u2_, s.IsUPeriodic(),
+                                s.IsUPeriodic() ? s.UPeriod() : 0.0);
 
     for (BRepGProp_Domain d(face); d.More(); d.Next()) {
       const TopoDS_Edge& e = d.Value();
@@ -298,6 +318,11 @@ public:
   }
 
   bool Ok() const { return ok_; }
+  // What a halving multiplies the cost by: both rules halve, or only the
+  // outer one where the inner is exact.
+  int Growth() const { return innerExact_ ? 2 : 4; }
+  // Surface evaluations made so far, every level together.
+  long Evaluations() const { return evaluations_; }
 
   FaceFigure At(int level) {
     const int split = 1 << level;
@@ -314,7 +339,11 @@ public:
             gp_Pnt2d p;
             gp_Vec2d d;
             e.curve.D1(lm + lr * g.x[j], p, d);
-            const double dul = e.sign * d.Y() * g.w[j] * lr;
+            // Green's theorem either way round: the integral over the face
+            // is the loop integral of F dv, F the integral across u from
+            // the lower u bound, or of -G du, G the one across v.
+            const double dul =
+                e.sign * (alongV_ ? -d.X() : d.Y()) * g.w[j] * lr;
             if (dul == 0.0)
               continue;
             const double u = std::clamp(p.X(), u1_, u2_);
@@ -366,23 +395,31 @@ private:
     }
   }
 
-  // The inner integral across u from the lower bound to `u`, at `v`.
+  // The inner integral across u from the lower bound to `u`, at `v` (or,
+  // along v, across v from its lower bound to `v`, at `u`).
   void Inner(double u, double v, double dul, int split, FaceFigure& f) {
-    if (u == u1_)
+    const double from = alongV_ ? v1_ : u1_, to = alongV_ ? v : u;
+    if (to == from)
       return;
-    const double lo = std::min(u1_, u), hi = std::max(u1_, u);
-    const double sign = u >= u1_ ? 1.0 : -1.0;
+    const double lo = std::min(from, to), hi = std::max(from, to);
+    const double sign = to >= from ? 1.0 : -1.0;
     const Gauss& g = Rule(kInnerOrder);
     double a = lo;
+    const int pieces = innerExact_ ? 1 : split;
     auto span = [&](double sa, double sb) {
-      for (int k = 0; k < split; k++) {
-        const double x1 = sa + (sb - sa) * k / split;
-        const double x2 = sa + (sb - sa) * (k + 1) / split;
+      for (int k = 0; k < pieces; k++) {
+        const double x1 = sa + (sb - sa) * k / pieces;
+        const double x2 = sa + (sb - sa) * (k + 1) / pieces;
         const double um = 0.5 * (x1 + x2), ur = 0.5 * (x2 - x1);
         for (size_t j = 0; j < g.x.size(); j++) {
           gp_Pnt p;
           gp_Vec n;
-          surface_.Normal(um + ur * g.x[j], v, p, n);
+          const double t = um + ur * g.x[j];
+          if (alongV_)
+            surface_.Normal(u, t, p, n);
+          else
+            surface_.Normal(t, v, p, n);
+          evaluations_++;
           const double w = sign * dul * ur * g.w[j];
           const double x = p.X() - about_.X(), y = p.Y() - about_.Y(),
                        z = p.Z() - about_.Z();
@@ -419,6 +456,9 @@ private:
   BRepGProp_Face surface_;
   double u1_ = 0, u2_ = 0, v1_ = 0, v2_ = 0;
   std::vector<double> uKnots_, vKnots_, innerCuts_;
+  bool alongV_ = false;
+  bool innerExact_ = false;
+  long evaluations_ = 0;
   std::vector<Edge> edges_;
   std::map<int, Gauss> rules_;
   bool ok_ = true;
@@ -569,9 +609,18 @@ Integral Integrate(const TopoDS_Shape& shape, const IntegrateOptions& options) {
     FaceFigure curV = cur, changeV = change, curA = cur, changeA = change;
     bool doneV = !wantV, doneA = !wantA;
     int level = 0;
+    long lastLevel = second.Evaluations();
     while ((!doneV || !doneA) && level < options.maxHalvings) {
+      // A halving costs up to four times the level before it: past the
+      // budget the face stops where it is, unconverged and saying so,
+      // rather than hold a measure for minutes.
+      if (second.Evaluations() + second.Growth() * lastLevel >
+          options.maxEvaluations)
+        break;
       level++;
+      const long before = second.Evaluations();
       cur = second.At(level);
+      lastLevel = second.Evaluations() - before;
       change = Gap(cur, prev);
       if (wantV)
         r.volumeChanges.push_back(change.volume / out.scale.volume);
@@ -590,6 +639,7 @@ Integral Integrate(const TopoDS_Shape& shape, const IntegrateOptions& options) {
     const bool converged =
         (!wantV || (doneV && level > 0)) && (!wantA || (doneA && level > 0));
     r.seconds = ThreadSeconds() - t0;
+    r.evaluations = second.Evaluations();
     r.second = wantV ? curV : FaceFigure{};
     r.second.area = wantA ? curA.area : 0.0;
     r.halvings = level;

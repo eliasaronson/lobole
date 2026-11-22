@@ -286,7 +286,18 @@ the box's half diagonal for a moment, its square for the inertia) and the
 sum of their areas. The fixed figure stands when it is within 1e-12 of that
 scale of the second estimate; otherwise the second one is used. Each figure
 carries an uncertainty: the last halving's change, plus the gap to the
-fixed rule where that stood. `LOBOLE_TEST_INTEGRATE_HALVINGS` (0 to 6) caps
+fixed rule where that stood.
+
+The span across u is cut at each of the surface's u knots for every point
+of the rule along the edges, so where v has fewer knot lines inside the
+face the inner integral runs across v instead (Green's theorem either way
+round): an extrusion of a 360-span cam profile has all its knots along u,
+and its side face with a hole took 0.74 s a level that way and 0.012 s
+across v. Across a plane, or along an extrusion's rulings, the inner rule
+is exact and is not halved. A face's second estimate may make 4 million
+surface evaluations, every level together (the cam's planar cap makes
+650 000, the thread's hardest face 270 000); a halving that would pass that is not taken, and the face is
+reported unconverged rather than holding a measure for minutes. `LOBOLE_TEST_INTEGRATE_HALVINGS` (0 to 6) caps
 the halvings for a test: at 0 every suspect face is left unconverged, which
 is how `mass_uncertainty_smoke` sees an uncertain figure reported.
 
