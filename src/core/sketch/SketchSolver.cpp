@@ -1689,7 +1689,8 @@ bool Solver::BeginDrag(const std::vector<PointRef>& points) {
     im.dragTarget.push_back(*gp->x); // start at the point's current position
     im.dragTarget.push_back(*gp->y);
     GCS::Point target(&im.dragTarget[base], &im.dragTarget[base + 1]);
-    int cid = im.sys.addConstraintP2PCoincident(*gp, target, im.dragTag++);
+    int cid = im.sys.addConstraintP2PCoincident(
+        *gp, target, GCS::DefaultTemporaryConstraint);
     im.sys.rescaleConstraint(cid, 0.01);
     im.dragTargetBase[i] = base;
   }
@@ -1717,8 +1718,9 @@ bool Solver::BeginRadiusDrag(uint32_t circleId) {
     return false;
   im.dragRadiusTarget.clear();
   im.dragRadiusTarget.push_back(*im.circles[it->second].rad); // current radius
-  int cid = im.sys.addConstraintCircleRadius(
-      im.circles[it->second], &im.dragRadiusTarget[0], im.dragTag++);
+  int cid = im.sys.addConstraintCircleRadius(im.circles[it->second],
+                                             &im.dragRadiusTarget[0],
+                                             GCS::DefaultTemporaryConstraint);
   im.sys.rescaleConstraint(cid, 0.01);
   im.DeclareUnknowns();
   const bool ok = im.RunSolve().conflicting.empty();

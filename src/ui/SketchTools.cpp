@@ -155,12 +155,17 @@ bool SketchCanTranslate(const SketchFeature& sketch, uint32_t lineId) {
   probe.SetDragTargets(targets);
   if (!probe.SolveDrag(sketch::Solver::DragGuard::None).ok)
     return false;
+  // Every point has to follow: a pull that only the free geometry answers
+  // would drag that along with the line and leave the rest behind.
   std::vector<sketch::Entity> moved = sketch.entities;
   probe.WriteBack(moved);
-  const auto& now = std::get<sketch::Line>(moved[at]);
   const double slack = 0.1 * step;
-  return glm::length(glm::dvec2(now.a) - glm::dvec2(line->a) - delta) < slack &&
-         glm::length(glm::dvec2(now.b) - glm::dvec2(line->b) - delta) < slack;
+  size_t k = 0;
+  for (const sketch::Entity& entity : moved)
+    for (const auto& [which, point] : EntityPoints(entity))
+      if (glm::length(glm::dvec2(point) - targets[k++]) > slack)
+        return false;
+  return true;
 }
 
 void BeginSketchTranslate(SketchDragSession& drag,

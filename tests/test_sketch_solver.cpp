@@ -442,6 +442,50 @@ TEST_CASE("Fixed pins a point under a drag", "[solver][drag]") {
   CHECK_THAT(glm::length(LineA(out[0])), WithinAbs(0.0, 1e-4)); // stayed at 0,0
 }
 
+// Two parallel lines whose starts are each held level with a fixed point:
+// a drag of the lower one's body up or down must leave it level.
+TEST_CASE("A line body drag keeps the level its start is held at",
+          "[solver][drag]") {
+  using K = sketch::ConstraintKind;
+  SketchFeature s = MakeSketch();
+  uint32_t top = s.AddEntity(sketch::Line{{-30, 3}, {30, 3}});
+  uint32_t side = s.AddEntity(sketch::Line{{30, 3}, {30, -3}});
+  s.constraints.push_back({K::Fixed, {top, 0}});
+  s.constraints.push_back({K::Fixed, {top, 1}});
+  s.constraints.push_back({K::Fixed, {side, 0}});
+  s.constraints.push_back({K::Fixed, {side, 1}});
+  const double turn = glm::radians(25.0);
+  const glm::dvec2 run = 7.0 * glm::dvec2(std::cos(turn), std::sin(turn));
+  uint32_t up = s.AddEntity(sketch::Line{{37, 3}, glm::dvec2(37, 3) + run});
+  uint32_t low = s.AddEntity(sketch::Line{{37, -3}, glm::dvec2(37, -3) + run});
+  s.constraints.push_back({K::Horizontal, {up, 0}, {top, 0}});
+  s.constraints.push_back({K::Vertical, {low, 0}, {up, 0}});
+  s.constraints.push_back({K::Horizontal, {low, 0}, {side, 1}});
+  s.constraints.push_back({K::Vertical, {low, 1}, {up, 1}});
+  s.constraints.push_back({K::Parallel, {low, 0}, {up, 0}});
+  s.constraints.push_back({K::Angle, {top, 0}, {up, 0}, turn});
+
+  sketch::Solver solver;
+  solver.Load(s);
+  REQUIRE(solver.Solve().ok);
+  REQUIRE(solver.BeginDrag({{low, 0}, {low, 1}}));
+  for (int i = 1; i <= 20; i++) {
+    const glm::dvec2 d(0.05 * i, -0.05 * i);
+    solver.SetDragTargets(
+        {glm::dvec2(37, -3) + d, glm::dvec2(37, -3) + run + d});
+    REQUIRE(solver.SolveDrag().ok);
+  }
+  std::vector<sketch::Entity> out;
+  solver.WriteBack(out);
+  const auto& l = std::get<sketch::Line>(out[3]);
+  const auto& u = std::get<sketch::Line>(out[2]);
+  INFO("low " << l.a.x << "," << l.a.y << " -> " << l.b.x << "," << l.b.y);
+  INFO("up " << u.a.x << "," << u.a.y << " -> " << u.b.x << "," << u.b.y);
+  CHECK_THAT(l.a.y, WithinAbs(-3.0, 1e-6));
+  CHECK_THAT(u.a.y, WithinAbs(3.0, 1e-6));
+  CHECK_THAT(l.a.x, WithinAbs(u.a.x, 1e-6));
+}
+
 TEST_CASE("Concentric shares two circle centres", "[solver]") {
   SketchFeature s = MakeSketch();
   uint32_t c0 = s.AddEntity(sketch::Circle{{0, 0}, 1.0});
@@ -1418,9 +1462,11 @@ TEST_CASE("A value edit with nothing to turn over costs one solve",
 
 TEST_CASE("A drag never mirrors a triangle", "[solver][drag]") {
   // An 80-60-100 triangle hinged at A, its free corner C dragged across AB
-  // in one frame. A point drag on a one-DOF hinge over-determines it, so
-  // PlaneGCS drops a redundant distance, and the one jump comes out
-  // mirrored; the guarded drag keeps the side.
+  // in one frame. The pull is a temporary constraint, below every real one,
+  // so no side's length is given up for it: the triangle turns about A as
+  // far as the pull takes it and stays the triangle it was, guarded or not.
+  // (Pulled as a real constraint, the over-determined hinge had PlaneGCS
+  // drop a distance and the one jump came out mirrored.)
   SketchFeature s = MakeSketch();
   using K = sketch::ConstraintKind;
   const uint32_t a = s.AddEntity(sketch::Point{{0, 0}});
@@ -1430,7 +1476,8 @@ TEST_CASE("A drag never mirrors a triangle", "[solver][drag]") {
   s.constraints.push_back({K::Distance, {a, 0}, {b, 0}, 100.0});
   s.constraints.push_back({K::Distance, {a, 0}, {c, 0}, 80.0});
   s.constraints.push_back({K::Distance, {b, 0}, {c, 0}, 60.0});
-  const auto drag = [&](sketch::Solver::DragGuard guard) {
+  for (const auto guard : {sketch::Solver::DragGuard::None,
+                           sketch::Solver::DragGuard::Orientations}) {
     sketch::Solver solver;
     solver.Load(s);
     REQUIRE(solver.BeginDrag({{c, 0}}));
@@ -1442,10 +1489,11 @@ TEST_CASE("A drag never mirrors a triangle", "[solver][drag]") {
       return std::get<sketch::Point>(out[s.IndexOfEntity(id)]).p;
     };
     const glm::dvec2 ab = p(b) - p(a), ac = p(c) - p(a);
-    return ab.x * ac.y - ab.y * ac.x;
-  };
-  REQUIRE(drag(sketch::Solver::DragGuard::None) < 0.0); // mirrored
-  CHECK(drag(sketch::Solver::DragGuard::Orientations) > 0.0);
+    CHECK(ab.x * ac.y - ab.y * ac.x > 0.0);
+    CHECK_THAT(glm::length(ab), WithinAbs(100.0, 1e-6));
+    CHECK_THAT(glm::length(ac), WithinAbs(80.0, 1e-6));
+    CHECK_THAT(glm::length(p(c) - p(b)), WithinAbs(60.0, 1e-6));
+  }
 }
 
 // A fully defined triangle: base fixed at its start and horizontal, three

@@ -1101,6 +1101,13 @@ the press with a pull on every point, and where the line does not follow,
 the drag is a `LineBody` one and the line moves as far as its own freedom
 goes. A driven dimension fixes nothing and does not count.
 
+The pull on a dragged point or radius is a PlaneGCS *temporary* constraint
+(`GCS::DefaultTemporaryConstraint`): it ranks below every real constraint,
+so a drag that asks for more than the sketch's freedom gets as close as
+that freedom allows. Tagged as a real constraint, an over-determined pull
+had the diagnosis drop one of the sketch's own constraints instead: a line
+held level with a corner was dragged off that level.
+
 `SketchFeature::Execute` re-solves only when a dimension or coordinate is
 expression-driven or external geometry exists (after `VisitExprs` has
 refreshed the values), as a value edit (above). A refused one keeps the last
