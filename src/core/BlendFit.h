@@ -22,8 +22,10 @@ enum class EdgeBlendOp; // core/features/FilletFeature.h
 namespace fit {
 
 // What a bound is about: the face's width from the edge, the width between
-// two picked edges, a face's curvature toward the round, a disc's rim.
-enum class BoundKind { Width, Between, Curvature, Rim };
+// two picked edges, a face's curvature toward the round, a circle's axis
+// (a face of revolution leaning toward it from the rim ends there), two
+// blends meeting across a planar face.
+enum class BoundKind { Width, Between, Curvature, Rim, Meet };
 
 // What cannot fit, for the cost of a look: nothing above `size` does, and
 // something below it may still fail. `why` is the geometric fact ("face
@@ -51,20 +53,52 @@ std::optional<Bound> BlendBound(const Body& body, const std::vector<int>& edges,
 bool Refuses(BoundKind kind);
 
 // How far past a bound a size is refused: a thousandth, so a size at the
-// bound (two rounds meeting exactly, a round as wide as its face) is still
-// the builder's to answer.
+// bound (a round as wide as its face) is still the builder's to answer. Two
+// blends that meet are given a hundredth: the builder runs the second a
+// little onto the first, and built 1.002 times the bound where a round meets
+// a concave rim's (the sweep: none at 1.01).
 inline constexpr double kRefuseMargin = 1e-3;
+inline constexpr double kMeetRefuseMargin = 1e-2;
+double RefuseMargin(BoundKind kind);
 
 // The least bound of a refusing kind that `asked` is past, or none.
 std::optional<Bound> RefusingBound(const std::vector<Bound>& bounds,
                                    double asked);
 
-// The rim bounds alone, for the cost of a look at the picked edges' faces:
-// what Execute asks before every build, where BlendBounds' measures of
-// every face cost more than a fitting blend (100 rims of a plate: 0.35 s of
-// CPU against a 0.2 s build). The same bounds BlendBounds offers as Rim.
+// The refusing bounds, for the cost of a look at analytic geometry: what
+// Execute asks before every build, where BlendBounds' measures of every face
+// cost more than a fitting blend (100 rims of a plate: 0.35 s of CPU
+// against a 0.2 s build). BlendBounds offers the same.
+//
+// Rim: a closed circular edge whose two faces each have a straight meridian
+// about its axis (a plane square to it, a coaxial cylinder or cone). A face
+// that leaves the rim leaning toward the axis (its meridian direction u
+// radially negative) reaches the axis R / -u_radial from it, and a blend's
+// setback on it cannot pass that: a chamfer's distance, a round's r /
+// tan(phi/2), phi the angle between the two faces' directions from the rim.
+// A shaft's end gives R; a 120 degree drill point's floor 2R; a bore's top
+// rim (material outside) nothing. A disc to its own rim beside a face of
+// another kind keeps the setback across the disc.
 std::vector<Bound> RimBounds(const Body& body, const std::vector<int>& edges,
                              EdgeBlendOp op);
+
+// Meet: the least over two edges of the blend (the builder's contours: the
+// picked edges and their tangent chains) on one planar face, each a line or a
+// circle whose other face has a straight section (a plane beside a line, a
+// coaxial cylinder or cone beside a circle), of g / (k1 + k2), g the length of
+// a segment square to both at points inside both that lies in the face, k a
+// blend's setback per mm (r tan((pi - psi) / 2) of a round, psi the angle
+// between the faces' directions into themselves; a chamfer's distance).
+// Past it the two blends' edges on the face cross. Only under `below` mm
+// (the pre-build look asks under the size asked): the segments in the face
+// are checked from the least up.
+std::optional<Bound> MeetBound(const Body& body, const std::vector<int>& edges,
+                               EdgeBlendOp op, double below);
+
+// RimBounds and MeetBound together: what Execute asks before it builds.
+std::vector<Bound> RefusingBounds(const Body& body,
+                                  const std::vector<int>& edges, EdgeBlendOp op,
+                                  double below);
 
 // `v` rounded down to three significant digits: every candidate is one, so
 // the size reported is a size that was built. 7.4925 -> 7.49.

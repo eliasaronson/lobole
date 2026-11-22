@@ -873,6 +873,61 @@ std::string EdgeBlendRefusal(const CADShape& body, const ElementMap& bodyMap,
   }
 }
 
+std::vector<BlendContour> EdgeBlendContours(const CADShape& body,
+                                            const std::vector<int>& edgeIndices,
+                                            EdgeBlendOp op) {
+  std::vector<BlendContour> out;
+  if (!body.IsValid() || edgeIndices.empty())
+    return out;
+  TopTools_IndexedMapOfShape mine;
+  TopExp::MapShapes(body.GetShape(), TopAbs_EDGE, mine);
+  for (int idx : edgeIndices)
+    if (idx < 0 || idx + 1 > mine.Extent())
+      return out;
+  // A closed edge is a contour of its own: nothing to ask the builder.
+  if (std::all_of(edgeIndices.begin(), edgeIndices.end(), [&](int idx) {
+        return BRep_Tool::IsClosed(TopoDS::Edge(mine(idx + 1)));
+      })) {
+    for (int idx : edgeIndices)
+      out.push_back({{idx}, true});
+    return out;
+  }
+  try {
+    // On a copy, as the build: the builder is not trusted with its input.
+    // The copy keeps the edge map's order, so its indices are the body's.
+    const TopoDS_Shape shape =
+        BRepBuilderAPI_Copy(body.GetShape(), false, false).Shape();
+    TopTools_IndexedMapOfShape edges;
+    TopExp::MapShapes(shape, TopAbs_EDGE, edges);
+    const auto collect = [&](auto& mk) {
+      const auto why = occsig::RunCatchingOccSignals([&] {
+        for (int idx : edgeIndices)
+          mk.Add(1.0, TopoDS::Edge(edges(idx + 1)));
+      });
+      if (why)
+        return;
+      for (int c = 1; c <= mk.NbContours(); c++) {
+        BlendContour contour;
+        contour.closed = mk.Closed(c);
+        for (int j = 1; j <= mk.NbEdges(c); j++)
+          if (const int at = edges.FindIndex(mk.Edge(c, j)); at != 0)
+            contour.edges.push_back(at - 1);
+        out.push_back(std::move(contour));
+      }
+    };
+    if (op == EdgeBlendOp::Chamfer) {
+      BRepFilletAPI_MakeChamfer mk(shape);
+      collect(mk);
+    } else {
+      BRepFilletAPI_MakeFillet mk(shape);
+      collect(mk);
+    }
+  } catch (const Standard_Failure&) {
+    out.clear();
+  }
+  return out;
+}
+
 CADShape EdgeBlendUnnamed(const CADShape& body,
                           const std::vector<int>& edgeIndices, EdgeBlendOp op,
                           double radiusOrDistance) {

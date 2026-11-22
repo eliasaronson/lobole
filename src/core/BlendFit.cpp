@@ -7,20 +7,45 @@
 #include "core/MeasureBlend.h"
 #include "core/features/FilletFeature.h" // EdgeBlendOp
 
+#include "core/ElementHistory.h" // EdgeBlendContours
+
 #include <BRepAdaptor_Curve.hxx>
 #include <BRepAdaptor_Surface.hxx>
+#include <BRepBndLib.hxx>
+#include <BRepClass_FaceClassifier.hxx>
+#include <BRepTools.hxx>
 #include <BRep_Tool.hxx>
+#include <BndLib_Add2dCurve.hxx>
+#include <Bnd_Box.hxx>
+#include <Bnd_Box2d.hxx>
+#include <ElCLib.hxx>
+#include <ElSLib.hxx>
+#include <GCE2d_MakeSegment.hxx>
+#include <Geom2dAPI_InterCurveCurve.hxx>
+#include <Geom2d_TrimmedCurve.hxx>
 #include <TopExp.hxx>
 #include <TopExp_Explorer.hxx>
 #include <TopTools_IndexedDataMapOfShapeListOfShape.hxx>
 #include <TopTools_IndexedMapOfShape.hxx>
 #include <TopoDS.hxx>
+#include <TopoDS_Wire.hxx>
+#include <gp_Cone.hxx>
+#include <gp_Cylinder.hxx>
+#include <gp_Lin.hxx>
+#include <gp_Pln.hxx>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cmath>
+#include <deque>
 #include <format>
+#include <limits>
+#include <map>
+#include <mutex>
 #include <numbers>
+#include <tuple>
+#include <unordered_map>
 
 namespace fit {
 
@@ -93,7 +118,9 @@ std::vector<Bound> BlendBounds(const Body& body, const std::vector<int>& edges,
   const auto edgeName = [&](int e) {
     return NameOrIndex(body.elementMap.EdgeNameOf(e), "edge", e);
   };
-  std::vector<Bound> all;
+  // The refusing bounds first: of two equal, Least keeps the one before.
+  std::vector<Bound> all =
+      RefusingBounds(body, edges, op, std::numeric_limits<double>::infinity());
   const auto offer = [&](BoundKind kind, double size, std::string why,
                          std::string element) {
     if (!(size > 0.0) || !std::isfinite(size))
@@ -147,57 +174,582 @@ std::vector<Bound> BlendBounds(const Body& body, const std::vector<int>& edges,
   return all;
 }
 
+namespace {
+
+// What the refusing bounds look at: the faces either side of an edge, their
+// kinds, and which way each runs from it. Analytic geometry only, so it
+// costs a fraction of a build.
+class Look {
+public:
+  explicit Look(const Body& body) : m_body(body) {
+    const TopoDS_Shape& s = body.shape.GetShape();
+    TopExp::MapShapes(s, TopAbs_EDGE, m_edges);
+    TopExp::MapShapes(s, TopAbs_FACE, m_faces);
+  }
+
+  int EdgeCount() const { return m_edges.Extent(); }
+  const TopoDS_Edge& Edge(int e) const { return TopoDS::Edge(m_edges(e + 1)); }
+  const TopoDS_Face& Face(int f) const { return TopoDS::Face(m_faces(f + 1)); }
+  std::string EdgeName(int e) const {
+    return NameOrIndex(m_body.elementMap.EdgeNameOf(e), "edge", e);
+  }
+  std::string FaceName(int f) const {
+    return NameOrIndex(m_body.elementMap.NameOf(f), "face", f);
+  }
+
+  // The two faces of an edge, as face indices; none on a seam, a free or a
+  // non-manifold edge.
+  std::optional<std::array<int, 2>> Faces(int e) {
+    if (!m_parents) {
+      m_parents.emplace();
+      TopExp::MapShapesAndAncestors(m_body.shape.GetShape(), TopAbs_EDGE,
+                                    TopAbs_FACE, *m_parents);
+    }
+    const int at = m_parents->FindIndex(Edge(e));
+    if (at == 0)
+      return std::nullopt;
+    std::array<int, 2> out{-1, -1};
+    int n = 0;
+    for (const TopoDS_Shape& f : m_parents->FindFromIndex(at)) {
+      const int fi = m_faces.FindIndex(f) - 1;
+      if (fi < 0 || (n > 0 && out[0] == fi))
+        return std::nullopt;
+      if (n == 2)
+        return std::nullopt;
+      out[n++] = fi;
+    }
+    if (n != 2)
+      return std::nullopt;
+    return out;
+  }
+
+  // Whether edge `e` is on the outer wire of face `f`: a plane bounded by a
+  // circle lies inside it there, outside it where the circle is a hole.
+  bool OnOuterWire(int f, int e) {
+    auto it = m_outer.find(f);
+    if (it == m_outer.end())
+      it = m_outer.emplace(f, BRepTools::OuterWire(Face(f))).first;
+    for (TopExp_Explorer x(it->second, TopAbs_EDGE); x.More(); x.Next())
+      if (x.Current().IsSame(Edge(e)))
+        return true;
+    return false;
+  }
+
+  // A plane bounded by this edge alone: a disc to its own rim.
+  bool IsDisc(int f) const {
+    int n = 0;
+    for (TopExp_Explorer x(Face(f), TopAbs_EDGE); x.More(); x.Next())
+      n++;
+    return n == 1;
+  }
+
+  // Whether the open segment a-b on planar face `f` lies in the face: its
+  // middle inside, and no boundary of the face crossing it.
+  bool SegmentInFace(int f, const gp_Pnt& a, const gp_Pnt& b) {
+    const TopoDS_Face& face = Face(f);
+    const gp_Pln pl = BRepAdaptor_Surface(face, false).Plane();
+    double ua = 0, va = 0, ub = 0, vb = 0;
+    ElSLib::Parameters(pl, a, ua, va);
+    ElSLib::Parameters(pl, b, ub, vb);
+    const gp_Pnt2d A(ua, va), B(ub, vb);
+    const double len = A.Distance(B);
+    if (len < 1e-9)
+      return false;
+    BRepClass_FaceClassifier inside;
+    inside.Perform(face, gp_Pnt2d(0.5 * (ua + ub), 0.5 * (va + vb)), 1e-7);
+    if (inside.State() != TopAbs_IN)
+      return false;
+    // Its ends are on the two edges: a hair short of them.
+    const gp_Vec2d d = gp_Vec2d(A, B) / len;
+    const double eps = 1e-6 * len + 1e-7;
+    const gp_Pnt2d A2 = A.Translated(d * eps), B2 = B.Translated(-d * eps);
+    const Handle(Geom2d_TrimmedCurve) seg = GCE2d_MakeSegment(A2, B2).Value();
+    Bnd_Box2d box;
+    box.Add(A2);
+    box.Add(B2);
+    box.Enlarge(1e-7);
+    for (const auto& [curve, cbox] : Boundaries(f)) {
+      if (cbox.IsOut(box))
+        continue;
+      Geom2dAPI_InterCurveCurve x(seg, curve, 1e-9);
+      if (x.NbPoints() > 0 || x.NbSegments() > 0)
+        return false;
+    }
+    return true;
+  }
+
+private:
+  using Boundary = std::pair<Handle(Geom2d_Curve), Bnd_Box2d>;
+  const std::vector<Boundary>& Boundaries(int f) {
+    auto it = m_boundaries.find(f);
+    if (it != m_boundaries.end())
+      return it->second;
+    std::vector<Boundary> out;
+    const TopoDS_Face& face = Face(f);
+    for (TopExp_Explorer x(face, TopAbs_EDGE); x.More(); x.Next()) {
+      double first = 0, last = 0;
+      const Handle(Geom2d_Curve) pc = BRep_Tool::CurveOnSurface(
+          TopoDS::Edge(x.Current()), face, first, last);
+      if (pc.IsNull())
+        continue;
+      Handle(Geom2d_Curve) trimmed = new Geom2d_TrimmedCurve(pc, first, last);
+      Bnd_Box2d box;
+      BndLib_Add2dCurve::Add(trimmed, 1e-7, box);
+      out.emplace_back(trimmed, box);
+    }
+    return m_boundaries.emplace(f, std::move(out)).first->second;
+  }
+
+  const Body& m_body;
+  TopTools_IndexedMapOfShape m_edges, m_faces;
+  std::optional<TopTools_IndexedDataMapOfShapeListOfShape> m_parents;
+  std::unordered_map<int, TopoDS_Wire> m_outer;
+  std::unordered_map<int, std::vector<Boundary>> m_boundaries;
+};
+
+// The direction a coaxial cylinder or cone runs from its rim `circ` at `p`,
+// along its ruling, or none for any other face.
+std::optional<gp_Dir> IntoRevolved(const TopoDS_Face& face, const gp_Circ& circ,
+                                   const gp_Pnt& p) {
+  const BRepAdaptor_Surface s(face, false);
+  const double tol = 1e-7 * std::max(1.0, circ.Radius());
+  const auto coaxial = [&](const gp_Ax3& a) {
+    return a.Direction().IsParallel(circ.Axis().Direction(), 1e-9) &&
+           gp_Lin(a.Axis()).Distance(circ.Location()) < tol;
+  };
+  double u = 0.0, v = 0.0;
+  gp_Pnt q;
+  gp_Vec du, dv;
+  if (s.GetType() == GeomAbs_Cylinder) {
+    const gp_Cylinder c = s.Cylinder();
+    if (!coaxial(c.Position()))
+      return std::nullopt;
+    ElSLib::Parameters(c, p, u, v);
+    ElSLib::CylinderD1(u, v, c.Position(), c.Radius(), q, du, dv);
+  } else if (s.GetType() == GeomAbs_Cone) {
+    const gp_Cone c = s.Cone();
+    if (!coaxial(c.Position()))
+      return std::nullopt;
+    ElSLib::Parameters(c, p, u, v);
+    ElSLib::ConeD1(u, v, c.Position(), c.RefRadius(), c.SemiAngle(), q, du, dv);
+  } else {
+    return std::nullopt;
+  }
+  double u0 = 0, u1 = 0, v0 = 0, v1 = 0;
+  BRepTools::UVBounds(face, u0, u1, v0, v1);
+  if (!(v1 - v0 > 1e-9) || dv.Magnitude() < 1e-12)
+    return std::nullopt;
+  // The rim is one end of the face's range along the ruling; the face runs
+  // toward the other.
+  const double toLow = std::abs(v - v0), toHigh = std::abs(v - v1);
+  if (std::min(toLow, toHigh) > 1e-6 * std::max(1.0, v1 - v0))
+    return std::nullopt;
+  return gp_Dir(toLow < toHigh ? dv : dv.Reversed());
+}
+
+// A blend's setback on a face per mm of its size, where the face runs from
+// the edge along `intoFace` and the other along `intoOther`; none at a
+// tangent edge.
+std::optional<double> SetbackPerMm(EdgeBlendOp op, const gp_Dir& intoFace,
+                                   const gp_Dir& intoOther) {
+  const double psi = intoFace.Angle(intoOther);
+  if (psi < 1e-4 || std::numbers::pi - psi < 1e-4)
+    return std::nullopt;
+  if (op == EdgeBlendOp::Chamfer)
+    return 1.0;
+  return std::tan(0.5 * (std::numbers::pi - psi));
+}
+
+// The builder's contours for these edges, kept for the last few inputs: the
+// look before every build asks them, and the copy the builder is handed
+// cost a tenth of the build of 104 edges of the plate of 100 bores, again at
+// each regeneration of a feature whose input has not changed (a size
+// dragged). Each entry holds its shape, so a match is that shape.
+std::vector<topo::BlendContour> ContoursOf(const CADShape& body,
+                                           const std::vector<int>& edges,
+                                           EdgeBlendOp op) {
+  struct Entry {
+    TopoDS_Shape shape;
+    std::vector<int> edges;
+    EdgeBlendOp op;
+    std::vector<topo::BlendContour> contours;
+  };
+  static std::mutex lock;
+  // Never destroyed: shapes released after OpenCASCADE's own statics at
+  // exit would be freed into a torn-down allocator.
+  static auto& kept = *new std::deque<Entry>();
+  constexpr size_t kKept = 4;
+  {
+    const std::lock_guard<std::mutex> hold(lock);
+    for (const Entry& k : kept)
+      if (k.op == op && k.edges == edges && k.shape.IsEqual(body.GetShape()))
+        return k.contours;
+  }
+  std::vector<topo::BlendContour> contours =
+      topo::EdgeBlendContours(body, edges, op);
+  const std::lock_guard<std::mutex> hold(lock);
+  kept.push_front({body.GetShape(), edges, op, contours});
+  if (kept.size() > kKept)
+    kept.pop_back();
+  return contours;
+}
+
+const char* BlendsWord(EdgeBlendOp op) {
+  return op == EdgeBlendOp::Chamfer ? "chamfers" : "rounds";
+}
+
+} // namespace
+
 std::vector<Bound> RimBounds(const Body& body, const std::vector<int>& edges,
                              EdgeBlendOp op) {
   std::vector<Bound> out;
-  const TopoDS_Shape& shape = body.shape.GetShape();
-  if (shape.IsNull())
+  if (body.shape.GetShape().IsNull())
     return out;
-  TopTools_IndexedMapOfShape all;
-  TopExp::MapShapes(shape, TopAbs_EDGE, all);
-  std::optional<TopTools_IndexedDataMapOfShapeListOfShape> faces;
+  Look look(body);
   for (const int e : edges) {
-    if (e < 0 || e + 1 > all.Extent())
+    if (e < 0 || e + 1 > look.EdgeCount())
       continue;
-    const TopoDS_Edge& edge = TopoDS::Edge(all(e + 1));
+    const TopoDS_Edge& edge = look.Edge(e);
     if (BRep_Tool::Degenerated(edge) || !BRep_Tool::IsClosed(edge))
       continue;
-    BRepAdaptor_Curve curve(edge);
+    const BRepAdaptor_Curve curve(edge);
     if (curve.GetType() != GeomAbs_Circle)
       continue;
-    if (!faces) {
-      faces.emplace();
-      TopExp::MapShapesAndAncestors(shape, TopAbs_EDGE, TopAbs_FACE, *faces);
-    }
-    // A planar face bounded by this circle alone: a disc to its own rim.
-    bool disc = false;
-    if (const int at = faces->FindIndex(edge); at != 0)
-      for (const TopoDS_Shape& f : faces->FindFromIndex(at)) {
-        if (BRepAdaptor_Surface(TopoDS::Face(f)).GetType() != GeomAbs_Plane)
-          continue;
-        int bounding = 0;
-        for (TopExp_Explorer x(f, TopAbs_EDGE); x.More(); x.Next())
-          bounding++;
-        disc = disc || bounding == 1;
-      }
-    if (!disc)
+    const auto faces = look.Faces(e);
+    if (!faces)
       continue;
-    double k = 1.0; // a chamfer takes its distance
-    if (op != EdgeBlendOp::Chamfer) {
-      const auto theta = Measure::DihedralAngleAt(body, e);
-      const auto perMm = theta ? ConvexSetbackPerMm(*theta) : std::nullopt;
-      if (!perMm)
-        continue;
-      k = *perMm;
+    const gp_Circ circ = curve.Circle();
+    const double R = circ.Radius();
+    const gp_Pnt p = curve.Value(curve.FirstParameter());
+    const gp_Dir radial(gp_Vec(circ.Location(), p));
+    const gp_Dir axis = circ.Axis().Direction();
+    // Each face's direction from the edge in the meridian: (radial, axial).
+    std::array<std::pair<double, double>, 2> u{};
+    bool meridian = true;
+    for (int i = 0; i < 2 && meridian; i++) {
+      const int f = (*faces)[i];
+      const TopoDS_Face& face = look.Face(f);
+      if (BRepAdaptor_Surface(face, false).GetType() == GeomAbs_Plane) {
+        u[i] = {look.OnOuterWire(f, e) ? -1.0 : 1.0, 0.0};
+      } else if (const auto d = IntoRevolved(face, circ, p)) {
+        u[i] = {d->Dot(radial), d->Dot(axis)};
+      } else {
+        meridian = false;
+      }
     }
-    const std::string* n = body.elementMap.EdgeNameOf(e);
-    const std::string name = NameOrIndex(n, "edge", e);
-    const double r = curve.Circle().Radius();
-    out.push_back(Bound{r / k, RimWhy(name, r), name, BoundKind::Rim});
+    const std::string name = look.EdgeName(e);
+    std::optional<double> size;
+    std::string why = RimWhy(name, R);
+    if (meridian) {
+      const double phi = std::acos(std::clamp(
+          u[0].first * u[1].first + u[0].second * u[1].second, -1.0, 1.0));
+      if (phi < 1e-4 || std::numbers::pi - phi < 1e-4)
+        continue; // tangent: nothing to blend
+      // A chamfer takes its distance of each face, a round r / tan(phi/2).
+      const double k =
+          op == EdgeBlendOp::Chamfer ? 1.0 : 1.0 / std::tan(0.5 * phi);
+      // A face leaning toward the axis reaches it R / -u_radial from the
+      // rim, and no setback runs past that: the blend's edge on it would
+      // be a circle of negative radius.
+      for (int i = 0; i < 2; i++) {
+        const double radialPart = u[i].first;
+        if (!(radialPart < -1e-9))
+          continue;
+        const double reach = R / -radialPart;
+        if (size && reach / k >= *size)
+          continue;
+        size = reach / k;
+        why = RimWhy(name, R);
+        if (std::abs(reach - R) > 1e-9 * R || std::abs(k - 1.0) > 1e-9)
+          why += ", and face '" + look.FaceName((*faces)[i]) + "' runs " +
+                 Mm(reach) + " mm from it to its axis, so " +
+                 (op == EdgeBlendOp::Chamfer ? "a chamfer" : "a round") +
+                 " of " + Mm(*size) + " mm takes all of it";
+      }
+    } else {
+      // A disc to its own rim beside a face of another kind: the setback
+      // across the disc is at most its radius.
+      for (const int f : *faces)
+        if (BRepAdaptor_Surface(look.Face(f), false).GetType() ==
+                GeomAbs_Plane &&
+            look.IsDisc(f)) {
+          double k = 1.0; // a chamfer takes its distance
+          if (op != EdgeBlendOp::Chamfer) {
+            const auto theta = Measure::DihedralAngleAt(body, e);
+            const auto perMm =
+                theta ? ConvexSetbackPerMm(*theta) : std::nullopt;
+            if (!perMm)
+              break;
+            k = *perMm;
+          }
+          size = R / k;
+          break;
+        }
+    }
+    if (!size || !(*size > 0.0) || !std::isfinite(*size))
+      continue;
+    out.push_back(Bound{*size, std::move(why), name, BoundKind::Rim});
   }
   return out;
 }
 
+std::optional<Bound> MeetBound(const Body& body, const std::vector<int>& edges,
+                               EdgeBlendOp op, double below) {
+  if (body.shape.GetShape().IsNull() || edges.empty() || !(below > 0.0))
+    return std::nullopt;
+  Look look(body);
+  // Every edge the blend takes in: the builder's contours, the picked edges
+  // and their tangent chains. A picked edge it takes into none (its faces
+  // meet tangentially) blends nothing, and is the edges' objection to make.
+  std::vector<int> blended;
+  for (const topo::BlendContour& c : ContoursOf(body.shape, edges, op))
+    blended.insert(blended.end(), c.edges.begin(), c.edges.end());
+  std::sort(blended.begin(), blended.end());
+  blended.erase(std::unique(blended.begin(), blended.end()), blended.end());
+
+  // Each blended line or circle on a plane, with its setback per mm toward
+  // either side of it in that plane.
+  struct OnPlane {
+    int edge = -1;
+    bool line = false;
+    gp_Lin lin;
+    gp_Circ circ;
+    double t0 = 0.0, t1 = 0.0; // the edge's parameter range
+    bool closed = false;
+    gp_Dir side;                // a line's: the plane's normal across it
+    std::optional<double> k[2]; // toward +side (a circle's: outward), -side
+    double kMax = 0.0;
+    Bnd_Box box;
+  };
+  std::map<int, std::vector<OnPlane>> byFace;
+  for (const int e : blended) {
+    if (e < 0 || e + 1 > look.EdgeCount())
+      continue;
+    const TopoDS_Edge& edge = look.Edge(e);
+    if (BRep_Tool::Degenerated(edge))
+      continue;
+    const auto faces = look.Faces(e);
+    if (!faces)
+      continue;
+    const BRepAdaptor_Curve curve(edge);
+    const bool line = curve.GetType() == GeomAbs_Line;
+    if (!line && curve.GetType() != GeomAbs_Circle)
+      continue;
+    const double t0 = curve.FirstParameter(), t1 = curve.LastParameter();
+    const gp_Pnt mid = curve.Value(0.5 * (t0 + t1));
+    for (int i = 0; i < 2; i++) {
+      const int f = (*faces)[i], g = (*faces)[1 - i];
+      const BRepAdaptor_Surface fs(look.Face(f), false);
+      if (fs.GetType() != GeomAbs_Plane)
+        continue;
+      OnPlane r;
+      r.edge = e;
+      r.line = line;
+      r.t0 = t0;
+      r.t1 = t1;
+      gp_Dir out1, out2; // the directions in the plane across the edge
+      std::optional<gp_Dir> intoOther;
+      if (line) {
+        r.lin = curve.Line();
+        r.side =
+            gp_Dir(fs.Plane().Axis().Direction().Crossed(r.lin.Direction()));
+        out1 = r.side;
+        out2 = r.side.Reversed();
+        // The other face must be a plane: then the setback is the same all
+        // along the edge. Which way it runs: its own classifier, a step in.
+        const TopoDS_Face& other = look.Face(g);
+        const BRepAdaptor_Surface gs(other, false);
+        if (gs.GetType() != GeomAbs_Plane)
+          continue;
+        const gp_Dir across(
+            gs.Plane().Axis().Direction().Crossed(r.lin.Direction()));
+        const double step = 1e-4 * std::max(1.0, std::abs(t1 - t0));
+        const auto in = [&](const gp_Dir& d) {
+          BRepClass_FaceClassifier c(other, mid.Translated(gp_Vec(d) * step),
+                                     1e-7);
+          return c.State() == TopAbs_IN;
+        };
+        const bool plus = in(across), minus = in(across.Reversed());
+        if (plus == minus)
+          continue;
+        intoOther = plus ? across : across.Reversed();
+      } else {
+        r.circ = curve.Circle();
+        r.closed = BRep_Tool::IsClosed(edge);
+        out1 = gp_Dir(gp_Vec(r.circ.Location(), mid));
+        out2 = out1.Reversed();
+        intoOther = IntoRevolved(look.Face(g), r.circ, mid);
+        if (!intoOther)
+          continue;
+      }
+      r.k[0] = SetbackPerMm(op, out1, *intoOther);
+      r.k[1] = SetbackPerMm(op, out2, *intoOther);
+      r.kMax = std::max(r.k[0].value_or(0.0), r.k[1].value_or(0.0));
+      if (!(r.kMax > 0.0))
+        continue;
+      BRepBndLib::Add(edge, r.box, false);
+      byFace[f].push_back(std::move(r));
+    }
+  }
+
+  struct Candidate {
+    double size = 0.0, gap = 0.0;
+    int face = -1, a = -1, b = -1;
+    gp_Pnt pa, pb;
+  };
+  std::vector<Candidate> candidates;
+  const auto inside = [](const OnPlane& r, const gp_Pnt& p) {
+    if (r.line) {
+      const double t = ElCLib::Parameter(r.lin, p);
+      const double m = 1e-6 * std::abs(r.t1 - r.t0);
+      return t > r.t0 + m && t < r.t1 - m;
+    }
+    if (r.closed)
+      return true;
+    // Into the edge's own range, which may start below 0 or end past 2pi.
+    double a = ElCLib::Parameter(r.circ, p); // [0, 2pi)
+    const double m = 1e-6, turn = 2.0 * std::numbers::pi;
+    while (a - turn >= r.t0)
+      a -= turn;
+    while (a < r.t0)
+      a += turn;
+    return a > r.t0 + m && a < r.t1 - m;
+  };
+  // Setback per mm of `r` at `p`, the blend's edge on the face moving off
+  // `r` along `t`; none where `r` curves away under it (a concave-side
+  // circle the setback `share` of the gap would pass the centre of).
+  const auto setback = [](const OnPlane& r, const gp_Pnt& p,
+                          const gp_Vec& t) -> std::optional<double> {
+    if (r.line)
+      return r.k[t.Dot(gp_Vec(r.side)) > 0.0 ? 0 : 1];
+    const gp_Vec outward(r.circ.Location(), p);
+    return r.k[t.Dot(outward) > 0.0 ? 0 : 1];
+  };
+  for (const auto& [f, rs] : byFace) {
+    const gp_Dir normal =
+        BRepAdaptor_Surface(look.Face(f), false).Plane().Axis().Direction();
+    for (size_t i = 0; i < rs.size(); i++)
+      for (size_t j = i + 1; j < rs.size(); j++) {
+        const OnPlane& A = rs[i];
+        const OnPlane& B = rs[j];
+        if (A.edge == B.edge)
+          continue;
+        if (std::isfinite(below) &&
+            A.box.Distance(B.box) >= below * (A.kMax + B.kMax))
+          continue;
+        // Segments square to both: along the line of centres of two
+        // circles, square to a line through a circle's centre, between
+        // two parallel lines where they overlap.
+        std::vector<std::pair<gp_Pnt, gp_Pnt>> segs;
+        if (!A.line && !B.line) {
+          const gp_Vec cc(A.circ.Location(), B.circ.Location());
+          gp_Dir d;
+          if (cc.Magnitude() > 1e-9) {
+            d = gp_Dir(cc);
+          } else { // concentric: any radius both arcs reach
+            d = gp_Dir(gp_Vec(A.circ.Location(),
+                              ElCLib::Value(0.5 * (A.t0 + A.t1), A.circ)));
+          }
+          for (const double sa : {1.0, -1.0})
+            for (const double sb : {1.0, -1.0})
+              segs.emplace_back(A.circ.Location().Translated(
+                                    gp_Vec(d) * (sa * A.circ.Radius())),
+                                B.circ.Location().Translated(
+                                    gp_Vec(d) * (sb * B.circ.Radius())));
+        } else if (A.line != B.line) {
+          const OnPlane& C = A.line ? B : A;
+          const OnPlane& L = A.line ? A : B;
+          const gp_Pnt foot =
+              ElCLib::Value(ElCLib::Parameter(L.lin, C.circ.Location()), L.lin);
+          gp_Vec n(C.circ.Location(), foot);
+          if (n.Magnitude() < 1e-9)
+            n = gp_Vec(L.side);
+          n.Normalize();
+          for (const double s : {1.0, -1.0}) {
+            const gp_Pnt pc =
+                C.circ.Location().Translated(n * (s * C.circ.Radius()));
+            if (A.line)
+              segs.emplace_back(foot, pc);
+            else
+              segs.emplace_back(pc, foot);
+          }
+        } else if (A.lin.Direction().IsParallel(B.lin.Direction(), 1e-9)) {
+          const auto tb = [&](double t) {
+            return ElCLib::Parameter(A.lin, ElCLib::Value(t, B.lin));
+          };
+          const double b0 = std::min(tb(B.t0), tb(B.t1));
+          const double b1 = std::max(tb(B.t0), tb(B.t1));
+          const double lo = std::max(A.t0, b0), hi = std::min(A.t1, b1);
+          if (hi > lo) {
+            const gp_Pnt pa = ElCLib::Value(0.5 * (lo + hi), A.lin);
+            segs.emplace_back(
+                pa, ElCLib::Value(ElCLib::Parameter(B.lin, pa), B.lin));
+          }
+        }
+        for (const auto& [pa, pb] : segs) {
+          const gp_Vec ab(pa, pb);
+          const double gap = ab.Magnitude();
+          if (gap < 1e-7 || std::abs(ab.Dot(gp_Vec(normal))) > 1e-6 * gap)
+            continue;
+          if (!inside(A, pa) || !inside(B, pb))
+            continue;
+          const gp_Vec t = ab / gap;
+          const auto ka = setback(A, pa, t), kb = setback(B, pb, -t);
+          if (!ka || !kb)
+            continue;
+          const double size = gap / (*ka + *kb);
+          // A circle the setback runs into the middle of curves away from
+          // under the blend: not this bound's to say.
+          const auto regular = [&](const OnPlane& r, const gp_Pnt& p,
+                                   const gp_Vec& dir, double k) {
+            return r.line || dir.Dot(gp_Vec(r.circ.Location(), p)) > 0.0 ||
+                   size * k < r.circ.Radius() * (1.0 - 1e-6);
+          };
+          if (!regular(A, pa, t, *ka) || !regular(B, pb, -t, *kb))
+            continue;
+          if (size < below && std::isfinite(size))
+            candidates.push_back({size, gap, f, A.edge, B.edge, pa, pb});
+        }
+      }
+  }
+  std::sort(candidates.begin(), candidates.end(),
+            [](const Candidate& x, const Candidate& y) {
+              // Ties by the edges, so the sentence names the same pair
+              // whatever the size asked filtered out.
+              return std::tie(x.size, x.face, x.a, x.b) <
+                     std::tie(y.size, y.face, y.a, y.b);
+            });
+  // From the least up, the first whose segment is in the face: a few, so a
+  // face whose nearest pairs are all blocked costs a bounded look.
+  constexpr size_t kChecks = 32;
+  for (size_t i = 0; i < candidates.size() && i < kChecks; i++) {
+    const Candidate& c = candidates[i];
+    if (!look.SegmentInFace(c.face, c.pa, c.pb))
+      continue;
+    const auto named = [&](int e) {
+      std::string n = "edge '" + look.EdgeName(e) + "'";
+      if (std::find(edges.begin(), edges.end(), e) == edges.end())
+        n += " (tangent to a picked edge, so blended with it)";
+      return n;
+    };
+    const std::string face = look.FaceName(c.face);
+    return Bound{c.size,
+                 "face '" + face + "' is " + Mm(c.gap) + " mm wide between " +
+                     named(c.a) + " and " + named(c.b) + ", so the " +
+                     BlendsWord(op) + " meet at " + Mm(c.size) + " mm",
+                 face, BoundKind::Meet};
+  }
+  return std::nullopt;
+}
+
+std::vector<Bound> RefusingBounds(const Body& body,
+                                  const std::vector<int>& edges, EdgeBlendOp op,
+                                  double below) {
+  std::vector<Bound> out = RimBounds(body, edges, op);
+  if (auto meet = MeetBound(body, edges, op, below))
+    out.push_back(std::move(*meet));
+  return out;
+}
 std::optional<Bound> Least(const std::vector<Bound>& bounds) {
   // Of two equal, the one that holds: a cylinder's end is bounded by its rim
   // and by its side's curvature alike, and only the rim is trusted.
@@ -220,9 +772,11 @@ bool Refuses(BoundKind kind) {
   // the action matrix's bodies: past a face's width, the width between two
   // picked edges or a face's curvature OpenCASCADE built hundreds of blends,
   // many at four times the bound (a wedge whose face narrows to a point at
-  // one station, a round that runs off its face); past a disc's rim, none.
+  // one station, a round that runs off its face); past a circle's axis or
+  // two blends meeting across a plane, none.
   switch (kind) {
   case BoundKind::Rim:
+  case BoundKind::Meet:
     return true;
   case BoundKind::Width:
   case BoundKind::Between:
@@ -232,11 +786,15 @@ bool Refuses(BoundKind kind) {
   return false;
 }
 
+double RefuseMargin(BoundKind kind) {
+  return kind == BoundKind::Meet ? kMeetRefuseMargin : kRefuseMargin;
+}
+
 std::optional<Bound> RefusingBound(const std::vector<Bound>& bounds,
                                    double asked) {
   std::optional<Bound> least;
   for (const Bound& b : bounds)
-    if (Refuses(b.kind) && asked > b.size * (1.0 + kRefuseMargin) &&
+    if (Refuses(b.kind) && asked > b.size * (1.0 + RefuseMargin(b.kind)) &&
         (!least || b.size < least->size))
       least = b;
   return least;

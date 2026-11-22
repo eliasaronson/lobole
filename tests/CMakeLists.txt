@@ -214,6 +214,7 @@ add_executable(designer_tests
     test_fillet.cpp
     test_blend_fit.cpp
     test_blend_fit_sweep.cpp
+    test_blend_fit_rim.cpp
     test_faceselector.cpp
     test_sketch_feature.cpp
     test_extrude.cpp

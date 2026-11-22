@@ -261,8 +261,10 @@ bool FilletFeature::Execute(RegenContext& ctx) {
   // builder's own failure far past the limit was most of what a refusal
   // cost (docs/modeling/README.md#bounds-that-refuse).
   const double asked = radius.value;
-  const std::optional<fit::Bound> past =
-      fit::RefusingBound(fit::RimBounds(*body, indices, op), asked);
+  const std::optional<fit::Bound> past = fit::RefusingBound(
+      fit::RefusingBounds(*body, indices, op,
+                          asked / (1.0 + fit::kRefuseMargin)),
+      asked);
   ElementMap map;
   std::string error;
   topo::EdgeBlendFailure failure;
@@ -335,8 +337,11 @@ bool FilletFeature::Execute(RegenContext& ctx) {
       fitMemo.For(body->shape, indices, static_cast<int>(op), asked);
   if (!answer) {
     const CADShape& input = body->shape;
+    // Past a refusing bound it is the seed: the least that refuses, and
+    // nothing above it builds. Measuring every face as well cost more than
+    // the one build under it (100 rims of a plate: 0.35 s against 0.3 s).
     const std::optional<fit::Bound> least =
-        fit::Least(fit::BlendBounds(*body, indices, op));
+        past ? past : fit::Least(fit::BlendBounds(*body, indices, op));
     answer = fit::LargestThatBuilds(
         asked, least,
         [&](double size) {

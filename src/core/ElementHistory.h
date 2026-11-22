@@ -104,6 +104,21 @@ std::vector<std::string> FaceNamesIn(const TopoDS_Shape& part,
 // a shell, a draft -- named through NamesThroughHistory above.
 TopTools_ListOfShape HistoryArguments(const TopoDS_Shape& shape);
 
+// The edges the blend builder takes in for `edgeIndices`, contour by
+// contour, when they are only added, not built (on a copy): the picked
+// edges and every edge its tangent propagation adds, as indices of `body`'s
+// edge map, and whether the contour closes on itself. What the size that
+// fits measures two blends meeting across a face against
+// (docs/modeling/README.md#bounds-that-refuse). Empty when the builder
+// refused the edges.
+struct BlendContour {
+  std::vector<int> edges;
+  bool closed = false;
+};
+std::vector<BlendContour> EdgeBlendContours(const CADShape& body,
+                                            const std::vector<int>& edgeIndices,
+                                            EdgeBlendOp op);
+
 // What the blend builder says when the edges are only added, not built
 // (EdgeBlendNamed's first half, on a copy): the tangent-chain walk failing,
 // or an edge it took into no contour. Empty when it took them all. Cheap

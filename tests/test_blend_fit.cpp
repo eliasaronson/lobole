@@ -125,11 +125,16 @@ TEST_CASE("Two rounds on a 15 mm end face: the size that fits is under 7.5",
   const FitHint h = Refused(doc, f, 10.0);
   CHECK(h.param == "radius");
   CHECK(h.askedMm == 10.0);
-  CHECK(h.basis == "built");
+  // The two rounds meet across the end face: a bound that refuses
+  // (docs/modeling/README.md#bounds-that-refuse), so 10 is not built.
+  CHECK(h.basis == "bound");
   CHECK(*h.fitsMm > 7.4);
   CHECK(*h.fitsMm <= 7.5);
-  CHECK(f->GetError().find("fillet radius 10 mm does not fit: the largest "
-                           "radius that fits is ") == 0);
+  CHECK(f->GetError().find("fillet radius 10 mm does not fit: face '") == 0);
+  CHECK(f->GetError().find("' is 15 mm wide between edge '") !=
+        std::string::npos);
+  CHECK(f->GetError().find(", so the rounds meet at 7.5 mm; the largest "
+                           "radius that fits is ") != std::string::npos);
   CHECK(f->GetError().find("too large for the geometry") == std::string::npos);
   const double r = *h.fitsMm;
   const double v = BuildsAtAndNotAbove(doc, f, r);
@@ -149,8 +154,9 @@ TEST_CASE("A chamfer says distance", "[fillet][fit]") {
   FilletFeature* f = AddBlend(doc, edges, 10.0, EdgeBlendOp::Chamfer);
   const FitHint h = Refused(doc, f, 10.0);
   CHECK(h.param == "radius");
-  CHECK(f->GetError().find("chamfer distance 10 mm does not fit: the largest "
-                           "distance that fits is ") == 0);
+  CHECK(f->GetError().find("chamfer distance 10 mm does not fit: face '") == 0);
+  CHECK(f->GetError().find(", so the chamfers meet at 7.5 mm; the largest "
+                           "distance that fits is ") != std::string::npos);
   BuildsAtAndNotAbove(doc, f, *h.fitsMm);
 }
 
@@ -380,8 +386,11 @@ TEST_CASE("A failed fillet on a plate of 100 holes answers within ten builds",
            glm::length(c - a) < 1e-3f;
   });
   REQUIRE(rims.size() >= 100);
-  // A round that fits: one build, its validity check included. The rims
-  // are 2 mm bores, so a round stops just under 1.
+  // The picked corner arcs bring the whole outline in by tangency, so the
+  // outer bores' rims meet the outline's round across the 2 mm between
+  // them: a round stops just under 1 (the bores are R3, and a bore's rim
+  // has no limit of its own at its radius:
+  // docs/modeling/README.md#bounds-that-refuse).
   // The two times are compared, so both are taken on one core: moved from
   // a performance core to a low-power one between them, the refusal read
   // 31 builds with nothing changed (0.26 s against 8.0 s).
@@ -391,15 +400,36 @@ TEST_CASE("A failed fillet on a plate of 100 holes answers within ten builds",
   FilletFeature* f = AddBlend(doc, rims, thick * 0.05); // adding regenerates
   const double one = cpu() - t0;
   REQUIRE(f->GetError().empty());
-  // One past it: the build that fails, the bounds and the search after it.
-  // (Far past it the kernel's own failing build is the cost: at 30 mm it
-  // takes 17 builds' time before anything here runs.)
+  // Far past it: refused before a build, the search's one candidate under
+  // the bound built.
+  const std::uint64_t built = fit::CandidatesBuilt();
+  f->radius = 30.0;
+  t0 = cpu();
+  CHECK_FALSE(doc.Regenerate());
+  const double far = cpu() - t0;
+  INFO(f->GetError());
+  REQUIRE(f->GetFitHint().has_value());
+  CHECK(f->GetFitHint()->basis == "bound");
+  CHECK(f->GetFitHint()->fitsMm == 0.999);
+  CHECK(fit::CandidatesBuilt() - built == 1);
+  CHECK(f->GetError().find(" is 2 mm wide between edge '") !=
+        std::string::npos);
+  CHECK(f->GetError().find("(tangent to a picked edge, so blended with it)") !=
+        std::string::npos);
+  CHECK(f->GetError().find("so the rounds meet at 1 mm; the largest radius "
+                           "that fits is 0.999 mm") != std::string::npos);
+  // One past it: the same, searched afresh under the size that failed.
   f->radius = 1.5;
   t0 = cpu();
   CHECK_FALSE(doc.Regenerate());
   const double failed = cpu() - t0;
-  INFO(f->GetError());
   REQUIRE(f->GetFitHint().has_value());
-  INFO("one build " << one << " s of CPU; the refusal " << failed << " s");
+  INFO("one build " << one << " s of CPU; the refusal at 30 " << far
+                    << " s, at 1.5 " << failed << " s");
   CHECK(failed < 10.0 * one);
+  // A cost check (docs/ui/testing.md#tests-that-time-things): the refusal
+  // at 30 is the look before the build and the one candidate under the
+  // bound, 1.3 times the round that fits, where building 30 first cost
+  // twenty times it (3.4 s against 0.17 s). A planted 1 s spin fails it.
+  CHECK(far < 3.0 * one);
 }

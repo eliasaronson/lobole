@@ -4,10 +4,11 @@
 // The evidence a bound kind refuses on (fit::Refuses,
 // docs/modeling/README.md#bounds-that-refuse): every edge of every body in a
 // directory of BREP files, alone and with the edge its face's width ends at,
-// filleted and chamfered past its least bound -- a thousandth, a tenth, a
-// half, twice and four times -- and every build that gives a valid solid
-// there counted. A bound
-// kind refuses only while this finds none of its own.
+// filleted and chamfered past its least bound -- a thousandth, a
+// hundredth, a tenth, a half, twice and four times -- and past its least
+// refusing bound where that is not the least ("not least <kind>"), and every
+// build that gives a valid solid there counted. A bound kind refuses only while
+// this finds none of its own.
 //
 // Hidden: it builds a few failing blends an edge, minutes on the matrix's
 // bodies. The bodies come from `tools/action_matrix.py export-breps DIR`
@@ -37,6 +38,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
+#include <limits>
 #include <map>
 #include <string>
 #include <vector>
@@ -53,12 +55,15 @@ const char* KindName(fit::BoundKind k) {
     return "curvature";
   case fit::BoundKind::Rim:
     return "rim";
+  case fit::BoundKind::Meet:
+    return "meet";
   }
   return "?";
 }
 
 // The factors past the least bound each edge set is built at.
-constexpr double kFactors[] = {1.0 + fit::kRefuseMargin, 1.1, 1.5, 2.0, 4.0};
+constexpr double kFactors[] = {
+    1.0 + fit::kRefuseMargin, 1.0 + fit::kMeetRefuseMargin, 1.1, 1.5, 2.0, 4.0};
 constexpr int kLevels = static_cast<int>(std::size(kFactors));
 
 struct Tally {
@@ -115,29 +120,40 @@ TEST_CASE("Nothing builds past a refusing bound", "[.fit_sweep]") {
       for (const auto& set : sets)
         for (const EdgeBlendOp op :
              {EdgeBlendOp::Fillet, EdgeBlendOp::Chamfer}) {
+          // The least bound, and the least that refuses where it is not
+          // that one: a refusing bound is asked before the build whether
+          // or not anything measures less.
           const auto least = fit::BlendBound(body, set, op);
           if (!least)
             continue;
-          const std::string key =
-              std::string(op == EdgeBlendOp::Chamfer ? "chamfer " : "fillet ") +
-              KindName(least->kind);
-          Tally& t = tally[key];
-          t.tried++;
-          for (int level = 0; level < kLevels; level++) {
-            const double size = least->size * kFactors[level];
-            const CADShape built =
-                topo::EdgeBlendUnnamed(body.shape, set, op, size);
-            if (!built.IsValid() || !Measure::InvalidReasons(built).empty())
-              continue;
-            t.built[level]++;
-            std::string edgesText;
-            for (const int e : set)
-              edgesText += (edgesText.empty() ? "" : ",") + std::to_string(e);
-            past.push_back(files[fi].filename().string() + " solid " +
-                           std::to_string(solidNo) + " edges " + edgesText +
-                           ": " + key + " " + fit::Mm(least->size) +
-                           " mm, built at " + fit::Mm(size) + " (" +
-                           least->why + ")");
+          std::vector<std::pair<std::string, fit::Bound>> tested;
+          const std::string opName =
+              op == EdgeBlendOp::Chamfer ? "chamfer " : "fillet ";
+          tested.emplace_back(opName + KindName(least->kind), *least);
+          if (const auto refusing = fit::Least(fit::RefusingBounds(
+                  body, set, op, std::numeric_limits<double>::infinity()));
+              refusing && refusing->size > least->size * (1.0 + 1e-9))
+            tested.emplace_back(
+                opName + "not least " + KindName(refusing->kind), *refusing);
+          for (const auto& [key, bound] : tested) {
+            Tally& t = tally[key];
+            t.tried++;
+            for (int level = 0; level < kLevels; level++) {
+              const double size = bound.size * kFactors[level];
+              const CADShape built =
+                  topo::EdgeBlendUnnamed(body.shape, set, op, size);
+              if (!built.IsValid() || !Measure::InvalidReasons(built).empty())
+                continue;
+              t.built[level]++;
+              std::string edgesText;
+              for (const int e : set)
+                edgesText += (edgesText.empty() ? "" : ",") + std::to_string(e);
+              past.push_back(files[fi].filename().string() + " solid " +
+                             std::to_string(solidNo) + " edges " + edgesText +
+                             ": " + key + " " + fit::Mm(bound.size) +
+                             " mm, built at " + fit::Mm(size) + " (" +
+                             bound.why + ")");
+            }
           }
         }
     }
@@ -152,15 +168,13 @@ TEST_CASE("Nothing builds past a refusing bound", "[.fit_sweep]") {
     std::printf("fit_sweep past: %s\n", p.c_str());
   for (const auto& [key, t] : tally) {
     INFO(key);
-    const bool refuses = [&] {
-      for (const auto k : {fit::BoundKind::Width, fit::BoundKind::Between,
-                           fit::BoundKind::Curvature, fit::BoundKind::Rim})
-        if (key.ends_with(KindName(k)))
-          return fit::Refuses(k);
-      return false;
-    }();
-    if (refuses)
-      for (const int n : t.built)
-        CHECK(n == 0);
+    // A kind that refuses builds nothing past its refusal margin.
+    for (const auto k :
+         {fit::BoundKind::Width, fit::BoundKind::Between,
+          fit::BoundKind::Curvature, fit::BoundKind::Rim, fit::BoundKind::Meet})
+      if (key.ends_with(KindName(k)) && fit::Refuses(k))
+        for (int level = 0; level < kLevels; level++)
+          if (kFactors[level] >= 1.0 + fit::RefuseMargin(k))
+            CHECK(t.built[level] == 0);
   }
 }
