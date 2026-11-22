@@ -18,7 +18,7 @@ in the file; the UI and expressions show degrees.
 | Smooth, the derivative equations of a spline joint, the same | `src/core/sketch/ConstraintSplineJoint.{h,cpp}` |
 | orientations a value edit must keep, `MeasureDimension` (pure geometry) | `src/core/sketch/SketchOrientation.{h,cpp}` |
 | loops, open ends, OCC wires/faces/prisms/revolves, offset, projection of model faces/edges | `src/core/sketch/SketchProfile.{h,cpp}` |
-| a section into a sketch: the cut of mesh and B-Rep bodies, its fits | `src/core/sketch/SketchSection.{h,cpp}`; the Section tool's "To sketch" in `src/ui/SectionToSketch.{h,cpp}` |
+| a section into a sketch: the cut of mesh and B-Rep bodies, its fits | `src/core/sketch/SketchSection.{h,cpp}`; the pieces fit in `src/core/sketch/SectionPieces.{h,cpp}`; the Section tool's "To sketch" in `src/ui/SectionToSketch.{h,cpp}` |
 | text labels: fonts, glyph layout, box corners | `src/core/sketch/SketchText.{h,cpp}`, the Hershey data `src/core/sketch/HersheyRomanSimplex.inc` |
 | snap/auto-constraint inference (pure, camera-free) | `src/core/sketch/SketchInference.{h,cpp}` |
 | box-select hit test (pure) | `src/core/sketch/SketchSelection.{h,cpp}` |
@@ -699,7 +699,8 @@ the object's outline stays fully parametric, which a
 [Cradle](../modeling/README.md#cradle) does not.
 
 `AddSectionGeometry(bodies, toleranceMm, fit)` (RPC `project_section`; the
-Section tool's **To sketch**) adds an `ExternalGeom` of kind `Section`:
+Section tool's **To sketch**, with the fit and, for pieces, the detail
+beside it) adds an `ExternalGeom` of kind `Section`:
 where the sketch's own plane cuts the bodies before it. It is not an
 element and keeps no index into anything: every regeneration cuts the
 bodies again and refits the cut (`RegenerateSection` in
@@ -730,6 +731,10 @@ stable ids, as any projection's is.
     needs; a chain past a sketch spline's 255 poles is split into pieces
     that meet, and a closed chain is always two (as a lone closed spline
     is built: [profiles](#profiles)).
+  - `pieces`: the lines and arcs the cut is made of, found from the
+    chain's own scatter, each with its own fit and uncertainty
+    ([the pieces fit](#the-pieces-fit)); the tolerance is only the noise
+    floor of an exact cut.
 - **The deviation** (`ExternalGeom::deviationMm`, `deviation_mm` in the
   reply): the largest distance from a point of the true cut to what was
   drawn (for a spline, both ways). The fit holds it within the tolerance;
@@ -749,9 +754,110 @@ stable ids, as any projection's is.
   gap. The offset bakes, as every offset does: it does not follow a
   re-scan, the section under it does.
 
-Saved as `{kind: "section", fit, bodies?, tolerance_mm?, gen_ids}` in the
-sketch's `external` (format v214); `bodies` and `tolerance_mm` are written
-only when given.
+Saved as `{kind: "section", fit, bodies?, tolerance_mm?, gen_ids,
+detail?}` in the sketch's `external` (format v214; `detail`, the pieces
+fit's, vNEXT); `bodies` and `tolerance_mm` are written only when given,
+`detail` only for `pieces` (a detail on another fit, or outside 0 to 1, is
+refused).
+
+#### The pieces fit
+
+The greedy `arcs` fit puts a break wherever the tolerance ran out: a corner
+round is swallowed by the line before it, and a wall that wanders by more
+than a round does is cut into several lines. `pieces`
+(`sketch::FitPieces`, `src/core/sketch/SectionPieces.{h,cpp}`) asks of
+each run of points whether one line or one arc *explains* it, against the
+chain's own noise. Every number below is a member of
+`sketch::PieceThresholds`, and nowhere else.
+
+- **Evened first.** A step more than four times the chain's median step
+  is filled in at the median: an exact B-Rep cut's straight edge is its two
+  ends, and a fit weighs points, so it would count for two against a
+  round's dozens. The pieces' spans are reported in the chain's own
+  indices.
+- **The noise** is measured twice. First each point's miss from a
+  quadratic through it and its seven neighbours each side (scaled by its
+  leverage), the median read as a sigma, never under a tenth of the
+  section's tolerance (an exact cut's floor). Noise a scan's cut shares
+  between neighbours (it is interpolated between mesh vertices) hides from
+  those quadratics, so once the pieces are found the sigma is taken again,
+  as the median of each piece's own robust scatter, with the residuals'
+  lag-one correlation pooled over them -- and if either moved, the pieces
+  are found again. Every allowance and uncertainty that sums neighbours
+  counts the correlation.
+- **Corners first**: Douglas-Peucker at three sigmas. It over-splits on
+  purpose; nothing it keeps is final.
+- **Merged best first**: of every two neighbouring runs, the pair whose
+  merged run is explained with the smallest residual (against its
+  allowance) is merged, a line tried before an arc, until no pair is
+  explained. *Explains* is three tests: the residuals' rms within sigma ×
+  (1 + 0.6 s); no six consecutive residuals missing on average by more
+  than s × a six-point mean's own sigma × (1.5 + √(2 ln windows)), so a
+  long run cannot average a fillet away and the allowance grows only as
+  the largest chance mean does; and the heading of the line through the
+  eight points at each end within 4 s of that line's own angle sigma of
+  the piece's tangent there, which is what stops a line running on into a
+  tangent round. An arc needs five points (three lie on a circle whatever
+  they are).
+- **Walls wander, rounds do not**: a line's rms and stretch allowances
+  grow to three times an arc's over its first thirty points (a short line
+  wanders nowhere). A 0.05 mm wave on a 60 mm wall is one line.
+- **Leftovers and breaks**: a piece of fewer than five points and no
+  longer than thirty sigmas goes to the neighbour it merges with best.
+  Each break then slides to the point of the chain nearest where its two
+  pieces meet -- where they cross, the middle of a tangent meeting's two
+  crossings, or where they come closest -- and the pieces are refitted,
+  three passes at most; the runs are then merged again from the pieces as
+  they are.
+- **The kind**: each piece is a line unless an arc is better by an F test
+  at 0.01 over it and its neighbours, the arc's residuals' correlation
+  discounting it, and the arc bows from its chord by more than a line of
+  its length may wander; an arc is turned back into a line otherwise. Each
+  kind is judged with the piece's own breaks moved first to where its
+  neighbours meet it and, for a short piece, to the least squares within
+  its own length: a round's tangent ends are taken by the walls until the
+  round is an arc. A changed kind merges the runs once more.
+- **`detail`** (0 to 1, default 0.5) sets s = 2^(1 − 2 detail): 2 at 0
+  (fewer, longer pieces), 1/2 at 1.
+
+The drawn entities meet: a piece ends where its neighbour starts (the
+meeting point put onto each), and a closed chain explained by one arc is a
+circle. Each piece keeps (`ExternalGeom::pieces`, not saved) its span of
+the chain, its points' residual sigma and worst stretch, and the
+uncertainty of its own parameters from the fit's normal equations -- a
+line's angle and its offset at its middle, an arc's centre and radius --
+widened by its residuals' correlation ((1 + ρ) / (1 − ρ)). The reply lists
+them (`pieces`). A piece's uncertainty is that of its parameters given its
+points; it leaves out where its ends are, which for a small round decides
+much of it (below).
+
+Measured by `tests/test_section_pieces.cpp` on outlines generated from
+known lines and arcs, tilted and sampled about every 0.2 mm (each step
+jittered by a third) with 0.03 mm of noise along the normal, independent
+or shared by three neighbours:
+
+- a rounded rectangle (r 5), a slot (r 6), a keyhole and a D come back as
+  their own count of lines and arcs, each break within a point spacing of
+  the generator's tangent point (the meeting of the fitted pieces places it
+  far better than the noise does), each radius and centre within three of
+  its own sigmas; over 150 draws of each the count is the generator's in
+  all but one of 600, and the true radius, centre and line angle lie within
+  two sigmas 94-95 %, 95 % and 96-98 % of the time (a Gaussian's 95.4 %;
+  the test prints the rates);
+- 1 mm rounds on a 60 x 40 rectangle are found sampled every 0.1 mm with
+  0.01 mm of noise (the count right in 149 of 150 draws), each radius
+  within a tenth of a millimetre. **Their sigmas are optimistic**: the true
+  radius lies within two of them 81 % of the time with independent noise
+  and 68 % with shared noise, because a few points decide where such a
+  round's tangent points are and the sigma does not carry that. With
+  0.03 mm of noise the walls take a 1 mm round's tangent ends and two draws
+  in five read it as a chamfer; with 0.02 mm, one in twelve;
+- a 0.05 mm wave (wavelength 25 mm) on a 60 mm wall is one line;
+- **Cost**: about 0.1 s of CPU for a 40,000-point cut (a 600 × 400 rounded
+  rectangle every 0.05 mm), against 0.005 s for the greedy `arcs`; the test
+  holds it under 1 s. Sampled every 0.02 mm with 0.02 mm of noise -- closer
+  than the noise is deep -- a round's tangent stretch can come back as a
+  line of its own.
 
 #### What a section costs
 
@@ -1573,7 +1679,7 @@ In `src/remote/RemoteModeling.cpp` (`describe` lists `sketch_entity_types`,
 | `mirror` | `sketch_id, sources, axis, link?` | `axis` may be a datum axis id |
 | `pattern` | `sketch_id, sources, count, link?` and `step` or `circular, center, angle \| angle_deg` | circular angle is **per step** |
 | `project_geometry` | `sketch_id, feature_id, element, kind` | live external geometry; returns `gen_ids` |
-| `project_section` | `sketch_id, bodies?, tolerance_mm?, fit?` | [a section into a sketch](#a-section-into-a-sketch); returns `gen_ids`, `tolerance_mm`, `deviation_mm`, `chains`, `open_chains` |
+| `project_section` | `sketch_id, bodies?, tolerance_mm?, fit?, detail?` | [a section into a sketch](#a-section-into-a-sketch); returns `gen_ids`, `tolerance_mm`, `deviation_mm`, `chains`, `open_chains`, and for `fit: "pieces"` `detail` and `pieces` ([the pieces fit](#the-pieces-fit)) |
 | `add_reference_image` | `sketch_id, path, at? \| origin?, opacity?, units_per_pixel?, rotation \| rotation_deg, show_always?` | returns `image_id`, `at`, `origin`; turned about its centre |
 | `set_reference_image` | `sketch_id, image_id, opacity?, hidden?, show_always?, at? \| origin?, units_per_pixel?, rotation \| rotation_deg` | returns `at`, `origin`; a turn keeps the centre |
 | `calibrate_reference_image` | `sketch_id, image_id, p1, p2, distance, align?` | `distance` in sketch mm |
@@ -1602,6 +1708,11 @@ There is no RPC to delete a single constraint, trim, paste or break a link; `mod
   tool's "To sketch" is the GUI test `section/to_sketch_draws_the_cut`;
   `project_section` through the RPC, offset and extruded, is in
   `headless_smoke.py`, and its refusals in `refused_calls_smoke.py`.
+- `tests/test_section_pieces.cpp` `[pieces]` -- [the pieces
+  fit](#the-pieces-fit) against generated outlines, the coverage of its
+  sigmas over many draws (`[slow]`), an exact cut, the detail, its cost.
+- `section/pieces_over_a_noisy_scan` (GUI): To sketch in pieces over a
+  noisy scan; the refusals in `refused_calls_smoke.py`.
 - `tests/test_sketch_import.cpp` `[import]` — the conic image (similarity,
   mirror, skew) exact; each DXF mapping row's entity and geometry (a bulge
   arc's radius and side; a non-uniform spline as ONE spline on its knots

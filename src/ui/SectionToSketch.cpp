@@ -75,6 +75,7 @@ uint64_t SectionToSketch(AppState& state, uint64_t sectionId) {
   }
   auto sk = std::make_unique<SketchFeature>("Section sketch", plane);
   sk->AddSectionGeometry({}, 0.0, state.sectionSketchFit);
+  sk->external.back().detail = std::clamp(state.sectionSketchDetail, 0.0, 1.0);
   const uint64_t id = BeginPreparedSketch(state, std::move(sk));
   if (id == 0) {
     state.sectionSketchMsg = state.sketchEdit.actionMsg;
@@ -87,16 +88,34 @@ uint64_t SectionToSketch(AppState& state, uint64_t sectionId) {
   return id;
 }
 
+namespace {
+
+// The pieces fit's detail: fewer, longer pieces to the left.
+void DrawDetailSlider(AppState& state) {
+  float detail = static_cast<float>(state.sectionSketchDetail);
+  ImGui::SetNextItemWidth(130.0f);
+  if (ImGui::SliderFloat("###sketchdetail", &detail, 0.0f, 1.0f, "detail %.2f"))
+    state.sectionSketchDetail =
+        std::clamp(static_cast<double>(detail), 0.0, 1.0);
+  ImGui::SetItemTooltip("The pieces fit's detail: fewer, longer pieces to "
+                        "the left, more, shorter ones to the right");
+}
+
+} // namespace
+
 void DrawSectionToSketchRow(AppState& state) {
   if (state.document == nullptr)
     return;
-  static const char* kFits[] = {"Lines", "Lines and arcs", "Splines"};
+  // In SectionFit's order.
+  static const char* kFits[] = {"Lines", "Lines and arcs", "Splines", "Pieces"};
   int fit = static_cast<int>(state.sectionSketchFit);
   ImGui::SetNextItemWidth(130.0f);
-  if (ImGui::Combo("###sketchfit", &fit, kFits, 3))
+  if (ImGui::Combo("###sketchfit", &fit, kFits, IM_ARRAYSIZE(kFits)))
     state.sectionSketchFit = static_cast<sketch::SectionFit>(fit);
-  ImGui::SetItemTooltip("What the cut is drawn with, to within 1/1000 of the "
-                        "bodies' size");
+  ImGui::SetItemTooltip(
+      "What the cut is drawn with: lines, arcs or splines to within 1/1000 "
+      "of the bodies' size, or the pieces -- the lines and arcs it is made "
+      "of, found from its own scatter");
   ImGui::SameLine();
   const bool none = state.sectionActiveId == 0;
   ImGui::BeginDisabled(none);
@@ -106,6 +125,8 @@ void DrawSectionToSketchRow(AppState& state) {
   ImGui::SetItemTooltip("A new sketch on the active cut, with the cut drawn in "
                         "it as construction geometry that follows the "
                         "bodies. Offset it for a profile");
+  if (state.sectionSketchFit == sketch::SectionFit::Pieces)
+    DrawDetailSlider(state);
   if (!state.sectionSketchMsg.empty())
     ImGui::TextWrapped("%s", state.sectionSketchMsg.c_str());
 }

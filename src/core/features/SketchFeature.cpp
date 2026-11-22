@@ -2458,9 +2458,12 @@ std::string RegenerateSection(SketchFeature& sk, const RegenContext& ctx,
   if (cut.chains.empty())
     return "the sketch's plane cuts none of the section's bodies (move the "
            "sketch's plane into them)";
-  sketch::FittedSection fitted = sketch::FitSection(cut.chains, ext.fit, tol);
+  sketch::FittedSection fitted =
+      sketch::FitSection(cut.chains, ext.fit, tol, ext.detail);
   for (sketch::Entity& e : fitted.entities)
     sketch::SetConstruction(e, true);
+  ext.cut = cut.chains;
+  ext.pieces = std::move(fitted.pieces);
   ext.usedToleranceMm = tol;
   ext.deviationMm = fitted.deviation;
   ext.sectionChains = static_cast<int>(cut.chains.size());

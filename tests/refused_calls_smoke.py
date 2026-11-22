@@ -309,7 +309,16 @@ def main():
                     ("project_section unknown body",
                      {"sketch_id": probe, "bodies": ["Nope"]}, "Nope"),
                     ("project_section a plane that cuts nothing",
-                     {"sketch_id": probe}, "cuts none")]:
+                     {"sketch_id": probe}, "cuts none"),
+                    ("project_section detail on another fit",
+                     {"sketch_id": probe, "fit": "arcs", "detail": 0.5},
+                     "pieces fit's"),
+                    ("project_section detail past 1",
+                     {"sketch_id": probe, "fit": "pieces", "detail": 2},
+                     "from 0"),
+                    ("project_section detail not a number",
+                     {"sketch_id": probe, "fit": "pieces", "detail": "fine"},
+                     "detail")]:
                 check(label, "project_section", params, needle=needle,
                       tab=part["name"])
             d.call("delete_feature", feature_id=probe)

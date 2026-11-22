@@ -522,6 +522,7 @@ set(core_sources
     src/core/sketch/SketchOrientation.cpp
     src/core/sketch/SketchText.cpp
     src/core/sketch/SketchSection.cpp
+    src/core/sketch/SectionPieces.cpp
     src/core/sketch/SketchSelection.cpp
     src/core/sketch/SketchFillet.cpp
     src/core/sketch/SketchSplit.cpp

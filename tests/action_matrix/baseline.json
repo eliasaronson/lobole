@@ -5055,6 +5055,13 @@
               "face:2/g1730128861":
                   "-face.delete -face.delete_feature face.draft face.extrude_add face.extrude_cut face.frame face.hole face.offset_in face.offset_out face.replace face.shell face.sketch"
             },
+            "golden/vNEXT-section-pieces": {
+              "body:1":
+                  "body.mirror body.pattern_circular body.pattern_linear body.split",
+              "edge:1/*;U*": "edge.chamfer*12 edge.fillet*12",
+              "face:1/face*":
+                  "-face.delete*6 -face.delete_feature*6 face.draft*6 face.extrude_add*6 face.extrude_cut*6 face.frame*6 face.hole*6 face.offset_in*6 face.offset_out*6 face.replace*6 face.shell*6 face.sketch*6"
+            },
             "golden/v28-units": {
               "body:2":
                   "body.mirror body.pattern_circular body.pattern_linear body.split",

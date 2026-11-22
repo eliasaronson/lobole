@@ -891,19 +891,29 @@ static constexpr MethodDoc ModelingMethods[] = {
      "creating-feature ids; default every body before the sketch); "
      "`tolerance_mm` (default 1/1000 of the cut bodies' bounding diagonal); "
      "`fit`: polyline | arcs (default; lines and arcs) | spline (the "
-     "sketch's cubic B-splines); anything else is refused. Returns "
-     "{external_index, gen_ids, tolerance_mm, deviation_mm (the largest "
-     "distance from the true cut to what was drawn), chains, open_chains (an "
-     "open scan's cut does not close), regen, digest}. A plane that cuts "
-     "none of the bodies is refused and changes nothing. The clearance round "
-     "it is the sketch's `offset`, which takes this construction outline "
-     "and makes real geometry.",
+     "sketch's cubic B-splines) | pieces (the lines and arcs the cut is made "
+     "of, found from its own scatter: the tolerance is then only the noise "
+     "floor of an exact cut, docs/sketching/README.md#the-pieces-fit); "
+     "anything else is refused. `detail` (pieces only, a number from 0 to "
+     "1, default 0.5): fewer, longer pieces toward 0, more, shorter ones "
+     "toward 1. Returns {external_index, gen_ids, tolerance_mm, deviation_mm "
+     "(the largest distance from the true cut to what was drawn), chains, "
+     "open_chains (an open scan's cut does not close), regen, digest}, and "
+     "for pieces `detail` and `pieces`, per drawn entity {id, kind, chain, "
+     "from, to (its span of the chain's points), points, sigma_mm (its "
+     "points' rms miss), stretch_mm (the worst mean miss over a few "
+     "points), angle_deg and angle_sigma_deg and offset_sigma_mm for a "
+     "line, radius_mm, radius_sigma_mm, centre_mm and centre_sigma_mm for an "
+     "arc (one sigma, from the fit's own normal equations)}. A plane that "
+     "cuts none of the bodies is refused and changes nothing. The clearance "
+     "round it is the sketch's `offset`, which takes this construction "
+     "outline and makes real geometry.",
      "sketch_id:int>=1, bodies?:any[], tolerance_mm?:number>0, "
-     "fit?:string",
+     "fit?:string, detail?:number",
      remote::NeedsPart,
      "external_index:int, gen_ids:int[], tolerance_mm:number, "
      "deviation_mm:number, chains:int, open_chains:int, fit:string, "
-     "regen:object, digest:object"},
+     "detail?:number, pieces?:object[], regen:object, digest:object"},
     {"add_reference_image",
      "Attach an image underlay to a sketch from an image file (`path`: PNG, "
      "JPEG or BMP, up to 16384 px a side; anything else is refused). "
@@ -1099,6 +1109,63 @@ static constexpr MethodDoc ModelingMethods[] = {
     // module has no such branch.
 };
 std::span<const MethodDoc> ModelingMethodDocs() { return ModelingMethods; }
+
+namespace {
+
+// A pieces fit's `detail`: a number from 0 to 1, else refused.
+double SectionDetail(const json& d, const std::string& method) {
+  if (!d.is_number() || !(d.get<double>() >= 0.0) || !(d.get<double>() <= 1.0))
+    throw std::runtime_error(method +
+                             ": detail is a number from 0 (fewer, longer "
+                             "pieces) to 1 (more, shorter ones); got " +
+                             d.dump());
+  return d.get<double>();
+}
+
+// One piece of a pieces fit, drawn as entity `id` of `sk`
+// (docs/sketching/README.md#the-pieces-fit).
+json PieceJson(const SketchFeature& sk, uint32_t id,
+               const sketch::PieceFit& p) {
+  const auto finite = [](double v) {
+    return std::isfinite(v) ? json(v) : json(nullptr);
+  };
+  json j = {{"id", id},
+            {"kind", p.arc ? "arc" : "line"},
+            {"chain", p.chain},
+            {"from", p.from},
+            {"to", p.to},
+            {"points", p.points},
+            {"sigma_mm", p.sigmaMm},
+            {"stretch_mm", p.stretchMm}};
+  const size_t idx = sk.IndexOfEntity(id);
+  const sketch::Entity* e =
+      idx < sk.entities.size() ? &sk.entities[idx] : nullptr;
+  if (p.arc) {
+    if (e != nullptr) {
+      if (const auto* a = std::get_if<sketch::Arc>(e)) {
+        j["radius_mm"] = a->radius;
+        j["centre_mm"] = {a->center.x, a->center.y};
+      } else if (const auto* c = std::get_if<sketch::Circle>(e)) {
+        j["kind"] = "circle";
+        j["radius_mm"] = c->radius;
+        j["centre_mm"] = {c->center.x, c->center.y};
+      }
+    }
+    j["radius_sigma_mm"] = finite(p.radiusSigmaMm);
+    j["centre_sigma_mm"] = {finite(p.centreSigmaMm.x),
+                            finite(p.centreSigmaMm.y)};
+  } else {
+    if (e != nullptr)
+      if (const auto* l = std::get_if<sketch::Line>(e))
+        j["angle_deg"] =
+            angles::ToDegrees(std::atan2(l->b.y - l->a.y, l->b.x - l->a.x));
+    j["angle_sigma_deg"] = finite(angles::ToDegrees(p.angleSigma));
+    j["offset_sigma_mm"] = finite(p.offsetSigmaMm);
+  }
+  return j;
+}
+
+} // namespace
 
 namespace {
 
@@ -2771,6 +2838,15 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
             t.dump());
       toleranceMm = t.get<double>();
     }
+    double detail = 0.5;
+    if (p.contains("detail")) {
+      if (fit != sketch::SectionFit::Pieces)
+        throw std::runtime_error(
+            "project_section: detail is the pieces fit's; pass fit "
+            "\"pieces\" with it (this fit is " +
+            std::string(sketch::ToString(fit)) + ")");
+      detail = SectionDetail(p.at("detail"), "project_section");
+    }
     std::vector<uint64_t> bodies;
     if (p.contains("bodies")) {
       const std::set<uint64_t> chosen =
@@ -2779,6 +2855,7 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
     }
     json before = DocumentIO::FeatureToJson(*sk);
     const size_t ei = sk->AddSectionGeometry(bodies, toleranceMm, fit);
+    sk->external[ei].detail = detail;
     doc->Regenerate();
     if (!sk->GetError().empty()) { // nothing cut, or a body after it
       const std::string err = sk->GetError();
@@ -2794,6 +2871,13 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
                  {"chains", ext.sectionChains},
                  {"open_chains", ext.sectionOpen},
                  {"fit", sketch::ToString(ext.fit)}};
+    if (ext.fit == sketch::SectionFit::Pieces) {
+      resp["detail"] = ext.detail;
+      json pieces = json::array();
+      for (size_t k = 0; k < ext.pieces.size() && k < ext.genIds.size(); k++)
+        pieces.push_back(PieceJson(*sk, ext.genIds[k], ext.pieces[k]));
+      resp["pieces"] = std::move(pieces);
+    }
     json after = DocumentIO::FeatureToJson(*sk);
     const json preDigest = BodyDigestJson(*doc);
     state.commands->Execute(

@@ -2038,6 +2038,8 @@ struct AppState {
   // the active cut with, and why the last press drew nothing.
   sketch::SectionFit sectionSketchFit = sketch::SectionFit::Arcs;
   std::string sectionSketchMsg;
+  // The pieces fit's detail, for "To sketch" in pieces and for Trace.
+  double sectionSketchDetail = 0.5;
   // The Align tool (docs/interchange/README.md#placing-an-import): an
   // Import's placement from a floor, three points, its principal axes or a
   // known distance. The preview writes the placement onto the feature with

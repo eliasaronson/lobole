@@ -1333,6 +1333,8 @@ json FeatureToJson(const Feature& feature) {
             ej["bodies"] = e.sectionBodies;
           if (e.toleranceMm > 0.0)
             ej["tolerance_mm"] = e.toleranceMm;
+          if (e.fit == sketch::SectionFit::Pieces) // vNEXT
+            ej["detail"] = e.detail;
           j["external"].push_back(std::move(ej));
           continue;
         }
@@ -3233,7 +3235,7 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
         // v214: where the sketch's plane cuts the bodies
         // (docs/sketching/README.md#a-section-into-a-sketch).
         readctx::RefuseUnknownKeys(
-            ej, {"kind", "fit", "bodies", "tolerance_mm", "gen_ids"},
+            ej, {"kind", "fit", "bodies", "tolerance_mm", "gen_ids", "detail"},
             "sketch section");
         sketch::ExternalGeom eg;
         eg.kind = sketch::ExternalKind::Section;
@@ -3252,6 +3254,20 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
                 "a sketch section's tolerance_mm is a number above 0, got " +
                 t.dump().substr(0, 40));
           eg.toleranceMm = t.get<double>();
+        }
+        if (ej.contains("detail")) { // vNEXT: the pieces fit's
+          const json& d = ej.at("detail");
+          if (eg.fit != sketch::SectionFit::Pieces)
+            throw std::runtime_error(
+                "a sketch section's detail is the pieces fit's; this one's "
+                "fit is " +
+                fit);
+          if (!d.is_number() || !(d.get<double>() >= 0.0) ||
+              !(d.get<double>() <= 1.0))
+            throw std::runtime_error(
+                "a sketch section's detail is a number from 0 to 1, got " +
+                d.dump().substr(0, 40));
+          eg.detail = d.get<double>();
         }
         eg.sectionBodies = ej.value("bodies", std::vector<uint64_t>{});
         eg.genIds = ej.value("gen_ids", std::vector<uint32_t>{});

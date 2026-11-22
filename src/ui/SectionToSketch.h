@@ -28,7 +28,8 @@ SketchPlane SectionSketchPlane(AppState& state,
 // that crosses no body), the reason in `state.sectionSketchMsg`.
 uint64_t SectionToSketch(AppState& state, uint64_t sectionId);
 
-// The tool window's row: the fit and the button, for the active cut.
+// The tool window's rows: the fit and To sketch, and the pieces' detail;
+// for the active cut.
 void DrawSectionToSketchRow(AppState& state);
 
 } // namespace ui

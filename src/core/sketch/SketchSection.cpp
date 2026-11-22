@@ -8,6 +8,7 @@
 #include "common/Logger.h"
 #include "core/Feature.h"
 #include "core/mesh/Slice.h"
+#include "core/sketch/SectionPieces.h"
 
 #include <BRepAdaptor_Curve.hxx>
 #include <BRepAlgoAPI_Section.hxx>
@@ -39,6 +40,8 @@ const char* ToString(SectionFit fit) {
     return "arcs";
   case SectionFit::Spline:
     return "spline";
+  case SectionFit::Pieces:
+    return "pieces";
   }
   return "polyline";
 }
@@ -50,6 +53,8 @@ std::optional<SectionFit> SectionFitFromString(const std::string& name) {
     return SectionFit::Arcs;
   if (name == "spline")
     return SectionFit::Spline;
+  if (name == "pieces")
+    return SectionFit::Pieces;
   return std::nullopt;
 }
 
@@ -577,8 +582,23 @@ std::vector<BSpline> FitSplines(const std::vector<glm::dvec2>& points,
 }
 
 FittedSection FitSection(const std::vector<CutChain>& chains, SectionFit fit,
-                         double tolerance) {
+                         double tolerance, double detail) {
   FittedSection out;
+  if (fit == SectionFit::Pieces) {
+    for (size_t i = 0; i < chains.size(); i++) {
+      if (chains[i].points.size() < 2)
+        continue;
+      PiecesFit f =
+          FitPieces(chains[i], static_cast<int>(i), tolerance, detail);
+      out.deviation = std::max(out.deviation, f.deviation);
+      for (size_t k = 0; k < f.entities.size(); k++) {
+        out.entities.push_back(std::move(f.entities[k]));
+        out.pieces.push_back(f.pieces[k]);
+        out.ends.push_back(f.ends[k]);
+      }
+    }
+    return out;
+  }
   for (const CutChain& c : chains) {
     const std::vector<glm::dvec2> pts = Walk(c);
     if (pts.size() < 2)
@@ -598,6 +618,8 @@ FittedSection FitSection(const std::vector<CutChain>& chains, SectionFit fit,
         out.entities.push_back(std::move(s));
       break;
     }
+    case SectionFit::Pieces:
+      break; // fitted above
     }
   }
   return out;

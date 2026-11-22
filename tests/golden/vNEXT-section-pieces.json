@@ -1,0 +1,112 @@
+{
+  "features": [
+    {
+      "depth": 10.0,
+      "height": 20.0,
+      "id": 1,
+      "name": "Block",
+      "position": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "type": "Box",
+      "width": 40.0
+    },
+    {
+      "constraints": [],
+      "entities": [
+        {
+          "a": [
+            0.0,
+            20.0
+          ],
+          "b": [
+            0.0,
+            0.0
+          ],
+          "construction": true,
+          "id": 517431015,
+          "type": "line"
+        },
+        {
+          "a": [
+            0.0,
+            0.0
+          ],
+          "b": [
+            40.0,
+            0.0
+          ],
+          "construction": true,
+          "id": 2469267207,
+          "type": "line"
+        },
+        {
+          "a": [
+            40.0,
+            0.0
+          ],
+          "b": [
+            40.0,
+            20.0
+          ],
+          "construction": true,
+          "id": 118616326,
+          "type": "line"
+        },
+        {
+          "a": [
+            40.0,
+            20.0
+          ],
+          "b": [
+            0.0,
+            20.0
+          ],
+          "construction": true,
+          "id": 4231634379,
+          "type": "line"
+        }
+      ],
+      "external": [
+        {
+          "bodies": [
+            1
+          ],
+          "detail": 0.3,
+          "fit": "pieces",
+          "gen_ids": [
+            517431015,
+            2469267207,
+            118616326,
+            4231634379
+          ],
+          "kind": "section"
+        }
+      ],
+      "id": 2,
+      "name": "Pieces",
+      "plane": {
+        "normal": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "origin": [
+          0.0,
+          0.0,
+          5.0
+        ],
+        "uAxis": [
+          1.0,
+          0.0,
+          0.0
+        ]
+      },
+      "type": "Sketch"
+    }
+  ],
+  "format": "designer-document",
+  "version": 234
+}

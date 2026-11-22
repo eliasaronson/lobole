@@ -990,7 +990,36 @@ struct DerivedOp {
 // lines and arcs, or B-splines (`fit`). It keeps no index into anything, so a
 // re-scan or an edit upstream draws the new cut. `ref` is unused.
 enum class ExternalKind { Face, Edge, Section };
-enum class SectionFit { Polyline, Arcs, Spline };
+// `Pieces` (vNEXT): the cut as the lines and arcs it is made of, each with
+// its own fit (docs/sketching/README.md#the-pieces-fit).
+enum class SectionFit { Polyline, Arcs, Spline, Pieces };
+// One chain of a section's cut, in the plane's UV. A closed one does not
+// repeat its first point.
+struct CutChain {
+  std::vector<glm::dvec2> points;
+  bool closed = false;
+};
+// One piece of a section's `pieces` fit: the span of its chain it explains
+// and how well (sketch::FitPieces, core/sketch/SectionPieces.h).
+struct PieceFit {
+  int chain = 0;
+  // The chain's point indices it spans, both included; on a closed chain
+  // `to` < `from` when it runs over the chain's first point.
+  uint32_t from = 0, to = 0;
+  uint32_t points = 0;
+  bool arc = false;
+  double sigmaMm = 0.0;   // its points' residual sigma (rms)
+  double stretchMm = 0.0; // the worst mean miss over a short stretch
+  // A line's direction angle (radians) and offset at its middle, an arc's
+  // centre and radius: one sigma each, from the fit's normal equations
+  // scaled by `inflation`, how much the residuals' own correlation widens
+  // them.
+  double angleSigma = 0.0;
+  double offsetSigmaMm = 0.0;
+  glm::dvec2 centreSigmaMm{0.0};
+  double radiusSigmaMm = 0.0;
+  double inflation = 1.0;
+};
 struct ExternalGeom {
   ElementRef ref; // face (elementMap.names) or edge (edgeNames) of a body
   ExternalKind kind = ExternalKind::Face;
@@ -1012,6 +1041,13 @@ struct ExternalGeom {
   // changed file renumbers, and the print is what the element under the name
   // is checked against (docs/sketching/README.md#projecting-an-imported-part).
   std::optional<ElementPrint> print;
+  // Section only, the pieces fit's detail (vNEXT): 0 fewer, longer pieces,
+  // 1 more, shorter ones.
+  double detail = 0.5;
+  // What the last regeneration cut (not saved), and for the pieces fit each
+  // drawn entity's fit, in `genIds` order.
+  std::vector<CutChain> cut;
+  std::vector<PieceFit> pieces;
 };
 
 } // namespace sketch

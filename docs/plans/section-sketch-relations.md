@@ -8,15 +8,12 @@ with the evidence for it, and none is applied past what the scan allows.
 ## The problem
 
 `project_section` (docs/sketching/README.md#a-section-into-a-sketch) draws
-the cut as solver-fixed construction geometry. That is right for a profile
+the cut as solver-fixed construction geometry, and its `pieces` fit finds
+the lines and arcs the cut is made of, each with its own fit and
+uncertainty (docs/sketching/README.md#the-pieces-fit). That is right for a profile
 that should follow the scan exactly, and wrong for reverse engineering a
 made part:
 
-- **The pieces are where a greedy walk put them.** `sketch::FitSection`
-  takes, from each point, the longest line or three-point arc within the
-  tolerance. A corner round is swallowed by the line before it, a break
-  falls wherever the tolerance ran out, and a wall that wanders by more
-  than a round does is cut into several lines.
 - **Nothing relates the pieces.** A slot's sides are 0.2° from parallel, its
   ends 0.03 mm from equal, a boss 11.97 mm across. The designer has to see
   each of these, redraw the outline by hand over the construction geometry
@@ -26,31 +23,6 @@ made part:
   the whole section.
 
 ## The shape of the fix
-
-### 1. Pieces that fit the cut
-
-A new fit, `fit: "pieces"`, in `sketch::FitSection`:
-
-- **Corners first.** Each chain is split by Douglas-Peucker at the chain's
-  own measured scatter (the median stand-off of a point from the line
-  through its neighbours, as a robust sigma).
-- **Runs are merged best first** while one line, or failing that one arc,
-  explains the merged run. "Explains" is three tests: the residuals' sigma;
-  the worst *short stretch* (the mean miss over a few consecutive points),
-  so a long run cannot average a fillet away; and the heading at the piece's
-  ends agreeing with the points there.
-- **Walls wander, rounds do not.** A line is allowed several times the
-  arc's tolerance, from the chain's own low-frequency scatter.
-- **Breaks slide** to where the residuals of the two neighbours cross; a
-  leftover shorter than a few points is given to a neighbour; each piece is
-  tried as the other kind and kept as the simpler unless the other is
-  better by an F-test.
-- `detail` (0 to 1, default 0.5) scales the tolerances: fewer, longer pieces
-  or more, shorter ones.
-
-Each piece keeps its points' residual sigma and the uncertainty of its own
-parameters (a line's angle and offset, an arc's centre and radius) from the
-fit's normal equations.
 
 ### 2. Real geometry beside the section
 
@@ -125,7 +97,6 @@ is opened on a scan-backed body (docs/ui/tool-sessions.md#defaults-and-refusals)
 
 ## Stages
 
-- **A.** The pieces fit (§1) as a `fit` of `project_section`.
 - **B.** Trace and `section_fit` (§2).
 - **C.** Candidates and accepting (§3, §4), the RPCs, then the tool.
 - **D.** The two readers (§5).
@@ -151,11 +122,6 @@ Fixtures are outlines generated from known lines and arcs, tilted in the
 plane, sampled with noise as a scan's cut is, and checked against the
 generator's numbers.
 
-- **Pieces.** A rounded rectangle, a slot, a keyhole and a D-shape come
-  back as their own count of lines and arcs, each break within a few point
-  spacings of the true tangent point, each radius within its stated
-  uncertainty. A 1 mm corner round on a 60 mm side is found, not averaged
-  into the side. A wall with a 0.05 mm low wave is one line.
 - **Candidates.** On a slot generated 0.2° off parallel with 0.05 mm noise,
   parallel is offered at under 3 sigmas and its ends' equal radius with it;
   on one generated 3° off, parallel is not offered. Two unrelated arcs of

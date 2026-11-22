@@ -1,8 +1,11 @@
 // SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+#include "app/GuiTests.h" // GuiTestCaptureDir
 #include "app/guitests/GuiTestsCommon.h"
 #include "cad/CADKernel.h"
+#include "common/ChildProcess.h" // CurrentPid
+#include "core/Angles.h"
 #include "core/Command.h"
 #include "core/features/RevolveFeature.h"
 #include "ui/AssemblyActions.h"
@@ -25,6 +28,11 @@
 
 #include <algorithm>
 #include <cmath>
+#include <filesystem>
+#include <fstream>
+#include <limits>
+#include <map>
+#include <random>
 
 // Viewport GUI tests, carved out of the single 8,036-line RegisterGuiTests.
 //
@@ -1414,6 +1422,132 @@ void RegisterViewportGuiTests(ImGuiTestEngine* engine) {
     s_App->sketchEdit = ui::SketchEditState{};
     ui::ClearSections(*s_App);
     s_App->sectionToolOpen = false;
+  };
+
+  // The pieces fit over a noisy scan's cut, drawn through the Section
+  // tool's To sketch: a plate with two rounded corners and two sharp ones,
+  // scanned with 0.03 mm of noise, comes back as its four lines and two
+  // arcs (docs/sketching/README.md#the-pieces-fit).
+  t = IM_REGISTER_TEST(engine, "section", "pieces_over_a_noisy_scan");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    const auto stl =
+        std::filesystem::temp_directory_path() /
+        ("lobole_gui_pieces_" + std::to_string(proc::CurrentPid()) + ".stl");
+    {
+      // The outline, a ring every 0.25 mm, and its outward normals.
+      std::vector<glm::dvec2> ring, normal;
+      const double sp = 0.25, r = 5.0, x = 20.0, y = 12.5, height = 10.0;
+      const auto line = [&](glm::dvec2 a, glm::dvec2 b) {
+        const int n = std::max(1, int(std::round(glm::length(b - a) / sp)));
+        const glm::dvec2 d = glm::normalize(b - a);
+        for (int i = 0; i < n; i++) {
+          ring.push_back(a + (b - a) * (double(i) / n));
+          normal.push_back({d.y, -d.x});
+        }
+      };
+      const auto arc = [&](glm::dvec2 c, double a0) {
+        const int n = int(std::round(angles::kPi / 2 * r / sp));
+        for (int i = 0; i < n; i++) {
+          const double t = a0 + angles::kPi / 2 * i / n;
+          ring.push_back(c + r * glm::dvec2(std::cos(t), std::sin(t)));
+          normal.push_back({std::cos(t), std::sin(t)});
+        }
+      };
+      line({-x, -y}, {x - r, -y});
+      arc({x - r, -y + r}, -angles::kPi / 2);
+      line({x, -y + r}, {x, y});
+      line({x, y}, {-x + r, y});
+      arc({-x + r, y - r}, angles::kPi / 2);
+      line({-x, y - r}, {-x, -y});
+      std::mt19937 rng(3);
+      std::normal_distribution<double> noise(0.0, 0.03);
+      const int levels = int(std::round(height / sp));
+      const size_t n = ring.size();
+      std::vector<glm::vec3> pos;
+      for (int z = 0; z <= levels; z++)
+        for (size_t i = 0; i < n; i++) {
+          const glm::dvec2 p = ring[i] + normal[i] * noise(rng);
+          pos.emplace_back(float(p.x), float(p.y), float(height * z / levels));
+        }
+      std::vector<std::array<size_t, 3>> tris;
+      for (int z = 0; z < levels; z++)
+        for (size_t i = 0; i < n; i++) {
+          const size_t a = z * n + i, b = z * n + (i + 1) % n;
+          tris.push_back({a, b, b + n});
+          tris.push_back({a, b + n, a + n});
+        }
+      const size_t bottom = pos.size();
+      pos.emplace_back(0.0f, 0.0f, 0.0f);
+      pos.emplace_back(0.0f, 0.0f, float(height));
+      const size_t top = bottom + 1, topRing = size_t(levels) * n;
+      for (size_t i = 0; i < n; i++) {
+        tris.push_back({bottom, (i + 1) % n, i});
+        tris.push_back({top, topRing + i, topRing + (i + 1) % n});
+      }
+      std::ofstream out(stl, std::ios::binary);
+      const char header[80] = {};
+      out.write(header, 80);
+      const uint32_t count = static_cast<uint32_t>(tris.size());
+      out.write(reinterpret_cast<const char*>(&count), 4);
+      for (const auto& tri : tris) {
+        const float nrm[3] = {0, 0, 0};
+        out.write(reinterpret_cast<const char*>(nrm), 12);
+        for (size_t k : tri)
+          out.write(reinterpret_cast<const char*>(&pos[k]), 12);
+        const char attr[2] = {};
+        out.write(attr, 2);
+      }
+    }
+    auto imp = std::make_unique<ImportFeature>("scan", stl.string());
+    imp->keepOrigin = true;
+    imp->upAxis = interchange::UpAxis::None;
+    imp->representation = mesh::Representation::Mesh;
+    Doc()->AddFeature(std::move(imp));
+    ctx->Yield(2);
+    IM_CHECK_EQ(Doc()->GetBodies().size(), (size_t)1);
+    ToolbarClick(ctx, "###tb_section");
+    ctx->Yield(3);
+    IM_CHECK_EQ(s_App->sections.size(), (size_t)1);
+    s_App->sectionActiveId = s_App->sections[0].id;
+    s_App->sections[0].offset = 5.0f;
+    s_App->sectionSketchFit = sketch::SectionFit::Pieces;
+    ctx->Yield();
+    const size_t before = Doc()->FeatureCount();
+    ctx->SetRef("//Section###ToolWindow");
+    ctx->ItemClick("**/###tosketch");
+    ctx->Yield(3);
+    IM_CHECK(s_App->sectionSketchMsg.empty());
+    const auto* sk =
+        dynamic_cast<const SketchFeature*>(Doc()->GetFeature(before));
+    IM_CHECK(sk != nullptr);
+    if (sk == nullptr)
+      return;
+    IM_CHECK(sk->GetError().empty());
+    const sketch::ExternalGeom& ext = sk->external[0];
+    IM_CHECK(ext.fit == sketch::SectionFit::Pieces);
+    IM_CHECK_EQ(ext.pieces.size(), (size_t)6);
+    int arcs = 0;
+    for (const sketch::PieceFit& p : ext.pieces)
+      arcs += p.arc;
+    IM_CHECK_EQ(arcs, 2);
+    if (!GuiTestCaptureDir().empty()) {
+      if (s_App->camera) {
+        s_App->camera->FinishAnimation();
+        s_App->camera->StopAnimation();
+        s_App->camera->SetTarget(glm::vec3(0.0f, 0.0f, 5.0f));
+        s_App->camera->SetUp(glm::vec3(0.0f, 1.0f, 0.0f));
+        s_App->camera->SetPosition(glm::vec3(0.0f, 0.0f, 5.0f + 70.0f));
+      }
+      ctx->Yield(3);
+      GuiShot(ctx, "section_pieces_noisy_scan");
+    }
+    s_App->sketchEdit = ui::SketchEditState{};
+    ui::ClearSections(*s_App);
+    s_App->sectionToolOpen = false;
+    s_App->sectionSketchFit = sketch::SectionFit::Arcs;
+    std::error_code ec;
+    std::filesystem::remove(stl, ec);
   };
 
   t = IM_REGISTER_TEST(engine, "section", "offset_arrow_drags_the_cut");

@@ -309,6 +309,62 @@ TEST_CASE("The v214 golden's section is drawn on load", "[sketch][golden]") {
         std::holds_alternative<sketch::Line>(s.entities[s.IndexOfEntity(id)]));
 }
 
+TEST_CASE("A pieces section is saved with its detail, and refused without "
+          "one that reads",
+          "[sketch][serialization]") {
+  SketchFeature sk("Cut", SketchPlane(PlaneType::XY));
+  sk.AddSectionGeometry({}, 0.0, sketch::SectionFit::Pieces);
+  sk.external[0].detail = 0.25;
+  const nlohmann::json j = DocumentIO::FeatureToJson(sk);
+  CHECK(j.at("external").at(0).at("fit") == "pieces");
+  CHECK(j.at("external").at(0).at("detail") == 0.25);
+  auto back = DocumentIO::FeatureFromJson(j);
+  const auto* s = dynamic_cast<const SketchFeature*>(back.get());
+  REQUIRE(s != nullptr);
+  CHECK(s->external[0].fit == sketch::SectionFit::Pieces);
+  CHECK(s->external[0].detail == 0.25);
+  nlohmann::json bad = j;
+  bad["external"][0]["detail"] = 1.5;
+  CHECK_THROWS_WITH(DocumentIO::FeatureFromJson(bad),
+                    ContainsSubstring("from 0 to 1"));
+  bad = j;
+  bad["external"][0]["fit"] = "arcs";
+  CHECK_THROWS_WITH(DocumentIO::FeatureFromJson(bad),
+                    ContainsSubstring("pieces fit's"));
+  // Another fit writes no detail.
+  SketchFeature arcs("Cut", SketchPlane(PlaneType::XY));
+  arcs.AddSectionGeometry({}, 0.0, sketch::SectionFit::Arcs);
+  CHECK_FALSE(
+      DocumentIO::FeatureToJson(arcs).at("external").at(0).contains("detail"));
+}
+
+TEST_CASE("The vNEXT pieces golden's section is drawn on load",
+          "[sketch][golden]") {
+  // tests/golden/vNEXT-section-pieces.json: the v214 box's section as
+  // pieces at detail 0.3 -- its four sides, each with its own fit.
+  auto doc = testio::Load(std::string(TestSourceDir()) +
+                          "/tests/golden/vNEXT-section-pieces.json");
+  REQUIRE(doc != nullptr);
+  auto& s = *dynamic_cast<SketchFeature*>(doc->GetFeature(1));
+  INFO(s.GetError());
+  REQUIRE(s.GetError().empty());
+  const sketch::ExternalGeom& e = s.external[0];
+  CHECK(e.fit == sketch::SectionFit::Pieces);
+  CHECK(e.detail == 0.3);
+  INFO("cut chains " << e.cut.size() << ", points "
+                     << (e.cut.empty() ? 0 : e.cut[0].points.size()));
+  REQUIRE(e.genIds.size() == 4);
+  REQUIRE(e.pieces.size() == 4);
+  for (size_t k = 0; k < 4; k++) {
+    const auto& ent = s.entities[s.IndexOfEntity(e.genIds[k])];
+    CHECK(std::holds_alternative<sketch::Line>(ent));
+    CHECK(sketch::IsConstruction(ent));
+    CHECK_FALSE(e.pieces[k].arc);
+    CHECK(e.pieces[k].sigmaMm < 1e-3); // a B-Rep's cut: exact
+  }
+  CHECK(e.deviationMm < 1e-3);
+}
+
 // What a section into a sketch costs on a scan, by size: hidden, run by name
 // (docs/sketching/README.md#what-a-section-costs).
 TEST_CASE("What a section into a sketch costs", "[.][section-cost]") {

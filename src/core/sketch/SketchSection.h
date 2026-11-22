@@ -24,17 +24,10 @@ struct Body;
 namespace sketch {
 
 // The fits project_section accepts, in the order the refusal names them.
-inline constexpr const char* kSectionFits = "polyline, arcs, spline";
+inline constexpr const char* kSectionFits = "polyline, arcs, spline, pieces";
 const char* ToString(SectionFit fit);
 // Nullopt for anything else; the caller refuses naming kSectionFits.
 std::optional<SectionFit> SectionFitFromString(const std::string& name);
-
-// One chain of the cut, in the plane's UV. A closed one does not repeat its
-// first point.
-struct CutChain {
-  std::vector<glm::dvec2> points;
-  bool closed = false;
-};
 
 struct SectionCut {
   std::vector<CutChain> chains;
@@ -63,6 +56,10 @@ struct FittedSection {
   // The largest distance from a point of the true cut to what was drawn
   // (mm).
   double deviation = 0.0;
+  // The pieces fit only: each entity's fit, and the `which` of its points
+  // at the piece's start and end (sketch::PiecesFit).
+  std::vector<PieceFit> pieces;
+  std::vector<std::pair<uint8_t, uint8_t>> ends;
 };
 
 // Each chain refitted within `tolerance` mm:
@@ -73,9 +70,12 @@ struct FittedSection {
 //   with the ends pinned, as many poles as the tolerance needs; a chain past
 //   255 poles (a sketch spline's limit) is split into pieces that meet, and
 //   a closed chain is always two (an extrusion of a lone closed spline
-//   weighs wrong: docs/known-bugs.md).
+//   weighs wrong: docs/known-bugs.md);
+// - pieces: the lines and arcs the cut is made of, found from each chain's
+//   own scatter at `detail` (0 to 1), the tolerance only its noise floor
+//   (core/sketch/SectionPieces.h).
 FittedSection FitSection(const std::vector<CutChain>& chains, SectionFit fit,
-                         double tolerance);
+                         double tolerance, double detail = 0.5);
 
 // One chain as B-splines within `tolerance` (the spline fit above), the
 // pieces joined end to end; `deviation` is the largest distance from a

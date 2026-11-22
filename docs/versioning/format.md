@@ -369,6 +369,7 @@ into the history above, numbered, when the branch lands
 
 | v | Change |
 |---|--------|
+| vNEXT | A sketch section's `fit` may be `pieces`, the lines and arcs the cut is made of, with `detail` (0 to 1, written only for that fit) ([the pieces fit](../sketching/README.md#the-pieces-fit)). A detail on another fit, or outside 0 to 1, is refused. Golden `vNEXT-section-pieces` |
 
 ## Paths in a project
 

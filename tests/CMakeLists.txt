@@ -177,6 +177,7 @@ add_executable(designer_tests
     scan_files.cpp
     test_mesh_scan_import.cpp
     test_sketch_section.cpp
+    test_section_pieces.cpp
     test_mesh_organic.cpp
     test_mesh_body.cpp
     test_mesh_body_import.cpp
