@@ -20,6 +20,7 @@
 #include <glm/glm.hpp>
 
 #include <cstdint>
+#include <functional>
 #include <limits>
 #include <memory>
 #include <vector>
@@ -61,6 +62,11 @@ public:
   [[nodiscard]] Closest
   ClosestPoint(const glm::dvec3& p,
                double maxDistance = std::numeric_limits<double>::max()) const;
+  // The same, over only the triangles `accept` admits (by index): the
+  // nearest surface that faces a given way (mesh/Facing.h).
+  [[nodiscard]] Closest
+  ClosestPoint(const glm::dvec3& p, double maxDistance,
+               const std::function<bool(uint32_t)>& accept) const;
 
   // The generalised winding number at `p`: 1 inside a closed outward mesh,
   // 0 outside, and in between near an open mesh's holes. First order far

@@ -508,7 +508,9 @@ static constexpr remote::MethodDoc kServerMethods[] = {
      "frame, one per part; what a waiting edit, and every geometry read of "
      "that part, is waiting for; cancelled, it rolls back the edit that "
      "made it when that is still the part's last, else leaves the feature "
-     "not built (cancelled) until build_feature). Empty when "
+     "not built (cancelled) until build_feature), `align` (an "
+     "align_import best_fit, or the Align tool's: what the waiting call is "
+     "waiting for; cancelled, the import stays where it stood). Empty when "
      "nothing is running. Not the "
      "CAM "
      "job document -- that is list_job_parts.",

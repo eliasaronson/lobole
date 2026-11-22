@@ -1230,7 +1230,7 @@ size_t RemoteServer::ProcessPending(ui::AppState& state) {
     // (remote/RemoteParking.h): a CAM one on its passes, a drawing one on its
     // projection, an exact interference of two named sides on its boolean, a
     // synchronous requirements check on its job, an import_step on the
-    // import job. A
+    // import job, an align_import best_fit on its align job. A
     // `batch` never parks -- its calls run inside HandleSemantic, one
     // transaction -- and neither does a request coming back from parking. Nor
     // does a drawing request on --headless, where no frame is held and the
@@ -1275,6 +1275,9 @@ size_t RemoteServer::ProcessPending(ui::AppState& state) {
               state, parked->request.method, *parked->params);
         if (!parked->wait)
           parked->wait = remote::ParkImportRequest(
+              state, parked->request.method, *parked->params);
+        if (!parked->wait)
+          parked->wait = remote::ParkModelingRequest(
               state, parked->request.method, *parked->params);
       } catch (...) {
         parked->wait = nullptr; // the handler says what went wrong

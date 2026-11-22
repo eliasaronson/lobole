@@ -2044,6 +2044,11 @@ struct AppState {
     std::optional<importplace::Placement> preview;
     std::string error;   // why the last alignment failed
     std::string summary; // what it fitted, one line
+    // Best fit: the feature whose body the import goes onto, and the fit
+    // running on an `align` job (ui/AlignTool.cpp), landed by its finish.
+    uint64_t ontoId = 0;
+    uint64_t jobId = 0;
+    std::shared_ptr<struct AlignToolRun> run;
   } alignTool;
   // The Fit tool (ui/FitTool.h): a primitive fitted to a body's triangles
   // from a picked point, kept as a datum from_fit.

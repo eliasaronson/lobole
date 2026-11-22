@@ -230,13 +230,13 @@ const Reference& FigureReference() {
 // cubes) of the figure at grid spacing h. Every vertex is on a grid edge,
 // shared by key, and kept at least 2% of the edge from its ends, so the
 // float32 weld of a written STL cannot fold two into one.
-mesh::TriMesh Contour(double h) {
-  glm::dvec3 lo, hi;
-  FigureBox(lo, hi);
+mesh::TriMesh
+ContourField(const std::function<double(const glm::dvec3&)>& field, double iso,
+             const glm::dvec3& lo, const glm::dvec3& hi, double h) {
   const int nx = int((hi.x - lo.x) / h) + 2, ny = int((hi.y - lo.y) / h) + 2,
             nz = int((hi.z - lo.z) / h) + 2;
   if (uint64_t(nx) * ny * nz >= (1ull << 32))
-    throw std::runtime_error("figure grid too fine");
+    throw std::runtime_error("contour grid too fine");
   const auto node = [&](int i, int j, int k) {
     return uint32_t(i + nx * (j + ny * k));
   };
@@ -249,7 +249,7 @@ mesh::TriMesh Contour(double h) {
   const auto fill = [&](std::vector<float>& layer, int k) {
     for (int j = 0; j < ny; j++)
       for (int i = 0; i < nx; i++)
-        layer[size_t(j) * nx + i] = float(Field(at(i, j, k)));
+        layer[size_t(j) * nx + i] = float(field(at(i, j, k)));
   };
   fill(below, 0);
   // Cube corner c: bit 0 x, bit 1 y, bit 2 z.
@@ -268,15 +268,15 @@ mesh::TriMesh Contour(double h) {
           f[c] = (dk ? above : below)[size_t(j + dj) * nx + i + di];
           id[c] = node(i + di, j + dj, k + dk);
           p[c] = at(i + di, j + dj, k + dk);
-          any |= f[c] > kIso;
-          all &= f[c] > kIso;
+          any |= f[c] > iso;
+          all &= f[c] > iso;
         }
         if (!any || all)
           continue;
         for (const auto& tet : kTets) {
           int in[4], out[4], ni = 0, no = 0;
           for (int c : tet)
-            (f[c] > kIso ? in[ni++] : out[no++]) = c;
+            (f[c] > iso ? in[ni++] : out[no++]) = c;
           if (ni == 0 || no == 0)
             continue;
           const auto vertexOn = [&](int a, int b) {
@@ -286,7 +286,7 @@ mesh::TriMesh Contour(double h) {
             auto [it, fresh] =
                 edgeVertex.try_emplace(key, uint32_t(m.positions.size()));
             if (fresh) {
-              double t = (kIso - f[a]) / double(f[b] - f[a]);
+              double t = (iso - f[a]) / double(f[b] - f[a]);
               t = std::clamp(t, 0.02, 0.98);
               m.positions.push_back(p[a] + t * (p[b] - p[a]));
             }
@@ -336,6 +336,12 @@ mesh::TriMesh Contour(double h) {
   }
   mesh::BuildAdjacency(m);
   return m;
+}
+
+mesh::TriMesh Contour(double h) {
+  glm::dvec3 lo, hi;
+  FigureBox(lo, hi);
+  return ContourField(Field, kIso, lo, hi, h);
 }
 
 // The grid spacing that makes about `triangles`: a contour at a quarter of
@@ -1141,6 +1147,173 @@ mesh::TriMesh Translated(const mesh::TriMesh& m, const glm::dvec3& offset) {
   for (glm::dvec3& p : out.positions)
     p += offset;
   return out;
+}
+
+// ------------------------------------------ parts to lay a scan onto --
+
+namespace {
+
+// A box of half sizes `half` about `c`, every edge rounded by `r`.
+double RoundBox(const glm::dvec3& p, const glm::dvec3& c,
+                const glm::dvec3& half, double r) {
+  const glm::dvec3 q = glm::abs(p - c) - (half - glm::dvec3(r));
+  return glm::length(glm::max(q, 0.0)) +
+         std::min(std::max({q.x, q.y, q.z}), 0.0) - r;
+}
+
+// A round hole of radius `r` about the line through `c` along unit `axis`.
+double Hole(const glm::dvec3& p, const glm::dvec3& c, const glm::dvec3& axis,
+            double r) {
+  const glm::dvec3 w = p - c;
+  return glm::length(w - glm::dot(w, axis) * axis) - r;
+}
+
+double PartDistance(SolidShape shape, const glm::dvec3& p) {
+  const glm::dvec3 X(1, 0, 0), Z(0, 0, 1);
+  switch (shape) {
+  case SolidShape::Bracket: {
+    // A base 60 x 30 x 5 and an upright 5 x 30 x 40 at its -x end, two
+    // holes of other sizes through the base and one through the upright.
+    double d = std::min(RoundBox(p, {0, 0, 2.5}, {30, 15, 2.5}, 0.8),
+                        RoundBox(p, {-27.5, 0, 20}, {2.5, 15, 20}, 0.8));
+    d = std::max(d, -Hole(p, {10, 6, 0}, Z, 4.0));
+    d = std::max(d, -Hole(p, {19, -7, 0}, Z, 2.5));
+    d = std::max(d, -Hole(p, {0, 5, 28}, X, 4.0));
+    return d;
+  }
+  case SolidShape::NearCube: {
+    // Within 4% of a cube, one blind hole 8 deep in its top off the
+    // middle: the one thing that tells its 24 attitudes apart.
+    double d = RoundBox(p, {0, 0, 0}, {15, 15.3, 15.6}, 1.0);
+    const double hole =
+        std::max(Hole(p, {5, -4, 0}, Z, 4.0), (15.6 - 8.0) - p.z);
+    return std::max(d, -hole);
+  }
+  case SolidShape::Plate: {
+    // 50 x 36 x 1.5, a hole off the middle and a notch from one corner:
+    // nothing turns it onto itself, and on its back its faces lie where
+    // the other side's were.
+    double d = RoundBox(p, {0, 0, 0}, {25, 18, 0.75}, 0.3);
+    d = std::max(d, -Hole(p, {12, 7, 0}, Z, 3.0));
+    d = std::max(d, -RoundBox(p, {-25, -18, 0}, {8, 6, 5}, 0.3));
+    return d;
+  }
+  }
+  return 1.0;
+}
+
+void PartBox(SolidShape shape, glm::dvec3& lo, glm::dvec3& hi) {
+  switch (shape) {
+  case SolidShape::Bracket:
+    lo = {-30, -15, 0};
+    hi = {30, 15, 40};
+    break;
+  case SolidShape::NearCube:
+    lo = {-15, -15.3, -15.6};
+    hi = {15, 15.3, 15.6};
+    break;
+  case SolidShape::Plate:
+    lo = {-25, -18, -0.75};
+    hi = {25, 18, 0.75};
+    break;
+  }
+}
+
+// The part contoured at `h`, each vertex projected onto the surface the
+// distance gives and moved along its normal by a noise of at most `noise`.
+mesh::TriMesh ContourPart(SolidShape shape, double h, double noise,
+                          uint64_t key) {
+  glm::dvec3 lo, hi;
+  PartBox(shape, lo, hi);
+  const glm::dvec3 margin(2.0 * h);
+  const auto field = [shape](const glm::dvec3& p) {
+    return -PartDistance(shape, p);
+  };
+  mesh::TriMesh m = ContourField(field, 0.0, lo - margin, hi + margin, h);
+  const double eps = 1e-4;
+  const auto gradient = [&](const glm::dvec3& p) {
+    glm::dvec3 g;
+    for (int i = 0; i < 3; i++) {
+      glm::dvec3 a = p, b = p;
+      a[i] += eps;
+      b[i] -= eps;
+      g[i] = (PartDistance(shape, a) - PartDistance(shape, b)) / (2.0 * eps);
+    }
+    return g;
+  };
+  for (glm::dvec3& p : m.positions) {
+    for (int it = 0; it < 6; it++) {
+      const glm::dvec3 g = gradient(p);
+      const double g2 = glm::dot(g, g);
+      if (!(g2 > 1e-12))
+        break;
+      p -= PartDistance(shape, p) * g / g2;
+    }
+    if (noise > 0.0) {
+      const glm::dvec3 g = gradient(p);
+      if (glm::length(g) > 1e-9)
+        p += glm::normalize(g) * (noise * Noise(key++));
+    }
+  }
+  return m;
+}
+
+const char* PartName(SolidShape shape) {
+  switch (shape) {
+  case SolidShape::Bracket:
+    return "bracket";
+  case SolidShape::NearCube:
+    return "near_cube";
+  case SolidShape::Plate:
+    return "plate";
+  }
+  return "part";
+}
+
+} // namespace
+
+glm::dvec3 Solid::ToWorld(const glm::dvec3& local) const {
+  return centre + turn * local;
+}
+
+Solid ScannedSolid(SolidShape shape, double spacing, double noise, bool half,
+                   double bodySpacing) {
+  Solid part;
+  part.shape = shape;
+  part.noise = noise;
+  part.turn = Turn({0.3, -0.8, 0.5}, 0.47);
+  part.centre = {11.0, -6.0, 4.0};
+  mesh::TriMesh body = ContourPart(
+      shape, bodySpacing > 0.0 ? bodySpacing : 0.5 * spacing, 0.0, 0);
+  mesh::TriMesh scan = ContourPart(shape, spacing, noise, 0x5ca9);
+  if (half) {
+    // The side of the part at +x (its own frame), as a scan that saw half
+    // of it arrives: open where it stopped.
+    std::vector<std::array<uint32_t, 3>> kept;
+    for (const auto& t : scan.triangles)
+      if ((scan.positions[t[0]].x + scan.positions[t[1]].x +
+           scan.positions[t[2]].x) /
+              3.0 >
+          0.0)
+        kept.push_back(t);
+    scan.triangles = std::move(kept);
+    Compact(scan);
+  }
+  for (mesh::TriMesh* m : {&body, &scan}) {
+    for (glm::dvec3& p : m->positions)
+      p = part.ToWorld(p);
+    mesh::BuildAdjacency(*m);
+    m->quantum = mesh::Float32Quantum(m->positions);
+  }
+  glm::dvec3 lo, hi;
+  body.Bounds(lo, hi);
+  part.size = glm::length(hi - lo);
+  part.body = std::move(body);
+  Organic& o = part.scan;
+  o.name = std::string(PartName(shape)) + (half ? "_half_scan" : "_scan");
+  scan.Bounds(o.lo, o.hi);
+  o.mesh = std::move(scan);
+  return part;
 }
 
 bool OrganicByName(const std::string& name, size_t triangles, Organic& out) {

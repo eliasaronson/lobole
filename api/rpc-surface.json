@@ -34,7 +34,7 @@
   "add_section": ["base_plane", "id", "offset", "plane_id", "reverse", "tilt_u", "tilt_v", "visible"],
   "add_simulation": ["configuration", "mesh_size_mm", "mesh_size_mm_expr", "name", "participants", "subject"],
   "add_study": ["kind", "material", "name", "simulation", "type"],
-  "align_import": ["distance_mm", "feature_id", "mode", "point_mm", "points_mm", "tolerance_mm"],
+  "align_import": ["distance_mm", "feature_id", "mode", "onto", "pairs_mm", "point_mm", "points_mm", "region", "tolerance_mm"],
   "auto_explode": ["view"],
   "autosave_now": [],
   "autosave_status": [],

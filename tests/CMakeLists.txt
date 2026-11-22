@@ -182,6 +182,7 @@ add_executable(designer_tests
     test_mesh_body_import.cpp
     test_mesh_cradle.cpp
     test_import_align.cpp
+    test_mesh_register.cpp
     test_mesh_costs.cpp
     test_mesh_writers.cpp
     test_mesh_fit.cpp
@@ -1021,6 +1022,14 @@ add_test(NAME contact_smoke
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/contact_smoke.py
                  $<TARGET_FILE:designer>)
 set_tests_properties(contact_smoke PROPERTIES TIMEOUT 120)
+
+# A scan laid onto a body by align_import best_fit, its datum, a save and
+# reopen, and a cancelled fit (docs/interchange/README.md#laying-a-scan-onto-a-body).
+# Headless.
+add_test(NAME scan_align_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/scan_align_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(scan_align_smoke PROPERTIES TIMEOUT 180)
 
 # Insertion paths: check_insertion and the `insertion` requirement
 # (docs/inspect/README.md#insertion). Headless.

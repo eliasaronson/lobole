@@ -197,6 +197,36 @@ struct Sheet {
 Sheet ScannedSheet(std::function<double(double, double)> heightAt, double width,
                    double depth, double spacing, double noise);
 
+// A machined part with its scan, for laying a scan onto its body
+// (docs/interchange/README.md#laying-a-scan-onto-a-body). The solid is a
+// signed distance -- rounded boxes, less round holes -- contoured twice:
+// the body at half `spacing` with no noise, and the scan at `spacing`
+// with every vertex on the surface moved along its normal by a
+// deterministic noise of at most `noise`. Both turned off the axes and
+// moved off the origin by the same motion, so the scan stands exactly on
+// its body: laid back onto it after any motion, the true answer is that
+// motion's inverse. `half` keeps only the scan's triangles on the +x side
+// of the part's own frame: a scan that saw half of it, open where it
+// stopped.
+//   Bracket: a base 60 x 30 x 5, an upright 5 x 30 x 40 at one end, two
+//     holes through the base and one through the upright.
+//   NearCube: 30 x 30.6 x 31.2, one blind hole off the middle of its top.
+//   Plate: 50 x 36 x 1.5, a hole off the middle and a notch at a corner.
+enum class SolidShape { Bracket, NearCube, Plate };
+struct Solid {
+  SolidShape shape = SolidShape::Bracket;
+  mesh::TriMesh body; // closed, adjacency built
+  Organic scan;       // closed, or open where `half`
+  glm::dmat3 turn{1.0};
+  glm::dvec3 centre{0.0};
+  double noise = 0.0;
+  double size = 0.0; // the body's bounding diagonal
+  [[nodiscard]] glm::dvec3 ToWorld(const glm::dvec3& local) const;
+};
+// `bodySpacing` 0: half of `spacing`.
+Solid ScannedSolid(SolidShape shape, double spacing = 0.8, double noise = 0.05,
+                   bool half = false, double bodySpacing = 0.0);
+
 // A triangle soup with what a bad file has, and how many of each.
 struct DirtySoup {
   std::vector<glm::dvec3> soup; // three points a triangle

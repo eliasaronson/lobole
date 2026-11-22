@@ -7,26 +7,40 @@
 #include "core/Command.h"
 #include "core/ImportAlign.h"
 #include "core/io/Serialization.h"
+#include "ui/BackgroundJobs.h"
 #include "ui/ExprInput.h"
 #include "ui/FeatureEditor.h" // kAlignToolSlot
 #include "ui/PanelLayout.h"   // LeftLabel
 #include "ui/PreviewFeature.h"
+#include "ui/Widgets.h" // DrawJobProgress
 
 #include "imgui.h"
 
+#include <atomic>
 #include <cmath>
 #include <cstdio>
 #include <exception>
 #include <string>
+#include <thread>
 
 namespace ui {
+
+// A best fit running on an `align` job: the worker writes the result, the
+// job's finish lands it on the frame.
+struct AlignToolRun {
+  importalign::Result result;
+  std::string error;
+};
 
 namespace {
 
 using importalign::Mode;
 
 constexpr const char* kModeLabels[] = {"Floor", "Three points",
-                                       "Principal axes", "Scale"};
+                                       "Principal axes", "Scale", "Best fit"};
+constexpr int kModes = 5;
+// The slot of the best fit's onto pick, past every point's.
+constexpr int kOntoSlot = 10;
 
 ImportFeature* AlignedImport(AppState& state, size_t* index = nullptr) {
   const auto& t = state.alignTool;
@@ -37,10 +51,30 @@ ImportFeature* AlignedImport(AppState& state, size_t* index = nullptr) {
       state.document->FindFeatureById(t.featureId, index));
 }
 
+// Stops the best fit in flight, if any: what it would land is no longer
+// asked for.
+void StopFit(AppState& state) {
+  auto& t = state.alignTool;
+  if (t.jobId != 0)
+    (void)CancelBackgroundJobById(state, t.jobId, "the Align tool moved on");
+  t.jobId = 0;
+  t.run.reset();
+}
+
 void Reset(AppState& state) {
   if (state.slotPick.featureId == kAlignToolSlot)
     state.slotPick = {};
+  StopFit(state);
   state.alignTool = AppState::AlignTool{};
+}
+
+// The bodies `id` made, as the document has them now.
+std::vector<const Body*> BodiesOf(const Document& doc, uint64_t id) {
+  std::vector<const Body*> out;
+  for (const Body& b : doc.GetBodies())
+    if (b.createdBy == id)
+      out.push_back(&b);
+  return out;
 }
 
 // Writes `p` onto the import and regenerates: the preview, off the undo
@@ -71,6 +105,8 @@ std::string Prompt(Mode mode, size_t i) {
            " of a distance you know";
   case Mode::Principal:
     break;
+  case Mode::BestFit:
+    return "Align: click the body to lay the import onto";
   }
   return "";
 }
@@ -83,9 +119,19 @@ void Arm(AppState& state, size_t i) {
   state.slotPick.prompt = Prompt(Mode(state.alignTool.mode), i);
 }
 
+void ArmOnto(AppState& state) {
+  state.slotPick = {};
+  state.slotPick.featureId = kAlignToolSlot;
+  state.slotPick.slot = kOntoSlot;
+  state.slotPick.kinds = SelectionKindBit(SelectionItem::Kind::Face);
+  state.slotPick.prompt = Prompt(Mode::BestFit, 0);
+}
+
 void ArmNext(AppState& state) {
   const auto& t = state.alignTool;
-  if (t.points.size() < importalign::PointsFor(Mode(t.mode)))
+  if (Mode(t.mode) == Mode::BestFit && t.ontoId == 0)
+    ArmOnto(state);
+  else if (t.points.size() < importalign::PointsFor(Mode(t.mode)))
     Arm(state, t.points.size());
   else if (state.slotPick.featureId == kAlignToolSlot)
     state.slotPick = {};
@@ -121,11 +167,95 @@ std::string Summary(Mode mode, const nlohmann::json& r) {
     std::snprintf(buf, sizeof buf, "Measured %.4g mm: scaled by %.6g",
                   r.value("measured_mm", 0.0), r.value("factor", 1.0));
     break;
+  case Mode::BestFit:
+    std::snprintf(buf, sizeof buf,
+                  "Laid onto '%s': mean %.3g mm, %.0f%% within %.3g mm "
+                  "(moved up to %.4g mm)",
+                  r.value("onto", std::string()).c_str(),
+                  r.value("mean_mm", 0.0), 100.0 * r.value("within", 0.0),
+                  r.value("within_mm", 0.0), r.value("moved_mm", 0.0));
+    break;
   }
   std::string out = buf;
   if (r.contains("note"))
     out += "\n" + r.at("note").get<std::string>();
   return out;
+}
+
+// Lands a best fit that finished: previewed, or why not. Only the run the
+// tool still waits on: one it stopped is dropped.
+void LandFit(AppState& state, const std::shared_ptr<AlignToolRun>& run) {
+  auto& t = state.alignTool;
+  if (!t.open || t.run != run)
+    return;
+  t.jobId = 0;
+  t.run.reset();
+  ImportFeature* imp = AlignedImport(state);
+  if (imp == nullptr)
+    return;
+  if (!run->error.empty()) {
+    t.error = run->error;
+    return;
+  }
+  if (run->result.cancelled) {
+    t.error = "Cancelled: the import stays where it stood";
+    return;
+  }
+  t.summary = Summary(Mode::BestFit, run->result.report);
+  Show(state, *imp, run->result.placement);
+  t.preview = run->result.placement;
+}
+
+// The best fit onto the tool's body, started on an `align` job: the
+// triangles gathered here, the fit on the worker.
+void StartFit(AppState& state, const ImportFeature& imp) {
+  auto& t = state.alignTool;
+  const Feature* onto = state.document->FindFeatureById(t.ontoId);
+  const std::vector<const Body*> bodies = BodiesOf(*state.document, t.ontoId);
+  if (onto == nullptr || bodies.empty()) {
+    t.error = "the body to lay it onto is gone: pick another";
+    t.ontoId = 0;
+    ArmNext(state);
+    return;
+  }
+  auto input = std::make_shared<const importalign::BestFitInput>(
+      importalign::GatherBestFit(
+          importalign::ImportBodies(*state.document, imp), bodies));
+  importalign::Request rq;
+  rq.mode = Mode::BestFit;
+  if (const std::string why = importalign::CheckBestFit(*input, rq);
+      !why.empty()) {
+    t.error = why;
+    return;
+  }
+  auto run = std::make_shared<AlignToolRun>();
+  auto bg = std::make_unique<BackgroundJob>();
+  bg->kind = "align";
+  bg->label = "Best fit onto '" + onto->GetName() + "'";
+  bg->cancellable = true;
+  bg->fraction.store(0.0);
+  BackgroundJob* raw = bg.get();
+  bg->thread = std::thread([run, raw, input, rq, current = t.original]() {
+    importalign::Progress progress;
+    progress.cancel = &raw->cancel;
+    progress.fraction = [raw](double f) { raw->fraction.store(f); };
+    try {
+      std::string why;
+      if (!importalign::BestFit(*input, current, rq, progress, run->result,
+                                why))
+        run->error = why;
+    } catch (const std::exception& e) {
+      run->error = e.what();
+    }
+    raw->done.store(true); // last
+  });
+  bg->finish = [run](AppState& s) {
+    LandFit(s, run);
+    return true;
+  };
+  t.run = run;
+  t.jobId = StartBackgroundJob(state, std::move(bg)).id;
+  LOG_INFO("tool: Align best fit onto '{}' started", onto->GetName());
 }
 
 // The alignment of the points as picked, previewed; or, while the mode
@@ -142,6 +272,12 @@ void Recompute(AppState& state) {
   // alignment of the preview would compound.
   Show(state, *imp, t.original);
   t.preview.reset();
+  StopFit(state);
+  if (mode == Mode::BestFit) {
+    if (t.ontoId != 0)
+      StartFit(state, *imp);
+    return;
+  }
   if (t.points.size() < importalign::PointsFor(mode))
     return;
   importalign::Request rq;
@@ -292,6 +428,22 @@ void AlignPointPicked(AppState& state, const SelectionItem& item) {
     state.slotPick = {};
     return;
   }
+  if (state.slotPick.slot == kOntoSlot) {
+    const uint64_t id =
+        item.kind == SelectionItem::Kind::Face ? item.element.featureId : 0;
+    if (id == 0 || id == t.featureId || BodiesOf(*state.document, id).empty()) {
+      state.slotPick.miss = id == t.featureId
+                                ? "that is the import itself: click the body "
+                                  "to lay it onto"
+                                : "click a face of the body to lay the "
+                                  "import onto";
+      return;
+    }
+    t.ontoId = id;
+    state.slotPick = {};
+    Recompute(state);
+    return;
+  }
   if (item.kind != SelectionItem::Kind::Face ||
       item.element.featureId != t.featureId) {
     state.slotPick.miss =
@@ -331,10 +483,12 @@ void DrawAlignToolWindow(AppState& state) {
   int mode = t.mode;
   LeftLabel("Mode");
   ImGui::SetNextItemWidth(-1);
-  if (ImGui::Combo("##align_mode", &mode, kModeLabels, 4) && mode != t.mode) {
+  if (ImGui::Combo("##align_mode", &mode, kModeLabels, kModes) &&
+      mode != t.mode) {
     t.mode = mode;
     t.points.clear();
     t.distanceMm = 0.0;
+    t.ontoId = 0;
     ArmNext(state);
     Recompute(state); // principal needs no point: it previews at once
   }
@@ -356,6 +510,32 @@ void DrawAlignToolWindow(AppState& state) {
         text + std::string("###align_pt") + std::to_string(i);
     if (ImGui::Button(label.c_str()))
       Arm(state, i);
+  }
+  if (m == Mode::BestFit) {
+    const bool armed = state.slotPick.featureId == kAlignToolSlot &&
+                       state.slotPick.slot == kOntoSlot;
+    const Feature* onto =
+        t.ontoId != 0 ? state.document->FindFeatureById(t.ontoId) : nullptr;
+    const std::string label =
+        (onto != nullptr
+             ? "Onto: " + onto->GetName() + (armed ? " (click again)" : "")
+             : std::string("Onto: ") +
+                   (armed ? "click it in the view" : "not picked")) +
+        "###align_onto";
+    if (ImGui::Button(label.c_str()))
+      ArmOnto(state);
+    if (BackgroundJob* job =
+            t.jobId != 0 ? FindBackgroundJobById(state, t.jobId) : nullptr) {
+      JobProgress bar;
+      bar.status = job->label;
+      bar.fraction = job->fraction.load();
+      bar.cancellable = job->cancellable;
+      bar.cancelAsked = job->cancel.load();
+      bar.cancelId = "###align_cancel_fit";
+      bar.cancelTip = "Stop fitting: the import stays where it stood";
+      if (DrawJobProgress(bar))
+        (void)CancelBackgroundJobById(state, t.jobId, "cancelled in the tool");
+    }
   }
   if (m == Mode::Floor) {
     bool own = t.ownTolerance;
@@ -404,7 +584,11 @@ void DrawAlignToolWindow(AppState& state) {
   ImGui::Separator();
   const bool ready = t.preview.has_value() && !(*t.preview == t.original);
   if (!ready && t.error.empty()) {
-    if (t.points.size() < need)
+    if (m == Mode::BestFit)
+      ImGui::TextDisabled(t.ontoId == 0  ? "Pick the body to lay it onto"
+                          : t.jobId != 0 ? "Fitting..."
+                                         : "It stands this way already");
+    else if (t.points.size() < need)
       ImGui::TextDisabled("Pick point %zu to continue", t.points.size() + 1);
     else if (m == Mode::Scale)
       ImGui::TextDisabled("Type the true distance to continue");

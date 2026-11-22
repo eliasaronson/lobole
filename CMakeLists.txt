@@ -555,6 +555,8 @@ set(core_sources
     src/core/mesh/Split.cpp
     src/core/mesh/MeshBvh.cpp
     src/core/mesh/Slice.cpp
+    src/core/mesh/Facing.cpp
+    src/core/mesh/Register.cpp
     src/core/io/RecognitionJson.cpp
     src/core/MotionStudy.cpp
     src/core/InputHash.cpp

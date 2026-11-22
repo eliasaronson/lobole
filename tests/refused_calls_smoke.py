@@ -481,6 +481,49 @@ def main():
                      "distance_mm")]:
                 check(label, "align_import", dict(params, feature_id=imp),
                       needle=needle, tab=part["name"])
+            # A best fit, refused before its job starts
+            # (docs/interchange/README.md#laying-a-scan-onto-a-body): onto
+            # another body of the part, never the import itself.
+            others = [b.get("created_by")
+                      for b in d.call("get_state").get("bodies", [])
+                      if b.get("created_by") not in (None, imp)]
+            note(others, "no body besides the import to lay it onto")
+            onto = others[0] if others else imp
+            line = [[[0, 0, 0], [0, 0, 0]], [[1, 0, 0], [1, 0, 0]],
+                    [[2, 0, 0], [2, 1, 0]]]
+            for label, params, needle in [
+                    ("align_import best_fit without onto",
+                     {"mode": "best_fit"}, "best_fit takes onto"),
+                    ("align_import best_fit onto no feature",
+                     {"mode": "best_fit", "onto": 987654},
+                     "onto: no feature with id"),
+                    ("align_import best_fit onto itself",
+                     {"mode": "best_fit", "onto": imp},
+                     "is the import itself"),
+                    ("align_import best_fit with a scale",
+                     {"mode": "best_fit", "onto": onto, "scale": 1.02},
+                     "unknown parameter 'scale'"),
+                    ("align_import best_fit pairs in a line",
+                     {"mode": "best_fit", "onto": onto, "pairs_mm": line},
+                     "in a line"),
+                    ("align_import best_fit two pairs",
+                     {"mode": "best_fit", "onto": onto,
+                      "pairs_mm": line[:2]}, "three pairs"),
+                    ("align_import best_fit region of a third body",
+                     {"mode": "best_fit", "onto": onto,
+                      "region": {"feature_id": 987654, "point_mm": [0, 0, 0],
+                                 "radius_mm": 5}},
+                     "neither the import"),
+                    ("align_import best_fit region off the import",
+                     {"mode": "best_fit", "onto": onto,
+                      "region": {"feature_id": imp,
+                                 "point_mm": [5000, 0, 0], "radius_mm": 5}},
+                     "no surface within"),
+                    ("align_import onto on a floor",
+                     {"mode": "floor", "point_mm": [0, 0, 0], "onto": onto},
+                     "onto is best_fit's")]:
+                check(label, "align_import", dict(params, feature_id=imp),
+                      needle=needle, tab=part["name"])
             # A primitive fitted from a point, and the datums that keep it
             # (docs/modeling/README.md#datums-on-a-scan): refused on the
             # inputs and on the geometry, the datum before it is added.

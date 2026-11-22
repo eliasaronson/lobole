@@ -34,7 +34,7 @@ COLUMNS: dict[str, str] = {
     'add_mate': "type?:@mate_types, a:object, b:object, name?:string, flipped?:bool, rotation_deg?:number, offset?:number, dx?:number, dy?:number, ball_rotation?:number[4], derive?:'twist'|'pose', rotation_range_deg?:number[2]|null, offset_range_mm?:number[2]|null, dx_range_mm?:number[2]|null, dy_range_mm?:number[2]|null, cone_deg?:number|null, rotation_deg_expr?:string, offset_expr?:string, dx_expr?:string, dy_expr?:string, rotation_range_deg_expr?:string[2], offset_range_mm_expr?:string[2], dx_range_mm_expr?:string[2], dy_range_mm_expr?:string[2], cone_deg_expr?:string",
     'add_occurrence': 'part:string|int, name?:string, transform?:object, visible?:bool, fixed?:bool, configuration?:string|int|null, material?:string|null, flexible?:bool',
     'add_part': 'name?:string',
-    'align_import': 'feature_id:int>=0, mode:string, point_mm?:number[3], points_mm?:any[], distance_mm?:number, tolerance_mm?:number',
+    'align_import': 'feature_id:int>=0, mode:string, point_mm?:number[3], points_mm?:any[], distance_mm?:number, tolerance_mm?:number, onto?:int>=0, pairs_mm?:any[], region?:object',
     'autosave_now': '',
     'autosave_status': '',
     'background_jobs': '',
@@ -187,6 +187,9 @@ class AlignImportParams(TypedDict):
     points_mm: NotRequired[Sequence[Any]]
     distance_mm: NotRequired[float]
     tolerance_mm: NotRequired[float]
+    onto: NotRequired[int]
+    pairs_mm: NotRequired[Sequence[Any]]
+    region: NotRequired[Mapping[str, Any]]
 
 class BatchParams(TypedDict):
     calls: Sequence[Mapping[str, Any]]

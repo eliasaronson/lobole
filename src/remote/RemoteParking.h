@@ -14,7 +14,8 @@
 // two named sides on its boolean (remote/RemoteInspection.h), a synchronous
 // requirements check or design sweep on its job
 // (remote/RemoteRequirements.h), an import_step on the import job
-// (remote/RemoteProject.h).
+// (remote/RemoteProject.h), an align_import best_fit on its align job
+// (remote/RemoteModeling.h).
 
 #include <nlohmann/json.hpp>
 

@@ -342,6 +342,12 @@ Bvh::Hit Bvh::Ray(const glm::dvec3& origin, const glm::dvec3& dir,
 }
 
 Bvh::Closest Bvh::ClosestPoint(const glm::dvec3& p, double maxDistance) const {
+  return ClosestPoint(p, maxDistance, nullptr);
+}
+
+Bvh::Closest
+Bvh::ClosestPoint(const glm::dvec3& p, double maxDistance,
+                  const std::function<bool(uint32_t)>& accept) const {
   Closest best;
   if (m_nodes.empty())
     return best;
@@ -358,6 +364,8 @@ Bvh::Closest Bvh::ClosestPoint(const glm::dvec3& p, double maxDistance) const {
     if (n.count) {
       for (uint32_t i = n.first; i < n.first + n.count; i++) {
         const uint32_t t = m_order[i];
+        if (accept && !accept(t))
+          continue;
         const glm::dvec3 q = ClosestOnTriangle(p, m.Corner(t, 0),
                                                m.Corner(t, 1), m.Corner(t, 2));
         const double d2 = glm::dot(q - p, q - p);

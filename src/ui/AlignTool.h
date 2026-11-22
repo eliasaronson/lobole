@@ -3,11 +3,13 @@
 
 #pragma once
 
-// The Align tool (docs/interchange/README.md#placing-an-import): the four
-// modes of `align_import` -- floor, three points, principal axes, scale --
-// on an Import, picked in the viewport. The import previews in its new
-// placement as soon as the mode has its points; Accept is one undo step,
-// and Cancel, Escape, the undo chord or a tab switch put it back.
+// The Align tool (docs/interchange/README.md#placing-an-import): the five
+// modes of `align_import` -- floor, three points, principal axes, scale,
+// best fit -- on an Import, picked in the viewport. The import previews in
+// its new placement as soon as the mode has its points (best fit: its body
+// to go onto, then the fit, run on an `align` job with its progress and a
+// cancel); Accept is one undo step, and Cancel, Escape, the undo chord or a
+// tab switch put it back.
 
 #include "ui/AppState.h"
 

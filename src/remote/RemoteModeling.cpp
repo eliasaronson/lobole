@@ -41,11 +41,13 @@
 #include "remote/InspectionContracts.h" // ContractError
 #include "remote/RemoteHelpers.h"
 #include "remote/RemoteInspection.h" // PrintedThreadJson
-#include "remote/RemoteProject.h"    // RequireFreshTabName
+#include "remote/RemoteParking.h"
+#include "remote/RemoteProject.h" // RequireFreshTabName
 #include "remote/RemoteTemplates.h"
 #include "remote/RpcContract.h"
 #include "ui/AppState.h"
 #include "ui/AssemblyActions.h" // PartDocById
+#include "ui/BackgroundJobs.h"
 #include "ui/DerivedActions.h"
 #include "ui/DocumentSlots.h"
 #include "ui/ImportActions.h" // ImportSketch
@@ -60,7 +62,10 @@
 #include <glm/glm.hpp>
 
 #include <algorithm>
+#include <atomic>
+#include <chrono>
 #include <cmath>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <functional>
@@ -68,6 +73,7 @@
 #include <memory>
 #include <set>
 #include <string>
+#include <thread>
 #include <vector>
 
 using nlohmann::json;
@@ -760,16 +766,41 @@ static constexpr MethodDoc ModelingMethods[] = {
      "(`points_mm` [2 points] and the true `distance_mm` between them give "
      "the factor; scaled about the origin, so a floor on z = 0 stays there). "
      "The plane modes put the bodies above the floor and centre them over "
-     "the origin in x and y; principal centres them. Points are where the "
+     "the origin in x and y; principal centres them. best_fit "
+     "(docs/interchange/README.md#laying-a-scan-onto-a-body) lays the "
+     "import onto the body `onto` made (its feature_id; the import's own is "
+     "refused): rigid only -- it never scales (`scale` is no parameter of "
+     "it) -- "
+     "from the placement as it stands and the principal attitudes (each "
+     "also turned 45 deg, each placed by the centroid and by the corners of "
+     "the box), screened, the best run to rest by point-to-plane ICP on a "
+     "thinned sample, each point matched to the nearest surface facing its "
+     "way, the winner by its capped mean distance over every sample, then "
+     "refined. `pairs_mm` [[on the import, on the body] x 3] give the one "
+     "start instead (three in a line refused); `region` {feature_id (the "
+     "import's or onto's), point_mm, radius_mm} limits it to the patch "
+     "within the radius, laid from where it stands. It runs as an `align` "
+     "job (background_jobs, cancel_background_job {kind: align}) and "
+     "answers when it lands; cancelled, it changes nothing. "
+     "Points are where the "
      "bodies stand now (get_state, measure, a pick), in mm. Any other mode is "
-     "refused, naming the four. Returns the inputs, the new {placement: "
+     "refused, naming the five. Returns the inputs, the new {placement: "
      "{translate_mm, rotate_deg}, scale}, `fit` (floor: {fitted: region | "
      "boundary_loop, body, triangles | loop_vertices, area_mm2, rms_mm, "
      "max_mm, tolerance_mm, normal}; three_points: {normal}; principal: "
-     "{spread_mm, note?}; scale: {measured_mm, factor}), regen and digest.",
+     "{spread_mm, note?}; scale: {measured_mm, factor}; best_fit: {onto, "
+     "rotate_deg and translate_mm (the motion applied), moved_mm (the "
+     "farthest any vertex moved), mean_mm and p95_mm (of the samples' "
+     "distances after), within_mm (the scan's noise, never under the "
+     "body's chord_mm) and within (the share inside it), unmatched (the "
+     "share with no surface facing its way within the cap), samples, "
+     "starts, winner (placement | principal | pairs), score_mm, runner_up? "
+     "{score_mm, turn_deg, move_mm} (the best start that ended elsewhere), "
+     "note? (when it comes close: the shape barely tells the two apart)}), "
+     "regen and digest.",
      "feature_id:int>=0, mode:string, "
      "point_mm?:number[3], points_mm?:any[], distance_mm?:number, "
-     "tolerance_mm?:number",
+     "tolerance_mm?:number, onto?:int>=0, pairs_mm?:any[], region?:object",
      remote::NeedsPart},
     {"set_material",
      "Assign a material slug (describe's material_slugs) to a body's creating "
@@ -1614,6 +1645,22 @@ Feature* BodyOwnerFor(Document& doc, const RpcParams& p, const char* method,
 
 } // namespace
 
+namespace {
+
+// An align_import best_fit, packed by the handler for ParkModelingRequest
+// instead of computed: the fit to run on a job, and the commit to run on
+// the frame when it lands.
+struct OffFrameAlign {
+  std::function<importalign::Result(const std::atomic<bool>&,
+                                    std::atomic<double>&)>
+      compute;
+  std::function<json(ui::AppState&, const importalign::Result&, bool)> commit;
+  std::string label;
+};
+thread_local OffFrameAlign* g_offFrameAlign = nullptr;
+
+} // namespace
+
 std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
                                       const std::string& m,
                                       const RpcParams& p) {
@@ -2133,6 +2180,7 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
                                ". Accepted: " + importalign::AcceptedModes());
     importalign::Request request;
     request.mode = *mode;
+    const bool bestFit = *mode == importalign::Mode::BestFit;
     const auto point = [](const json& v, const std::string& what) {
       if (!v.is_array() || v.size() != 3 || !v[0].is_number() ||
           !v[1].is_number() || !v[2].is_number())
@@ -2141,22 +2189,29 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
                         v[2].get<double>());
     };
     const char* modeName = importalign::ToString(*mode);
+    const auto takesNone = [&](const char* key, const char* whose) {
+      if (p.contains(key))
+        throw std::runtime_error(std::string(key) + " is " + whose + "; " +
+                                 modeName + " takes none");
+    };
     if (p.contains("point_mm")) {
       if (*mode != importalign::Mode::Floor)
         throw std::runtime_error(
             std::string("point_mm is floor's; ") + modeName + " takes " +
-            (*mode == importalign::Mode::Principal ? "no points"
-                                                   : "points_mm"));
+            (*mode == importalign::Mode::Principal || bestFit ? "no points"
+                                                              : "points_mm"));
       request.pointsMm.push_back(point(p.at("point_mm"), "point_mm"));
     }
     if (p.contains("points_mm")) {
       if (*mode == importalign::Mode::Floor ||
-          *mode == importalign::Mode::Principal)
+          *mode == importalign::Mode::Principal || bestFit)
         throw std::runtime_error(
             std::string("points_mm is for three_points "
                         "and scale; ") +
             modeName + " takes " +
-            (*mode == importalign::Mode::Floor ? "one point_mm" : "no points"));
+            (*mode == importalign::Mode::Floor ? "one point_mm"
+             : bestFit ? "pairs_mm, three [on the import, on the body] pairs"
+                       : "no points"));
       const json& pts = p.at("points_mm");
       if (!pts.is_array())
         throw std::runtime_error("points_mm is a list of [x, y, z] points, "
@@ -2182,44 +2237,198 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
         throw std::runtime_error("tolerance_mm is a number of mm");
       request.toleranceMm = p.at("tolerance_mm").get<double>();
     }
+    std::vector<const Body*> ontoBodies;
+    std::string ontoName;
+    if (!bestFit) {
+      takesNone("onto", "best_fit's");
+      takesNone("pairs_mm", "best_fit's");
+      takesNone("region", "best_fit's");
+    } else {
+      if (!p.contains("onto"))
+        throw std::runtime_error(
+            "best_fit takes onto: the feature_id of the body to lay the "
+            "import onto (get_state lists each body with created_by)");
+      const json& ontoJson = p.at("onto");
+      if (!ontoJson.is_number_unsigned())
+        throw std::runtime_error("onto is the feature_id (an integer) of the "
+                                 "body to lay the import onto, not " +
+                                 ontoJson.dump());
+      const uint64_t ontoId = ontoJson.get<uint64_t>();
+      if (ontoId == fid)
+        throw std::runtime_error(
+            "onto " + std::to_string(ontoId) + " is the import itself ('" +
+            imp->GetName() +
+            "'): a best fit lays it onto ANOTHER body -- a part's, or an "
+            "earlier scan's");
+      const Feature* ontoFeature = doc->FindFeatureById(ontoId);
+      if (ontoFeature == nullptr)
+        throw std::runtime_error(
+            "onto: no feature with id " + std::to_string(ontoId) +
+            " — get_state lists every body with the feature that made it "
+            "(created_by)");
+      for (const Body& body : doc->GetBodies())
+        if (body.createdBy == ontoId)
+          ontoBodies.push_back(&body);
+      if (ontoBodies.empty())
+        throw std::runtime_error(
+            "onto " + std::to_string(ontoId) + " ('" + ontoFeature->GetName() +
+            "', a " + ontoFeature->TypeName() +
+            ") made no body to lay the import onto: name the feature that "
+            "made the body (get_state's created_by)");
+      ontoName = ontoFeature->GetName();
+      if (p.contains("pairs_mm")) {
+        const json& pairs = p.at("pairs_mm");
+        if (!pairs.is_array())
+          throw std::runtime_error("pairs_mm is three pairs [[on the import "
+                                   "[x, y, z], on the body [x, y, z]], ...], "
+                                   "not " +
+                                   pairs.dump());
+        for (size_t i = 0; i < pairs.size(); i++) {
+          const std::string what = "pairs_mm[" + std::to_string(i) + "]";
+          if (!pairs[i].is_array() || pairs[i].size() != 2)
+            throw std::runtime_error(what +
+                                     " is a pair [on the import [x, y, z], on "
+                                     "the body [x, y, z]], not " +
+                                     pairs[i].dump());
+          request.pairsMm.push_back({point(pairs[i][0], what + "[0]"),
+                                     point(pairs[i][1], what + "[1]")});
+        }
+      }
+      if (p.contains("region")) {
+        const json& region = p.at("region");
+        if (!region.is_object())
+          throw std::runtime_error("region is {feature_id, point_mm, "
+                                   "radius_mm}, not " +
+                                   region.dump());
+        for (const auto& [key, value] : region.items())
+          if (key != "feature_id" && key != "point_mm" && key != "radius_mm")
+            throw std::runtime_error("region: unknown key '" + key +
+                                     "'. Accepted: feature_id, point_mm, "
+                                     "radius_mm");
+        if (!region.contains("feature_id") || !region.contains("point_mm") ||
+            !region.contains("radius_mm"))
+          throw std::runtime_error("region takes all of feature_id (the "
+                                   "import's or onto's), point_mm and "
+                                   "radius_mm");
+        if (!region.at("feature_id").is_number_unsigned())
+          throw std::runtime_error("region: feature_id is an integer");
+        const uint64_t on = region.at("feature_id").get<uint64_t>();
+        if (on != fid && on != ontoId)
+          throw std::runtime_error("region: feature_id " + std::to_string(on) +
+                                   " is neither the import (" +
+                                   std::to_string(fid) + ") nor onto (" +
+                                   std::to_string(ontoId) +
+                                   "): a region is a patch of one of the two");
+        if (!region.at("radius_mm").is_number())
+          throw std::runtime_error("region: radius_mm is a number of mm");
+        request.region = importalign::Request::Region{
+            on == fid, point(region.at("point_mm"), "region: point_mm"),
+            region.at("radius_mm").get<double>()};
+      }
+    }
     importalign::CheckRequest(request);
-    importalign::Result aligned;
-    std::string why;
-    if (!importalign::Align(importalign::ImportBodies(*doc, *imp),
-                            imp->placement, request, aligned, why))
+    // The reply's echo of what was asked, and the commit both paths share.
+    json echo{{"feature_id", fid}, {"mode", modeName}};
+    for (const char* key :
+         {"point_mm", "points_mm", "onto", "pairs_mm", "region"})
+      if (p.contains(key))
+        echo[key] = p.at(key);
+    if (p.contains("distance_mm"))
+      echo["distance_mm"] = request.distanceMm;
+    if (p.contains("tolerance_mm"))
+      echo["tolerance_mm"] = *request.toleranceMm;
+    const importplace::Placement current = imp->placement;
+    Document* const target = doc;
+    // `parked`: the fit ran on a job, and the document may have moved on
+    // since it was asked.
+    const auto commit = [fid, echo, current, target](
+                            ui::AppState& state,
+                            const importalign::Result& aligned, bool parked) {
+      const char* const mode =
+          echo.at("mode").get_ref<const std::string&>().c_str();
+      if (aligned.cancelled)
+        throw std::runtime_error(std::string("align_import ") + mode +
+                                 ": cancelled; the document is unchanged");
+      size_t at = 0;
+      auto* now =
+          !parked || state.document.get() == target
+              ? dynamic_cast<ImportFeature*>(target->FindFeatureById(fid, &at))
+              : nullptr;
+      if (now == nullptr || !(now->placement == current))
+        throw std::runtime_error(
+            std::string("align_import ") + mode +
+            ": the import was moved, removed or its part closed while the "
+            "fit ran; nothing was changed -- ask again");
+      const json before = DocumentIO::FeatureToJson(*now);
+      json after;
+      {
+        ImportFeature placed(*now);
+        placed.placement = aligned.placement;
+        // Written whole: what it moved no longer follows a text.
+        placed.translateExpr = {};
+        placed.rotateExpr = {};
+        placed.scaleExpr.clear();
+        after = DocumentIO::FeatureToJson(placed);
+      }
+      const json preDigest = BodyDigestJson(*target);
+      if (!state.commands->Execute(
+              std::make_unique<ModifyFeatureCommand>(at, before, after),
+              *target))
+        throw std::runtime_error("align_import: the placed import did not "
+                                 "regenerate; the document is unchanged");
+      json resp = echo;
+      resp["placement"] = importalign::PlacementJson(aligned.placement);
+      resp["scale"] = aligned.placement.scale;
+      resp["fit"] = aligned.report;
+      resp["regen"] = RegenSummaryJson(*target);
+      resp["digest"] = DigestJson(preDigest, *target);
+      return resp;
+    };
+    if (!bestFit) {
+      importalign::Result aligned;
+      std::string why;
+      if (!importalign::Align(importalign::ImportBodies(*doc, *imp), current,
+                              request, aligned, why))
+        throw std::runtime_error("align_import: " + why +
+                                 "; the document is unchanged");
+      return commit(state, aligned, false);
+    }
+    // The triangles gathered here, on the frame (a B-Rep is tessellated on
+    // a copy); the fit needs nothing else of the document.
+    auto input = std::make_shared<const importalign::BestFitInput>(
+        importalign::GatherBestFit(importalign::ImportBodies(*doc, *imp),
+                                   ontoBodies));
+    if (const std::string why = importalign::CheckBestFit(*input, request);
+        !why.empty())
       throw std::runtime_error("align_import: " + why +
                                "; the document is unchanged");
-    const json before = DocumentIO::FeatureToJson(*imp);
-    json after;
-    {
-      ImportFeature placed(*imp);
-      placed.placement = aligned.placement;
-      // Written whole: what it moved no longer follows a text.
-      placed.translateExpr = {};
-      placed.rotateExpr = {};
-      placed.scaleExpr.clear();
-      after = DocumentIO::FeatureToJson(placed);
+    const auto compute = [input, current,
+                          request](const std::atomic<bool>& cancel,
+                                   std::atomic<double>& fraction) {
+      importalign::Progress progress;
+      progress.cancel = &cancel;
+      progress.fraction = [&fraction](double f) { fraction.store(f); };
+      importalign::Result aligned;
+      std::string why;
+      if (!importalign::BestFit(*input, current, request, progress, aligned,
+                                why))
+        throw std::runtime_error("align_import: " + why +
+                                 "; the document is unchanged");
+      return aligned;
+    };
+    if (g_offFrameAlign != nullptr) {
+      // Parked: the fit runs on an `align` job, and the reply waits for it
+      // (ParkModelingRequest).
+      g_offFrameAlign->compute = compute;
+      g_offFrameAlign->commit = commit;
+      g_offFrameAlign->label =
+          "Best fit of '" + imp->GetName() + "' onto '" + ontoName + "'";
+      return json::object();
     }
-    const json preDigest = BodyDigestJson(*doc);
-    if (!state.commands->Execute(
-            std::make_unique<ModifyFeatureCommand>(index, before, after), *doc))
-      throw std::runtime_error("align_import: the placed import did not "
-                               "regenerate; the document is unchanged");
-    json resp{{"feature_id", fid}, {"mode", modeName}};
-    if (p.contains("point_mm"))
-      resp["point_mm"] = p.at("point_mm");
-    if (p.contains("points_mm"))
-      resp["points_mm"] = p.at("points_mm");
-    if (p.contains("distance_mm"))
-      resp["distance_mm"] = request.distanceMm;
-    if (p.contains("tolerance_mm"))
-      resp["tolerance_mm"] = *request.toleranceMm;
-    resp["placement"] = importalign::PlacementJson(aligned.placement);
-    resp["scale"] = aligned.placement.scale;
-    resp["fit"] = aligned.report;
-    resp["regen"] = RegenSummaryJson(*doc);
-    resp["digest"] = DigestJson(preDigest, *doc);
-    return resp;
+    // In a batch, or wherever nothing parks: on this thread.
+    std::atomic<bool> never{false};
+    std::atomic<double> fraction{0.0};
+    return commit(state, compute(never, fraction), false);
   }
   if (m == "set_material") {
     // Assign a material to a body-creating feature — by feature_id (the
@@ -3248,6 +3457,85 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
                 {"digest", DigestJson(preDigest, *doc)}};
   }
   return std::nullopt;
+}
+
+namespace {
+
+// A parked best fit: answered on the frame once its job lands, by the
+// commit the handler packed -- one undo step, or the refusal of a cancel.
+class AlignWait : public Parking {
+public:
+  struct Run {
+    std::function<json(ui::AppState&, const importalign::Result&, bool)> commit;
+    importalign::Result result;
+    std::string error;
+    std::atomic<bool> done{false};
+  };
+  explicit AlignWait(std::shared_ptr<Run> run) : m_run(std::move(run)) {}
+  Next Poll(ui::AppState&, const RpcParams&, json& answer) override;
+
+private:
+  std::shared_ptr<Run> m_run;
+};
+
+Parking::Next AlignWait::Poll(ui::AppState& state, const RpcParams&,
+                              json& answer) {
+  if (!m_run->done.load(std::memory_order_acquire))
+    return Next::Wait;
+  if (!m_run->error.empty())
+    throw std::runtime_error(m_run->error);
+  answer = m_run->commit(state, m_run->result, true);
+  return Next::Answer;
+}
+
+} // namespace
+
+std::unique_ptr<Parking> ParkModelingRequest(ui::AppState& state,
+                                             const std::string& m,
+                                             const RpcParams& p) {
+  if (m != "align_import" || !state.document)
+    return nullptr;
+  OffFrameAlign slot;
+  g_offFrameAlign = &slot;
+  try {
+    (void)HandleModelingRpc(state, *state.document, m, p);
+  } catch (...) {
+    g_offFrameAlign = nullptr;
+    return nullptr; // the handler refuses it again, in its own words
+  }
+  g_offFrameAlign = nullptr;
+  // Not a best fit (answered as it was asked), or a key no handler read:
+  // the server refuses that before anything starts.
+  if (!slot.compute || !p.UnknownKeys().empty())
+    return nullptr;
+  auto run = std::make_shared<AlignWait::Run>();
+  run->commit = std::move(slot.commit);
+  auto bg = std::make_unique<ui::BackgroundJob>();
+  bg->kind = "align";
+  bg->label = slot.label;
+  bg->cancellable = true;
+  bg->fraction.store(0.0);
+  ui::BackgroundJob* raw = bg.get();
+  // Holds the job before it computes (tests only), so a smoke can cancel it
+  // while it runs.
+  int holdMs = 0;
+  if (const char* ms = std::getenv("LOBOLE_TEST_ALIGN_MS"))
+    holdMs = std::max(0, std::atoi(ms));
+  bg->thread = std::thread([run, raw, holdMs,
+                            compute = std::move(slot.compute)]() {
+    for (int waited = 0; waited < holdMs && !raw->cancel.load(); waited += 10)
+      std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    try {
+      run->result = compute(raw->cancel, raw->fraction);
+    } catch (const std::exception& e) {
+      run->error = e.what();
+    }
+    run->done.store(true, std::memory_order_release);
+    raw->done.store(true); // last
+  });
+  bg->finish = [](ui::AppState&) { return true; };
+  ui::StartBackgroundJob(state, std::move(bg));
+  return std::make_unique<AlignWait>(std::move(run));
 }
 
 } // namespace remote

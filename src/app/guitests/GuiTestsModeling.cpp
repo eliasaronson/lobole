@@ -8,6 +8,7 @@
 #include "core/Angles.h"
 #include "core/ElementHistory.h"
 #include "core/HeavyBuild.h"
+#include "core/ImportAlign.h"
 #include "core/Measure.h"
 #include "core/Primitives.h"
 #include "core/PrintAllowance.h"
@@ -2591,6 +2592,148 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(import()->placement.IsIdentity());
     IM_CHECK(std::abs(zSpan().second - zSpan().first - 10.0) < 1e-4);
     IM_CHECK_EQ(s_App->commands->UndoDepth(), undone);
+    std::filesystem::remove(stl);
+  };
+
+  // The Align tool's Best fit
+  // (docs/interchange/README.md#laying-a-scan-onto-a-body): the same 40 x 20 x
+  // 10 box read twice, once where it was written and once turned and moved off
+  // it. Best fit on the moved one arms a pick of the body to lay it onto,
+  // Accept disabled; a click on the other box starts the fit as an `align` job,
+  // shown with its progress, and the frame keeps drawing; it lands as a preview
+  // standing on the other box (a box is its own turn, so the note says another
+  // attitude fits as well); Accept is one undo step and Undo puts it back.
+  t = IM_REGISTER_TEST(engine, "align", "a_best_fit_runs_off_the_frame");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    const auto stl =
+        std::filesystem::temp_directory_path() /
+        ("lobole_gui_bestfit_" + std::to_string(proc::CurrentPid()) + ".stl");
+    {
+      // Each face a grid of 4 x 4 squares: a fit samples a surface, and two
+      // triangles a face is a thin one to sample.
+      std::vector<std::array<glm::vec3, 3>> tris;
+      const glm::vec3 half(20.0f, 10.0f, 5.0f);
+      for (int axis = 0; axis < 3; axis++)
+        for (int side : {-1, 1}) {
+          const int u = (axis + 1) % 3, v = (axis + 2) % 3;
+          const auto at = [&](int i, int j) {
+            glm::vec3 p(0.0f);
+            p[axis] = float(side) * half[axis];
+            p[u] = -half[u] + 2.0f * half[u] * float(i) / 4.0f;
+            p[v] = -half[v] + 2.0f * half[v] * float(j) / 4.0f;
+            return p;
+          };
+          for (int i = 0; i < 4; i++)
+            for (int j = 0; j < 4; j++) {
+              const glm::vec3 a = at(i, j), b = at(i + 1, j),
+                              c = at(i + 1, j + 1), d = at(i, j + 1);
+              if (side > 0) {
+                tris.push_back({a, b, c});
+                tris.push_back({a, c, d});
+              } else {
+                tris.push_back({a, c, b});
+                tris.push_back({a, d, c});
+              }
+            }
+        }
+      std::ofstream out(stl, std::ios::binary);
+      const char header[80] = {};
+      out.write(header, 80);
+      const uint32_t count = uint32_t(tris.size());
+      out.write(reinterpret_cast<const char*>(&count), 4);
+      for (const auto& tri : tris) {
+        const float n[3] = {0, 0, 0};
+        out.write(reinterpret_cast<const char*>(n), 12);
+        for (const glm::vec3& p : tri)
+          out.write(reinterpret_cast<const char*>(&p), 12);
+        const char attr[2] = {};
+        out.write(attr, 2);
+      }
+    }
+    for (const char* name : {"model", "scan"}) {
+      auto imp = std::make_unique<ImportFeature>(name, stl.string());
+      imp->upAxis = interchange::UpAxis::None;
+      imp->representation = mesh::Representation::Mesh;
+      imp->keepOrigin = true;
+      if (std::string(name) == "scan") {
+        imp->placement.rotateDeg = {17.0, -24.0, 38.0};
+        imp->placement.translateMm = {-80.0, 15.0, 8.0};
+      }
+      Doc()->AddFeature(std::move(imp));
+    }
+    Doc()->Regenerate();
+    ctx->Yield(2);
+    IM_CHECK_EQ(Doc()->GetBodies().size(), size_t{2});
+    const uint64_t modelId = Doc()->GetFeature(0)->GetId(),
+                   scanId = Doc()->GetFeature(1)->GetId();
+    const auto bounds = [](uint64_t id, glm::dvec3& lo, glm::dvec3& hi) {
+      for (const Body& b : Doc()->GetBodies())
+        if (b.createdBy == id)
+          BodyBounds(b, lo, hi, /*tight=*/true);
+    };
+    const auto scan = [&] {
+      return dynamic_cast<const ImportFeature*>(Doc()->FindFeatureById(scanId));
+    };
+    const size_t depth = s_App->commands->UndoDepth();
+
+    ToolbarClick(ctx, "###tb_align");
+    ctx->Yield();
+    IM_CHECK(s_App->alignTool.open);
+    IM_CHECK_EQ(s_App->alignTool.featureId, scanId); // the newest import
+    ctx->SetRef("//###ToolWindow");
+    ctx->ComboClick("##align_mode/Best fit");
+    ctx->SetRef("//##MainMenuBar");
+    ctx->Yield(2);
+    IM_CHECK_EQ(s_App->alignTool.mode, int(importalign::Mode::BestFit));
+    IM_CHECK_EQ(s_App->slotPick.featureId, ui::kAlignToolSlot);
+    IM_CHECK((ctx->ItemInfo("//###ToolWindow/###tw_accept").ItemFlags &
+              ImGuiItemFlags_Disabled) != 0);
+
+    // The model's +X end, from straight out along +X: the scan stands far
+    // off along -X, behind the model.
+    const glm::vec3 end(20.0f, 0.0f, 0.0f);
+    s_App->camera->StopAnimation();
+    s_App->camera->SetTarget(end);
+    s_App->camera->SetUp(conv::kWorldUpF);
+    s_App->camera->SetPosition(end + glm::vec3(40.0f, 0.0f, 0.0f));
+    ctx->Yield(2);
+    ctx->MouseMoveToPos(WorldToWindow(end + glm::vec3(0.0f, 3.0f, 1.0f)));
+    ctx->MouseClick(ImGuiMouseButton_Left);
+    ctx->Yield();
+    ctx->LogInfo("onto pick: %s", s_App->slotPick.miss.c_str());
+    IM_CHECK_EQ(s_App->alignTool.ontoId, modelId);
+    IM_CHECK(s_App->alignTool.error.empty());
+    IM_CHECK(WaitForJobs(ctx, "align"));
+    ctx->Yield(2);
+    IM_CHECK(s_App->alignTool.error.empty());
+    IM_CHECK(s_App->alignTool.preview.has_value());
+    IM_CHECK(s_App->alignTool.summary.find("Laid onto 'model") !=
+             std::string::npos);
+    IM_CHECK(s_App->alignTool.summary.find("barely tells them apart") !=
+             std::string::npos);
+    IM_CHECK_EQ(s_App->commands->UndoDepth(), depth); // a preview, unrecorded
+    glm::dvec3 mlo, mhi, slo, shi;
+    bounds(modelId, mlo, mhi);
+    bounds(scanId, slo, shi);
+    IM_CHECK(glm::length(slo - mlo) < 1e-3 && glm::length(shi - mhi) < 1e-3);
+    IM_CHECK_EQ(scan()->placement.scale, 1.0);
+    // What a person sees: the tool window with what it laid.
+    s_App->camera->SetTarget(glm::vec3(0.0f));
+    s_App->camera->SetPosition(glm::vec3(70.0f, -90.0f, 60.0f));
+    ctx->Yield(3);
+    FilletShot(ctx, "align_best_fit");
+    ctx->ItemClick("//###ToolWindow/###tw_accept");
+    ctx->Yield(2);
+    IM_CHECK(!s_App->alignTool.open);
+    IM_CHECK_EQ(s_App->commands->UndoDepth(), depth + 1);
+
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("Edit/Undo");
+    ctx->Yield(2);
+    IM_CHECK(std::abs(scan()->placement.translateMm.x + 80.0) < 1e-9);
     std::filesystem::remove(stl);
   };
 

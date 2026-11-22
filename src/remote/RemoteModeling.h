@@ -34,6 +34,17 @@ std::optional<nlohmann::json> HandleModelingRpc(ui::AppState& state,
 // One row per RPC this module dispatches (for the describe endpoint).
 std::span<const MethodDoc> ModelingMethodDocs();
 
+class Parking;
+// An align_import best_fit waits instead of fitting on the frame
+// (docs/interchange/README.md#laying-a-scan-onto-a-body): the handler reads
+// and checks every input and gathers the triangles here, the fit runs on an
+// `align` job with progress and a cancel, and the request is answered --
+// the placement committed as one undo step -- when it lands. nullptr:
+// dispatch it now (another mode, or a request the handler refuses).
+std::unique_ptr<Parking> ParkModelingRequest(ui::AppState& state,
+                                             const std::string& method,
+                                             const RpcParams& params);
+
 // Sketch constraint kind names accepted by add_constraint(s), for describe.
 std::vector<std::string> ConstraintKindNames();
 
