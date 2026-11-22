@@ -1182,6 +1182,9 @@ bool ApplySlotItem(AppState& state, Feature& f, PickSlot slot,
           th->designation = scan->designation;
           th->pitch = scan->pitch;
           th->rightHanded = scan->rightHanded;
+          // Remembered so the window can say where the thread came from.
+          state.scanSeed = {f.GetId(), 0.0, scan->designation, scan->pitch,
+                            scan->rightHanded};
         } else if (const std::string size = ThreadForFace(state, th->face);
                    !size.empty()) {
           if (const auto row = threads::Lookup(size)) {
@@ -1400,6 +1403,7 @@ bool ApplySlotItem(AppState& state, Feature& f, PickSlot slot,
                   BlendFromScan(*input, fil->edges.front(),
                                 fil->op == EdgeBlendOp::Chamfer)) {
             fil->radius = *size;
+            state.scanSeed = {f.GetId(), *size, {}, 0.0, true};
             if (liveRegen)
               state.document->Regenerate();
           }
@@ -3028,6 +3032,10 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
       }
       ImGui::EndCombo();
     }
+    // A thread the scan on the picked face carries says so: its size,
+    // pitch and hand were read, not guessed.
+    if (const std::string note = ScanSeedNote(state, *th); !note.empty())
+      ImGui::TextDisabled("%s", note.c_str());
     if (const auto row = threads::Lookup(th->designation)) {
       // The table's pitch is the only one a table thread takes. A stored
       // one that is not (a file written by hand) is the feature's error,
@@ -3306,6 +3314,10 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
     ExprDim(state, feature, index, commit,
             fil->op == EdgeBlendOp::Chamfer ? "Distance" : "Radius",
             fil->radius);
+    // A size the scan under the model gave the first edge says so, as a
+    // Fold's radius names the rules it came from.
+    if (const std::string note = ScanSeedNote(state, *fil); !note.empty())
+      ImGui::TextDisabled("%s", note.c_str());
     // The committed feature's editor says why it is broken and offers the
     // size that fits; the tool window draws both under its own error line.
     if (commit && fil->GetFitHint() && !fil->ErrorAfterEarlierFailure()) {
@@ -3324,6 +3336,27 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
                     : std::to_string(fil->edges.size()) + " picked");
     RefListRows(state, feature, index, commit, fil->edges);
   }
+}
+
+std::string ScanSeedNote(const AppState& state, const Feature& feature) {
+  const AppState::ScanSeed& seed = state.scanSeed;
+  if (seed.featureId == 0 || seed.featureId != feature.GetId() ||
+      state.pendingFeatureId != feature.GetId())
+    return {};
+  if (const auto* fil = dynamic_cast<const FilletFeature*>(&feature)) {
+    if (!seed.designation.empty() || !fil->radius.expr.empty() ||
+        fil->radius.value != seed.size)
+      return {};
+    return fil->op == EdgeBlendOp::Chamfer ? "From the scan's chamfer"
+                                           : "From the scan's round";
+  }
+  if (const auto* th = dynamic_cast<const ThreadFeature*>(&feature)) {
+    if (seed.designation.empty() || seed.designation != th->designation ||
+        seed.pitch != th->pitch.value || seed.rightHanded != th->rightHanded)
+      return {};
+    return "Size, pitch and hand from the scan";
+  }
+  return {};
 }
 
 bool DrawFitButton(AppState& state, Feature& feature, size_t index,

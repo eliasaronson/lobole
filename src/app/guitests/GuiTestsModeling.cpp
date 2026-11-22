@@ -91,6 +91,212 @@
 // loudly instead of silently disappearing.
 namespace {
 
+// A scan, for the tools that take their size off one
+// (docs/modeling/README.md#reading-a-round-off-a-scan): an outline extruded
+// `height` and scanned as a mesh -- each ring of points along the outline,
+// stacked in z, moved along the outline's normal by a little noise -- with
+// its caps fanned from `inside`. `dense(s, z)` says where the scanner went
+// slowly (0.1 mm), elsewhere 1 mm, so the corner a tool reads is sampled as
+// a real scan is and the file stays small. Written as a binary STL to
+// `path`.
+struct ScanOutline {
+  std::vector<glm::dvec2> at, normal;
+};
+void WriteScanStl(const std::filesystem::path& path,
+                  const std::vector<glm::dvec3>& positions,
+                  const std::vector<std::array<uint32_t, 3>>& triangles) {
+  std::ofstream out(path, std::ios::binary);
+  const char header[80] = {};
+  out.write(header, 80);
+  const uint32_t count = static_cast<uint32_t>(triangles.size());
+  out.write(reinterpret_cast<const char*>(&count), 4);
+  for (const auto& t : triangles) {
+    const float n[3] = {0, 0, 0};
+    out.write(reinterpret_cast<const char*>(n), 12);
+    for (uint32_t i : t) {
+      const float p[3] = {static_cast<float>(positions[i].x),
+                          static_cast<float>(positions[i].y),
+                          static_cast<float>(positions[i].z)};
+      out.write(reinterpret_cast<const char*>(p), 12);
+    }
+    const char attr[2] = {};
+    out.write(attr, 2);
+  }
+}
+void WriteScannedPrism(const std::filesystem::path& path,
+                       const ScanOutline& ring, double height,
+                       glm::dvec2 inside, double zDenseLo, double zDenseHi) {
+  std::vector<double> zs;
+  for (double z = 0.0; z < height - 1e-9;)
+    zs.push_back(z), z += (z >= zDenseLo && z < zDenseHi) ? 0.1 : 1.0;
+  zs.push_back(height);
+  std::mt19937 rng(802);
+  std::normal_distribution<double> gauss(0.0, 0.01);
+  std::vector<glm::dvec3> pos;
+  std::vector<std::array<uint32_t, 3>> tri;
+  const uint32_t n = static_cast<uint32_t>(ring.at.size());
+  for (double z : zs)
+    for (uint32_t i = 0; i < n; i++) {
+      const glm::dvec2 p = ring.at[i] + ring.normal[i] * gauss(rng);
+      pos.push_back({p.x, p.y, z});
+    }
+  const uint32_t levels = static_cast<uint32_t>(zs.size()) - 1;
+  for (uint32_t z = 0; z < levels; z++)
+    for (uint32_t i = 0; i < n; i++) {
+      const uint32_t a = z * n + i, b = z * n + (i + 1) % n;
+      tri.push_back({a, b, b + n});
+      tri.push_back({a, b + n, a + n});
+    }
+  const uint32_t bottom = static_cast<uint32_t>(pos.size());
+  pos.push_back({inside.x, inside.y, 0.0});
+  pos.push_back({inside.x, inside.y, height});
+  const uint32_t top = levels * n;
+  for (uint32_t i = 0; i < n; i++) {
+    tri.push_back({bottom, (i + 1) % n, i});
+    tri.push_back({bottom + 1, top + i, top + (i + 1) % n});
+  }
+  WriteScanStl(path, pos, tri);
+}
+// The 30 mm square at the origin, counter-clockwise, its corner at the
+// origin a round of `r` (or a chamfer of `r` along each face): dense within
+// 8 mm of that corner.
+ScanOutline CornerOutline(double r, bool chamfer) {
+  ScanOutline o;
+  const auto line = [&](glm::dvec2 a, glm::dvec2 b) {
+    const glm::dvec2 d = b - a;
+    const double len = glm::length(d);
+    const glm::dvec2 nrm = glm::normalize(glm::dvec2(d.y, -d.x));
+    for (double s = 0.0; s < len - 1e-9;) {
+      const glm::dvec2 p = a + d * (s / len);
+      o.at.push_back(p);
+      o.normal.push_back(nrm);
+      s += glm::length(p) < 8.0 ? 0.1 : 1.0;
+    }
+  };
+  line({r, 0.0}, {30.0, 0.0});
+  line({30.0, 0.0}, {30.0, 30.0});
+  line({30.0, 30.0}, {0.0, 30.0});
+  line({0.0, 30.0}, {0.0, r});
+  if (chamfer) {
+    line({0.0, r}, {r, 0.0});
+  } else {
+    const int k = std::max(8, static_cast<int>(std::ceil(r * 1.5708 / 0.1)));
+    for (int i = 0; i < k; i++) {
+      const double a = angles::kPi + 0.5 * angles::kPi * i / k;
+      const glm::dvec2 dir(std::cos(a), std::sin(a));
+      o.at.push_back(glm::dvec2(r, r) + r * dir);
+      o.normal.push_back(dir);
+    }
+  }
+  return o;
+}
+// A threaded rod's surface, scanned (ISO metric's basic profile, z from 0
+// to `length`, open at its ends): a grid round the axis every 0.08 mm.
+void WriteScannedThread(const std::filesystem::path& path, double rMajor,
+                        double pitch, double length) {
+  const double spacing = 0.08;
+  const int nt =
+      static_cast<int>(std::round(2 * angles::kPi * rMajor / spacing));
+  const int nz = static_cast<int>(std::round(length / spacing));
+  std::mt19937 rng(801);
+  std::normal_distribution<double> gauss(0.0, 0.01);
+  std::vector<glm::dvec3> pos;
+  std::vector<std::array<uint32_t, 3>> tri;
+  const double depth = 0.5413 * pitch;
+  for (int k = 0; k <= nz; k++)
+    for (int i = 0; i < nt; i++) {
+      const double th = 2 * angles::kPi * i / nt, z = length * k / nz;
+      double ph = (z - pitch * th / (2 * angles::kPi)) / pitch;
+      ph -= std::floor(ph);
+      const double u = std::abs(ph - std::round(ph));
+      const double r =
+          (u <= 1.0 / 16 ? rMajor
+           : u >= 0.5 - 1.0 / 8
+               ? rMajor - depth
+               : rMajor - depth * (u - 1.0 / 16) / (0.5 - 1.0 / 8 - 1.0 / 16)) +
+          gauss(rng);
+      pos.push_back({r * std::cos(th), r * std::sin(th), z});
+    }
+  for (int k = 0; k < nz; k++)
+    for (int i = 0; i < nt; i++) {
+      const uint32_t a = k * nt + i, b = k * nt + (i + 1) % nt;
+      tri.push_back({a, b, b + static_cast<uint32_t>(nt)});
+      tri.push_back(
+          {a, b + static_cast<uint32_t>(nt), a + static_cast<uint32_t>(nt)});
+    }
+  WriteScanStl(path, pos, tri);
+}
+// The scan at `path` into the open part as a mesh body, where the file put it.
+void AddScanBody(const std::filesystem::path& path) {
+  auto imp = std::make_unique<ImportFeature>("scan", path.string());
+  imp->keepOrigin = true;
+  imp->upAxis = interchange::UpAxis::None;
+  imp->representation = mesh::Representation::Mesh;
+  Doc()->AddFeature(std::move(imp));
+}
+// The first edge clicked into a fresh Fillet (or Chamfer) on a model drawn
+// over a scan of its rounded (chamfered) corner.
+void BlendFromScanCase(ImGuiTestContext* ctx, bool chamfer) {
+  ctx->SetRef("//##MainMenuBar");
+  ctx->MenuClick("File/New");
+  ctx->Yield();
+  const double size = chamfer ? 1.5 : 2.0;
+  const auto stl =
+      std::filesystem::temp_directory_path() /
+      ("lobole_gui_scan_corner_" + std::to_string(proc::CurrentPid()) + ".stl");
+  WriteScannedPrism(stl, CornerOutline(size, chamfer), 40.0, {15.0, 15.0}, 15.0,
+                    25.0);
+  AddScanBody(stl);
+  auto sk =
+      std::make_unique<SketchFeature>("Square", SketchPlane(PlaneType::XY));
+  sk->AddEntity(sketch::Line{{0, 0}, {30, 0}});
+  sk->AddEntity(sketch::Line{{30, 0}, {30, 30}});
+  sk->AddEntity(sketch::Line{{30, 30}, {0, 30}});
+  sk->AddEntity(sketch::Line{{0, 30}, {0, 0}});
+  Doc()->AddFeature(std::move(sk));
+  const uint64_t skId = Doc()->GetFeature(1)->GetId();
+  Doc()->AddFeature(std::make_unique<ExtrudeFeature>("Box", skId, 40.0,
+                                                     ExtrudeMode::NewBody));
+  Doc()->Regenerate();
+  ctx->Yield(2);
+  IM_CHECK_EQ(Doc()->GetBodies().size(), (size_t)2);
+  // Looking at the corner the scan rounds, from outside it.
+  const glm::vec3 corner(0.0f, 0.0f, 20.0f);
+  s_App->camera->StopAnimation();
+  s_App->camera->SetTarget(corner);
+  s_App->camera->SetUp(glm::vec3(0, 0, 1));
+  s_App->camera->SetPosition(
+      corner + glm::normalize(glm::vec3(-1.0f, -1.2f, 0.5f)) * 45.0f);
+  ctx->Yield(2);
+  ToolbarClick(ctx, chamfer ? "###tb_chamfer" : "###tb_fillet");
+  ctx->Yield();
+  ctx->MouseMoveToPos(WorldToWindow(corner));
+  ctx->MouseClick(ImGuiMouseButton_Left);
+  ctx->Yield(2);
+  auto* blend = dynamic_cast<FilletFeature*>(
+      Doc()->FindFeatureById(s_App->pendingFeatureId));
+  IM_CHECK(blend != nullptr);
+  if (blend == nullptr) {
+    std::filesystem::remove(stl);
+    return;
+  }
+  IM_CHECK_EQ(blend->edges.size(), (size_t)1);
+  IM_CHECK(std::abs(blend->radius.value - size) < 0.1);
+  if (!chamfer)
+    IM_CHECK_EQ(blend->radius.value, 2.0); // on the 0.5 mm step
+  const std::string note = ui::ScanSeedNote(*s_App, *blend);
+  IM_CHECK_STR_EQ(note.c_str(), chamfer ? "From the scan's chamfer"
+                                        : "From the scan's round");
+  GuiShot(ctx, chamfer ? "chamfer_from_scan" : "fillet_from_scan");
+  // Typed over, the number is the person's, and the note goes.
+  blend->radius = size + 1.0;
+  IM_CHECK(ui::ScanSeedNote(*s_App, *blend).empty());
+  ui::CancelPendingFeature(*s_App);
+  ctx->Yield();
+  // Kept until here: a later regeneration reads the import's file again.
+  std::filesystem::remove(stl);
+}
+
 // The primitive/* base: a 10 x 6 x 2 plate on the Top plane, through the core
 // tool (so its faces are named), as one undo step.
 void PrimitiveTestPlate() {
@@ -2190,6 +2396,67 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
       ui::CancelPendingFeature(*s_App);
       ctx->Yield();
     }
+  };
+
+  // A model drawn over a scan takes its sizes off the scan through the real
+  // picks (docs/ui/tool-sessions.md#defaults-and-refusals): the first edge
+  // clicked into a fresh Fillet takes the scan's 2 mm round there, into a
+  // Chamfer the scan's chamfer, and a face clicked into Thread the scan's
+  // size, pitch and hand -- each window saying under the number that it
+  // came from the scan (ui::ScanSeedNote), as Fold names where its radius
+  // came from.
+  t = IM_REGISTER_TEST(engine, "defaults", "fillet_takes_the_scans_round");
+  t->TestFunc = [](ImGuiTestContext* ctx) { BlendFromScanCase(ctx, false); };
+  t = IM_REGISTER_TEST(engine, "defaults", "chamfer_takes_the_scans_size");
+  t->TestFunc = [](ImGuiTestContext* ctx) { BlendFromScanCase(ctx, true); };
+
+  t = IM_REGISTER_TEST(engine, "defaults", "thread_takes_the_scans_size");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    const auto stl = std::filesystem::temp_directory_path() /
+                     ("lobole_gui_scan_thread_" +
+                      std::to_string(proc::CurrentPid()) + ".stl");
+    WriteScannedThread(stl, 4.0, 1.25, 12.0);
+    AddScanBody(stl);
+    // A rod drawn through the scanned thread, longer than it below: the
+    // face is clicked where no scan covers it, and read where one does.
+    s_App->commands->Execute(
+        std::make_unique<AddFeatureCommand>(std::make_unique<CylinderFeature>(
+            "Rod", glm::vec3(0.0f, 0.0f, -12.0f), conv::kWorldUpF, 3.6, 36.0)),
+        *Doc());
+    Doc()->Regenerate();
+    ctx->Yield(2);
+    IM_CHECK_EQ(Doc()->GetBodies().size(), (size_t)2);
+    const glm::vec3 below(-3.6f, 0.0f, -6.0f);
+    s_App->camera->StopAnimation();
+    s_App->camera->SetTarget(glm::vec3(0.0f, 0.0f, 0.0f));
+    s_App->camera->SetUp(glm::vec3(0, 0, 1));
+    s_App->camera->SetPosition(glm::vec3(-60.0f, -8.0f, 0.0f));
+    ctx->Yield(2);
+    ToolbarClick(ctx, "###tb_thread");
+    ctx->Yield();
+    ctx->MouseMoveToPos(WorldToWindow(below));
+    ctx->MouseClick(ImGuiMouseButton_Left);
+    ctx->Yield(2);
+    auto* th = dynamic_cast<ThreadFeature*>(
+        Doc()->FindFeatureById(s_App->pendingFeatureId));
+    IM_CHECK(th != nullptr);
+    if (th == nullptr) {
+      std::filesystem::remove(stl);
+      return;
+    }
+    IM_CHECK(th->face.IsSet());
+    IM_CHECK_STR_EQ(th->designation.c_str(), "M8");
+    IM_CHECK_EQ(th->pitch.value, 1.25);
+    IM_CHECK(th->rightHanded);
+    IM_CHECK_STR_EQ(ui::ScanSeedNote(*s_App, *th).c_str(),
+                    "Size, pitch and hand from the scan");
+    GuiShot(ctx, "thread_from_scan");
+    ui::CancelPendingFeature(*s_App);
+    ctx->Yield();
+    std::filesystem::remove(stl);
   };
 
   // Without stock declared, a flange, a hem and a jog have no length to

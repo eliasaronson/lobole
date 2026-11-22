@@ -1869,6 +1869,18 @@ struct AppState {
   // primitive's sketch, the Extrude or Revolve of which is the pending
   // feature. 0 = none.
   uint64_t pendingCompanionId = 0;
+  // The size a scan under the model gave the pending tool's first pick
+  // (a Fillet's or Chamfer's from BlendFromScan, a Thread's from
+  // ThreadFromScan), so its window can say where the number came from while
+  // it is still that number. `featureId` 0 = none.
+  struct ScanSeed {
+    uint64_t featureId = 0;
+    double size = 0.0;       // a blend's radius or distance, mm
+    std::string designation; // a thread's
+    double pitch = 0.0;      // a thread's, mm
+    bool rightHanded = true; // a thread's
+  };
+  ScanSeed scanSeed;
 
   // The Box / Cylinder / Sphere tool (docs/ui/tool-sessions.md#primitives,
   // ui/PrimitiveTool.h). Armed through the plane pick

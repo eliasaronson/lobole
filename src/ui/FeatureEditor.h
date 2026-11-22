@@ -29,6 +29,13 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
 bool DrawFitButton(AppState& state, Feature& feature, size_t index,
                    bool commit);
 
+// Where the pending tool's size came from when a scan under the model gave
+// it (AppState::scanSeed), as its window says it under the number: "From
+// the scan's round", "Size, pitch and hand from the scan". Empty for any
+// other feature, once the tool is committed, and once the number is no
+// longer the one read.
+std::string ScanSeedNote(const AppState& state, const Feature& feature);
+
 // Dialog pick slots (U3): which reference field of the edited feature an
 // armed SlotPickState fills. One global enum — slots are feature-specific
 // but ids need only be unique. Only append: tests address rows as

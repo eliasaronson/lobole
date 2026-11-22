@@ -1411,7 +1411,14 @@ a fresh Fillet takes the scan's round there (the reading put on the
 chamfer; a cylindrical face picked into the Thread tool takes the thread
 the scan carries on it, size, pitch and hand, before the face's own size
 (`ui::BlendFromScan`, `ui::ThreadFromScan`;
-[defaults](../ui/tool-sessions.md#defaults-and-refusals)).
+[defaults](../ui/tool-sessions.md#defaults-and-refusals)). The tool window
+says so under the number, "From the scan's round" ("chamfer"; "Size, pitch
+and hand from the scan"), while the tool is open and the number is still
+the one read (`ui::ScanSeedNote`, `AppState::scanSeed`), as Fold names the
+rules its radius came from. Each is clicked through in a GUI test
+(`defaults/fillet_takes_the_scans_round`,
+`defaults/chamfer_takes_the_scans_size`,
+`defaults/thread_takes_the_scans_size`).
 
 ## Sizes past the model space are refused
 
