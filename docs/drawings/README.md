@@ -582,6 +582,29 @@ first flange was picked on, so the two can label a crease differently
 (`src/core/io/ExportDxf.h`). A view of a flat blank also draws its bend
 lines as chain lines. See [../sheetmetal/README.md](../sheetmetal/README.md).
 
+### Dry runs
+
+`add_drawing_view`, `add_drawing_dim` and `add_drawing_note` take `dry_run:
+true`, which answers what the call would have answered and adds nothing:
+a view's fitted `scale` and `position` (every view answer carries them now),
+a dimension's `value`, `text` and placed `offset`, a note's own answer;
+plus `issues`, the rows `check_drawing` (on the renders as they are) gains
+because of it: off the border, over another view or the title block, a
+dangling reference. No undo step is made and the sheet is as it was, its
+version included, so a clean sheet still reads clean.
+
+It is the call itself, run and then taken back (`DryRunDrawingAdd` in
+`RemoteDrawings.cpp`): the sheet's document, its undo history and the
+renders of what the call added are put back. So the answer is the real
+call's by construction, which a second placement path could not promise.
+The price is the real call's: an auto-placed view is measured, so
+projected, as it is when added; a view given its `scale` and `position` is
+projected for the dry run so its overlaps are known. `drawing_smoke` holds
+each dry run to the sheet it leaves (views, dimensions and notes as they
+were, and one `undo` taking back the edit before it) and to the call made
+for real answering the same values, and a view asked for over another
+naming the overlap.
+
 ### Parts lists and balloons
 
 A note with `table: "bom"` on an ASSEMBLY view is its parts list: one row

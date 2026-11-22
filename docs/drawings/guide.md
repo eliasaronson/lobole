@@ -166,7 +166,8 @@ add_drawing_view {source, orientation?, scale?, position?, base_view?,
                   configuration?, quality?: "exact"|"fast",
                   hidden?: [occurrence ids or names | body names or feature ids],
                   rotation_deg?, section?: {point: [x, y, z], label?},
-                  exploded_view?: an assembly's exploded view, name or id}
+                  exploded_view?: an assembly's exploded view, name or id,
+                  dry_run?}     # dry_run: the answer, nothing added
 add_drawing_view {detail: {view, center: [x, y, z], radius_mm, label?},
                   scale, position, name?}   # a detail of another view
 set_drawing_view {id, position?, scale?, name?, show_hidden?, quality?,
@@ -177,13 +178,14 @@ update_drawing {budget_s?, async?}  # re-project; per-view curve counts and erro
 list_drawing_views             # placement, stale, and what each projection cost
 list_drawing_geometry {view}   # a view's curves, with the ref to dimension each
 add_drawing_dim {view, kind, refs: [{edge | sil_face: {feature_id, element},
-                                     occurrence?, end? | extreme?}], offset?}
+                                     occurrence?, end? | extreme?}], offset?,
+                 dry_run?}
 list_drawing_dims / remove_drawing_dim {id}
 add_drawing_note {text, position: [x, y], view?, ref?: {feature_id, element}
                   | {edge | sil_face: {...}, occurrence?, end? | extreme?},
                   style?: "text"|"balloon"|"datum"|"fcf", table?: "bends"|"bom",
                   fcf?: {symbol, tolerance_mm, diameter?, modifier?: "mmc"|"lmc",
-                         datums?: ["A", "B"]}, dim?}
+                         datums?: ["A", "B"]}, dim?, dry_run?}
 layout_balloons {views: [ids]} # a balloon on every parts-list row, none crossing
 list_drawing_notes / remove_drawing_note {id}
 check_drawing {drawing?}       # stale views, dangling refs, overlapping labels

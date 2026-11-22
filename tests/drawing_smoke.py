@@ -206,6 +206,33 @@ def main():
                        refs=[{"edge": a["ref"]}, {"edge": b["ref"]}])
             d.call("remove_drawing_dim", id=r["id"])
             return r["value"]
+        # --- Dry runs (docs/drawings/README.md#dry-runs): what the call
+        # would answer, nothing added, no undo step; and the call made for
+        # real answers the same.
+        def sheet():
+            return (d.call("list_drawing_views")["views"],
+                    d.call("list_drawing_dims")["dims"],
+                    d.call("list_drawing_notes")["notes"])
+        before = sheet()
+        refs = [{"edge": at_x(xs[0])["ref"]}, {"edge": circles[0]["ref"]}]
+        dry = d.call("add_drawing_dim", view=v2["id"], kind="distance_x",
+                     refs=refs, dry_run=True)
+        expect(dry["dry_run"] and "id" not in dry and "issues" in dry
+               and abs(dry["value"] - 30) < 0.1, f"a dim's dry run: {dry}")
+        after = sheet()
+        expect(after == before, "a dim's dry run added nothing: "
+               f"{[(a, b) for a, b in zip(before, after) if a != b]}")
+        real = d.call("add_drawing_dim", view=v2["id"], kind="distance_x",
+                      refs=refs)
+        expect(all(real[k] == dry[k] for k in ("value", "text", "offset")),
+               f"the dry run answered what the call does: {dry} / {real}")
+        note = dict(text="{{2 * 3}} holes", position=[30, 30])
+        dry = d.call("add_drawing_note", dry_run=True, **note)
+        expect(dry["dry_run"] and sheet()[2] == before[2],
+               f"a note's dry run added nothing: {dry}")
+        # No undo step: one undo takes the real dimension back.
+        d.call("undo")
+        expect(sheet() == before, "the dry runs left no undo step")
         expect(abs(dval(at_x(xs[0]), circles[0]) - 30) < 0.1,
                "edge-to-hole is perpendicular (30, not the 39.1 diagonal)")
         expect(abs(dval(circles[0], circles[1]) -
@@ -264,8 +291,27 @@ def main():
         d.call("add_part", name="tallbody")
         box(d, (-5, -22, -28), (87, 43, 60), "body")
         d.call("create_drawing", name="tallbody-dwg", sheet={"size": "a3"})
-        ids = [d.call("add_drawing_view", source="tallbody", orientation=o)["id"]
-               for o in ("front", "top", "right", "iso")]
+        dry = d.call("add_drawing_view", source="tallbody",
+                     orientation="front", dry_run=True)
+        expect(dry["dry_run"] and "id" not in dry and dry["scale"] > 0
+               and len(dry["position"]) == 2,
+               f"a view's dry run places it: {dry}")
+        expect(d.call("list_drawing_views")["views"] == [],
+               "a view's dry run added nothing")
+        first = d.call("add_drawing_view", source="tallbody",
+                       orientation="front")
+        expect(first["scale"] == dry["scale"]
+               and first["position"] == dry["position"],
+               f"placed where the dry run said: {dry} / {first}")
+        ids = [first["id"]] + [
+            d.call("add_drawing_view", source="tallbody", orientation=o)["id"]
+            for o in ("top", "right", "iso")]
+        # A view asked for over another names the overlap it would make.
+        over = d.call("add_drawing_view", source="tallbody",
+                      orientation="front", scale=first["scale"],
+                      position=first["position"], dry_run=True)
+        expect(any(i["kind"] == "view_overlap" for i in over["issues"]),
+               f"the dry run names the overlap: {over['issues']}")
         views = d.call("list_drawing_views")["views"]
         scales = {round(v["scale"], 6) for v in views}
         expect(len(scales) == 1, f"one scale per sheet: {scales}")

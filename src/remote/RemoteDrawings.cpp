@@ -24,6 +24,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -131,6 +132,8 @@ static constexpr MethodDoc DrawingMethods[] = {
      "name or the id of the feature that created one (the ground under a "
      "house), stored as feature ids. It is a per-SHEET choice, not a model "
      "change. "
+     "Every answer carries the view's `scale` and `position` (fitted, when it "
+     "is placed). "
      "When this call projects (the auto-placed form), it returns `cost_ms` "
      "and `by_occurrence` — which occupants carried it — plus a `warnings` "
      "line when one of them carried most of a slow view, so the name to put "
@@ -152,10 +155,14 @@ static constexpr MethodDoc DrawingMethods[] = {
      "projection's own parameters are then the parent's and are refused "
      "here; `label` defaults to the sheet's next free view letter. An "
      "auto-placed view's projection runs off the frame on a windowed "
-     "instance, the call waiting for it (see update_drawing).",
-     "base_view, configuration, detail, drawing, exploded_view, hidden, "
-     "name, orientation, position, quality, rotation_deg, scale, section, "
-     "source, position_expr, rotation_deg_expr, scale_expr"},
+     "instance, the call waiting for it (see update_drawing)."
+     " `dry_run: true` answers what the call would "
+     "(docs/drawings/README.md#dry-runs) plus `issues`, the rows check_drawing "
+     "would gain because of it, and adds nothing: no undo step, the sheet as "
+     "it was.",
+     "base_view, configuration, detail, drawing, dry_run, exploded_view, "
+     "hidden, name, orientation, position, quality, rotation_deg, scale, "
+     "section, source, position_expr, rotation_deg_expr, scale_expr"},
     {"remove_drawing_view",
      "Remove a view by id (and its dimensions and saved projection). Nothing "
      "projects; it waits for a projection in flight to land first.",
@@ -222,8 +229,12 @@ static constexpr MethodDoc DrawingMethods[] = {
      "`offset` is the "
      "label's placement in SHEET millimetres from the measured geometry (not "
      "model mm — the view's scale sits between them); omit it and it is "
-     "auto-placed clear of the views and the title block.",
-     "kind, offset, refs, view"},
+     "auto-placed clear of the views and the title block."
+     " `dry_run: true` answers what the call would "
+     "(docs/drawings/README.md#dry-runs) plus `issues`, the rows check_drawing "
+     "would gain because of it, and adds nothing: no undo step, the sheet as "
+     "it was.",
+     "dry_run, kind, offset, refs, view"},
     {"remove_drawing_dim", "Remove a dimension by id.", "id"},
     {"list_drawing_dims", "List dimensions with values.", "", remote::NoFlags,
      "dims:{id:int, kind:string, resolved:bool, text:string, "
@@ -267,8 +278,12 @@ static constexpr MethodDoc DrawingMethods[] = {
      "must be a `datum` note on this sheet. It stands at `position` with a "
      "leader to `ref`, or with `dim` (a dimension id) stacked with that "
      "dimension's value (under a callout's, over a linear one's) with no "
-     "leader and `position` ignored.",
-     "dim, fcf, position, ref, style, table, text, view"},
+     "leader and `position` ignored."
+     " `dry_run: true` answers what the call would "
+     "(docs/drawings/README.md#dry-runs) plus `issues`, the rows check_drawing "
+     "would gain because of it, and adds nothing: no undo step, the sheet as "
+     "it was.",
+     "dim, dry_run, fcf, position, ref, style, table, text, view"},
     {"layout_balloons",
      "Balloon every row of the sheet's parts list round the given views "
      "{views: [ids]} (docs/drawings/README.md#balloon-layout): each row on "
@@ -1193,6 +1208,79 @@ std::unique_ptr<Parking> ParkDrawingRequest(ui::AppState& state,
   }
 }
 
+namespace {
+
+// Set while a dry run's call runs for real, inside DryRunDrawingAdd.
+bool g_inDryRun = false;
+
+// `dry_run: true` on add_drawing_view, add_drawing_dim and add_drawing_note
+// (docs/drawings/README.md#dry-runs): the call runs as it would -- the same
+// placement, the same resolution, so what it answers is what the call made
+// for real answers -- and the sheet is then put back exactly as it was: its
+// document (version included, so it reads as clean as it did), its undo
+// history, and the renders of what the call added. The answer is the call's
+// own, less the id it would have taken, plus `issues`: the rows
+// check_drawing (on the renders as they are) gains because of it.
+json DryRunDrawingAdd(ui::AppState& state, const std::string& m,
+                      const RpcParams& p) {
+  if (p.contains("drawing"))
+    SelectDrawing(state, p);
+  if (!state.drawing)
+    throw std::runtime_error("the active document is not a drawing");
+  const DrawingDocument before = *state.drawing;
+  const ui::DrawingHistory history = state.drawingHistory;
+  std::set<uint64_t> rendered;
+  for (const auto& [id, view] : state.drawingRenders)
+    rendered.insert(id);
+  const json issuesBefore = CheckDrawingAnswer(state).at("issues");
+  const auto restore = [&] {
+    *state.drawing = before;
+    state.drawingHistory = history;
+    bool dropped = false;
+    for (auto it = state.drawingRenders.begin();
+         it != state.drawingRenders.end();) {
+      if (rendered.contains(it->first)) {
+        ++it;
+        continue;
+      }
+      it = state.drawingRenders.erase(it);
+      dropped = true;
+    }
+    // The sheet's assembled picture, without the view the call added. A dim
+    // or a note added no render, and the views keep theirs as they were.
+    if (dropped)
+      ui::ReassembleDrawingViews(state);
+  };
+  json out;
+  json issuesAfter;
+  g_inDryRun = true;
+  try {
+    out = *HandleDrawingRpc(state, m, p);
+    // A view the call adds unprojected is projected here, so what it would
+    // overlap is known; the renders go with the restore.
+    if (m == "add_drawing_view" && out.value("needs_update", false))
+      ui::UpdateDrawingRendersNow(state);
+    issuesAfter = CheckDrawingAnswer(state).at("issues");
+  } catch (...) {
+    g_inDryRun = false;
+    restore();
+    throw;
+  }
+  g_inDryRun = false;
+  restore();
+  json issues = json::array();
+  for (const json& issue : issuesAfter)
+    if (std::find(issuesBefore.begin(), issuesBefore.end(), issue) ==
+        issuesBefore.end())
+      issues.push_back(issue);
+  out.erase("id");
+  out["dry_run"] = true;
+  out["issues"] = std::move(issues);
+  return out;
+}
+
+} // namespace
+
 std::optional<json> HandleDrawingRpc(ui::AppState& state, const std::string& m,
                                      const RpcParams& p) {
   // A handler answers with complete results, so whatever it asks of the
@@ -1273,6 +1361,8 @@ std::optional<json> HandleDrawingRpc(ui::AppState& state, const std::string& m,
     return json{{"drawings", arr}};
   }
   if (m == "add_drawing_view") {
+    if (p.value("dry_run", false) && !g_inDryRun)
+      return DryRunDrawingAdd(state, m, p);
     // `drawing` (name or id) switches to that drawing tab first — the doc
     // has always described it, and the handler used to refuse the key.
     // rpc-params: scale_expr, position_expr, rotation_deg_expr
@@ -1338,6 +1428,10 @@ std::optional<json> HandleDrawingRpc(ui::AppState& state, const std::string& m,
                 {"source_id", sourceId},
                 {"needs_update", false},
                 {"auto_placed", true}};
+      if (const DrawingView* placed = state.drawing->FindView(id)) {
+        resp["scale"] = placed->scale;
+        resp["position"] = {placed->position.x, placed->position.y};
+      }
       const auto placed = state.drawingRenders.find(id);
       if (placed != state.drawingRenders.end()) {
         const DrawingView* added = state.drawing->FindView(id);
@@ -1355,7 +1449,11 @@ std::optional<json> HandleDrawingRpc(ui::AppState& state, const std::string& m,
     const uint64_t id = state.drawing->AddView(v);
     // Projection is explicit (design §2, the FEM rule): the view is added now;
     // call update_drawing to project it.
-    return json{{"id", id}, {"source_id", sourceId}, {"needs_update", true}};
+    return json{{"id", id},
+                {"source_id", sourceId},
+                {"needs_update", true},
+                {"scale", v.scale},
+                {"position", {v.position.x, v.position.y}}};
   }
   if (m == "remove_drawing_view") {
     if (!state.drawing)
@@ -1524,6 +1622,10 @@ std::optional<json> HandleDrawingRpc(ui::AppState& state, const std::string& m,
     return json{{"views", arr}};
   }
   if (m == "add_drawing_note") {
+    // A dry run comes back through this branch for its keys.
+    // rpc-params: none
+    if (p.value("dry_run", false) && !g_inDryRun)
+      return DryRunDrawingAdd(state, m, p);
     const ExprArgs ex(p, {"fcf/tolerance_mm"}, state.projectSymbols,
                       kDrawingScope);
     const RpcParams& p = ex.Params();
@@ -1797,6 +1899,10 @@ std::optional<json> HandleDrawingRpc(ui::AppState& state, const std::string& m,
     return json{{"geometry", edges}};
   }
   if (m == "add_drawing_dim") {
+    // A dry run comes back through this branch for its keys.
+    // rpc-params: none
+    if (p.value("dry_run", false) && !g_inDryRun)
+      return DryRunDrawingAdd(state, m, p);
     if (!state.drawing)
       throw std::runtime_error("the active document is not a drawing");
     const uint64_t viewId = p.at("view").get<uint64_t>();
