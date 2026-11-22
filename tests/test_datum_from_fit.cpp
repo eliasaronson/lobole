@@ -500,13 +500,13 @@ TEST_CASE("A datum axis from_fit is a scanned ring's axis, through its "
   fs::remove(stl);
 }
 
-TEST_CASE("The vNEXT golden's ring axis is fitted to its torus",
+TEST_CASE("The v231 golden's ring axis is fitted to its torus",
           "[datum][fit][golden]") {
-  // tests/golden/vNEXT-datum-fit-torus.json: a circle of radius 5 at 20
+  // tests/golden/v231-datum-fit-torus.json: a circle of radius 5 at 20
   // from Z revolved about it, its axis fitted to its own tessellation as a
   // torus, outside.
   auto doc = testio::Load(std::string(TestSourceDir()) +
-                          "/tests/golden/vNEXT-datum-fit-torus.json");
+                          "/tests/golden/v231-datum-fit-torus.json");
   REQUIRE(doc != nullptr);
   const auto& axis = *dynamic_cast<const DatumAxisFeature*>(doc->GetFeature(2));
   INFO(axis.GetError());

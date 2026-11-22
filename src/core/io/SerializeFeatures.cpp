@@ -3736,7 +3736,7 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
     case DatumAxisKind::GlobalZ:
       break;
     case DatumAxisKind::FromFit:
-      // vNEXT: a torus too.
+      // v231: a torus too.
       da->fit = FitRefFromJson(
           j.at("fit"), "DatumAxis fit",
           {mesh::Kind::Cylinder, mesh::Kind::Cone, mesh::Kind::Torus});
