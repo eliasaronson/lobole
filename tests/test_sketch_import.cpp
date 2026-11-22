@@ -206,41 +206,81 @@ TEST_CASE("each DXF entity becomes the sketch entity its row says",
   CHECK_THAT(part.endParam - part.startParam, WithinAbs(kPi / 2, 1e-12));
 }
 
-TEST_CASE("a non-uniform DXF spline is split into exact Bezier pieces",
+TEST_CASE("a non-uniform DXF spline imports as one spline on its own knots",
           "[sketch][import]") {
   const std::vector<double> knots = {0, 0, 0, 0, 0.3, 1.2, 2, 2, 2, 2};
   const std::vector<glm::dvec2> poles = {{0.5, 1.5}, {1.0, 1.8}, {1.5, 1.4},
                                          {2.0, 1.9}, {2.5, 1.5}, {3.0, 1.7}};
-  const auto pieces = sketchimport::SplineToSketch(knots, poles, 3);
-  REQUIRE(pieces.size() == 3); // one per non-empty knot span
-  // Each piece is a Bezier: its own parameter runs 0..1 over its span.
-  const double spans[4] = {0.0, 0.3, 1.2, 2.0};
-  for (size_t i = 0; i < pieces.size(); i++) {
-    REQUIRE(pieces[i].poles.size() == 4);
-    for (int k = 0; k <= 20; k++) {
-      const double s = k / 20.0;
-      const double u = spans[i] + s * (spans[i + 1] - spans[i]);
-      const glm::dvec2 want = sketchimport::EvalSpline(knots, poles, 3, u);
-      const glm::dvec2 got = sketch::BSplineEvalUV(pieces[i], s);
-      CHECK(glm::length(got - want) < 1e-9);
-    }
+  // Clamped: stored as it is, on the file's parameter.
+  const auto one = sketchimport::SplineToSketch(knots, poles, 3);
+  REQUIRE(one.size() == 1);
+  CHECK(one[0].poles == poles);
+  CHECK(one[0].knots == knots);
+  for (int k = 0; k <= 200; k++) {
+    const double u = 2.0 * k / 200.0;
+    const glm::dvec2 want = sketchimport::EvalSpline(knots, poles, 3, u);
+    CHECK(glm::length(sketch::BSplineEvalUV(one[0], u) - want) < 1e-9);
   }
-  // Clamped-uniform comes through as it is.
+  // Clamped-uniform comes through as it is, with no knots stored.
   const auto same =
       sketchimport::SplineToSketch({0, 0, 0, 0, 1, 2, 3, 3, 3, 3}, poles, 3);
   REQUIRE(same.size() == 1);
   CHECK(same[0].poles == poles);
-  // An unclamped (periodic-style) knot vector: pieces over [U_p, U_n] only.
+  CHECK(same[0].knots.empty());
+  // Unclamped (periodic-style) knots: clamped over [U_p, U_n] by insertion,
+  // one spline; evenly spaced there, so stored plain, its domain [0, 3].
   const std::vector<double> uniform = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9};
   const auto open = sketchimport::SplineToSketch(uniform, poles, 3);
-  REQUIRE(open.size() == 3);
-  for (size_t i = 0; i < open.size(); i++)
-    for (int k = 0; k <= 10; k++) {
-      const double s = k / 10.0;
-      const glm::dvec2 want =
-          sketchimport::EvalSpline(uniform, poles, 3, 3.0 + i + s);
-      CHECK(glm::length(sketch::BSplineEvalUV(open[i], s) - want) < 1e-9);
+  REQUIRE(open.size() == 1);
+  CHECK(open[0].knots.empty());
+  for (int k = 0; k <= 60; k++) {
+    const double s = 3.0 * k / 60.0;
+    const glm::dvec2 want =
+        sketchimport::EvalSpline(uniform, poles, 3, 3.0 + s);
+    CHECK(glm::length(sketch::BSplineEvalUV(open[0], s) - want) < 1e-9);
+  }
+  // Unclamped and uneven: one spline keeping the file's parameter.
+  const std::vector<double> skew = {0, 0.5, 2, 3, 3.5, 5, 6, 7, 8, 9.5};
+  const auto skewed = sketchimport::SplineToSketch(skew, poles, 3);
+  REQUIRE(skewed.size() == 1);
+  CHECK(sketch::SplineDomain(skewed[0]) == std::pair{3.0, 6.0});
+  for (int k = 0; k <= 60; k++) {
+    const double u = 3.0 + 3.0 * k / 60.0;
+    CHECK(glm::length(sketch::BSplineEvalUV(skewed[0], u) -
+                      sketchimport::EvalSpline(skew, poles, 3, u)) < 1e-9);
+  }
+  // A knot of full multiplicity is a corner: cut there, two splines.
+  const std::vector<glm::dvec2> seven = {{0, 0}, {1, 2}, {2, 2}, {3, 0},
+                                         {4, 2}, {5, 3}, {6, 0}};
+  const std::vector<double> corner = {0, 0, 0, 0, 1, 1, 1, 2, 2, 2, 2};
+  const auto two = sketchimport::SplineToSketch(corner, seven, 3);
+  REQUIRE(two.size() == 2);
+  for (size_t i = 0; i < 2; i++)
+    for (int k = 0; k <= 20; k++) {
+      const double u = static_cast<double>(i) + k / 20.0;
+      CHECK(glm::length(sketch::BSplineEvalUV(two[i], u - i) -
+                        sketchimport::EvalSpline(corner, seven, 3, u)) < 1e-9);
     }
+  // Past 255 poles: cut where a piece reaches 255, each piece exact.
+  std::vector<glm::dvec2> many;
+  std::vector<double> manyKnots{0, 0, 0, 0};
+  for (int i = 0; i < 300; i++)
+    many.push_back({0.1 * i, std::sin(0.3 * i)});
+  for (int i = 1; i < 300 - 3; i++)
+    manyKnots.push_back(i + 0.25 * std::sin(1.0 * i)); // uneven
+  manyKnots.insert(manyKnots.end(), 4, 297.0);
+  const auto split = sketchimport::SplineToSketch(manyKnots, many, 3);
+  REQUIRE(split.size() == 2);
+  for (const sketch::BSpline& piece : split) {
+    CHECK(piece.poles.size() <= 255);
+    const auto [lo, hi] = sketch::SplineDomain(piece);
+    for (int k = 0; k <= 400; k++) {
+      const double u = lo + (hi - lo) * k / 400.0;
+      CHECK(glm::length(sketch::BSplineEvalUV(piece, u) -
+                        sketchimport::EvalSpline(manyKnots, many, 3, u)) <
+            1e-9);
+    }
+  }
 }
 
 TEST_CASE("the ezdxf plate: inches, nested blocks, layers, CRLF",
@@ -253,7 +293,7 @@ TEST_CASE("the ezdxf plate: inches, nested blocks, layers, CRLF",
                                                         {"circle", 3},
                                                         {"ellipse", 1},
                                                         {"line", 3},
-                                                        {"spline", 3}});
+                                                        {"spline", 1}});
   CHECK(d.notImported == std::map<std::string, int>{{"MTEXT", 1}, {"TEXT", 1}});
   // The bulged end: a half circle of radius 1 in about (3, 1) in.
   const auto arc = All<sketch::Arc>(d.entities).at(0);
@@ -283,7 +323,7 @@ TEST_CASE("the ezdxf plate: inches, nested blocks, layers, CRLF",
   int construction = 0;
   for (const auto& e : d.entities)
     construction += sketch::IsConstruction(e) ? 1 : 0;
-  CHECK(construction == 3);
+  CHECK(construction == 1); // the engraving: one spline on its own knots
   // An unknown layer is refused, listing the file's.
   opt.constructionLayers = {"BEND"};
   const std::string why =

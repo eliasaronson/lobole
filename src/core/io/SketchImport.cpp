@@ -7,7 +7,9 @@
 
 #include <algorithm>
 #include <cmath>
+#include <format>
 #include <numbers>
+#include <optional>
 #include <stdexcept>
 #include <unordered_map>
 
@@ -223,45 +225,65 @@ SplineToSketch(const std::vector<double>& knotsIn,
   const double a = knotsIn[p], b = knotsIn[n];
   if (!(b > a))
     throw std::runtime_error("a spline's knots span nothing");
-  // Clamped-uniform, the form the sketch stores: p+1 equal knots at each end
-  // and evenly spaced single knots between.
-  {
-    bool clamped = true;
-    for (int i = 0; i <= p && clamped; i++)
-      clamped = knotsIn[i] == a && knotsIn[n + i] == b;
-    const double step = (b - a) / (n - p);
-    for (int i = 1; i < n - p && clamped; i++)
-      clamped = std::abs(knotsIn[p + i] - (a + i * step)) <= 1e-12 * (b - a);
-    if (clamped && n <= 255)
-      return {sketch::BSpline{polesIn, p}};
+  for (size_t i = 0; i < knotsIn.size();) {
+    size_t j = i;
+    while (j < knotsIn.size() && knotsIn[j] == knotsIn[i])
+      j++;
+    if (j - i > static_cast<size_t>(p + 1))
+      throw std::runtime_error(
+          "a spline's knot " + std::format("{}", knotsIn[i]) + " is repeated " +
+          std::to_string(j - i) + " times, more than its degree + 1 (" +
+          std::to_string(p + 1) + ")");
+    i = j;
   }
-  // Bezier pieces: insert every knot in [a, b] until it has multiplicity p
-  // (Boehm). The curve does not change; over each span the p+1 poles that
-  // span reads are then its Bezier polygon — at an unclamped end too, since
-  // a span's Bernstein form needs only the p knots beside it.
+  // Clamped over [a, b]: each end raised to multiplicity p by Boehm's rule
+  // (the curve does not change), the poles and knots outside dropped.
   std::vector<double> U = knotsIn;
   std::vector<glm::dvec2> P = polesIn;
   const auto multiplicity = [&](double u) {
     return static_cast<int>(std::count(U.begin(), U.end(), u));
   };
-  const auto insert = [&](double u) { sketch::InsertKnot(U, P, p, u); };
-  std::vector<double> distinct;
-  for (double u : knotsIn)
-    if (u >= a && u <= b && (distinct.empty() || distinct.back() != u))
-      distinct.push_back(u);
-  for (double u : distinct)
-    while (multiplicity(u) < p)
-      insert(u);
+  for (const double end : {a, b})
+    while (multiplicity(end) < p)
+      sketch::InsertKnot(U, P, p, end);
+  // One spline, cut only where the sketch cannot store it whole: at an
+  // interior knot of multiplicity p or more (a corner, or a break), and
+  // where a piece would carry more than 255 poles.
+  std::vector<double> breaks{a};
+  for (int i = p + 1; i < static_cast<int>(U.size()) - p - 1; i++)
+    if (U[i] > a && U[i] < b && U[i] != breaks.back() &&
+        multiplicity(U[i]) >= p)
+      breaks.push_back(U[i]);
+  breaks.push_back(b);
+  std::vector<sketch::BSpline> whole;
+  for (size_t i = 0; i + 1 < breaks.size(); i++)
+    whole.push_back(sketch::SliceSpline(U, P, p, breaks[i], breaks[i + 1]));
   std::vector<sketch::BSpline> out;
-  const int nn = static_cast<int>(P.size());
-  for (int i = p; i < nn; i++) {
-    if (!(U[i] < U[i + 1]) || U[i] < a || U[i + 1] > b)
-      continue;
-    sketch::BSpline piece;
-    piece.degree = p;
-    piece.poles.assign(P.begin() + (i - p), P.begin() + i + 1);
+  for (sketch::BSpline piece : whole) {
+    while (piece.poles.size() > 255) {
+      // The last interior knot that leaves at most 255 poles before it.
+      std::vector<double> K = piece.knots;
+      std::vector<glm::dvec2> Q = piece.poles;
+      std::optional<double> found;
+      for (int i = p + 1; i < static_cast<int>(Q.size()); i++)
+        if (i <= 255 && K[i] != K[i - 1])
+          found = K[i];
+      if (!found)
+        throw std::runtime_error("a spline of degree " + std::to_string(p) +
+                                 " has more than the 255 poles a sketch "
+                                 "spline holds and no knot to cut it at");
+      const double at = *found;
+      while (std::count(K.begin(), K.end(), at) < p)
+        sketch::InsertKnot(K, Q, p, at);
+      out.push_back(sketch::SliceSpline(K, Q, p, K.front(), at));
+      piece = sketch::SliceSpline(K, Q, p, at, K.back());
+    }
     out.push_back(std::move(piece));
   }
+  // Evenly spaced knots are the sketch's default: stored as a plain spline.
+  for (sketch::BSpline& piece : out)
+    if (sketch::UniformUpToScale(piece.knots, p))
+      piece.knots.clear();
   return out;
 }
 

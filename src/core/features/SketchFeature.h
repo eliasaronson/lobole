@@ -7,9 +7,11 @@
 #include "core/Feature.h"
 #include "core/sketch/ExternalPrint.h"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <format>
 #include <glm/glm.hpp>
 #include <map>
 #include <optional>
@@ -86,22 +88,27 @@ struct EllipseArc {
   uint32_t id = 0;
   bool construction = false;
 };
-// A non-rational, clamped, uniform B-spline through its control `poles`
-// (the fitted-spline entity a parametric import carries; sketch phase L).
+// A non-rational, clamped B-spline through its control `poles` (the
+// fitted-spline entity a parametric import carries; sketch phase L).
 // `which` addresses pole k, so each pole is a movable solver point
 // (Coincident/Distance/Fixed on a pole work); the solver also knows the
 // curve, so a point can lie on it and a curve can be tangent to its ends.
 // The curve interpolates its first and last poles (clamped), so those poles
 // ARE its ends; a spline whose first and last poles are equal is closed.
-// `degree` is cubic, reduced to poles-1 when there are too few poles. Weights
-// and an explicit knot vector are not stored in v1 — they are the
-// clamped-uniform defaults (see BSplineKnots), keeping serialization small and
-// every pole addressable by `PointRef::which` (uint8_t; poles capped at 255).
+// `degree` is cubic, reduced to poles-1 when there are too few poles
+// (BSplineDegree). `knots` (vNEXT) is the full knot vector, poles + degree + 1
+// values, non-decreasing, clamped at both ends and no interior value more
+// than `degree` times; EMPTY means clamped-uniform, as every spline was
+// before (docs/sketching/README.md#representation). Read it only through
+// SplineKnots / SplineDomain. Weights are not stored: the spline is
+// non-rational. Every pole is addressable by `PointRef::which` (uint8_t;
+// poles capped at 255).
 struct BSpline {
   std::vector<glm::dvec2> poles;
   int degree = 3;
   uint32_t id = 0;
   bool construction = false;
+  std::vector<double> knots; // last: positional initialisers exist
 };
 
 // A one-line text label (v137, docs/sketching/README.md#text): one entity,
@@ -177,12 +184,13 @@ inline int BSplineDegree(const BSpline& s) {
   return std::min(s.degree > 0 ? s.degree : 3, n - 1);
 }
 
-// The clamped-uniform knot vector for `n` poles of degree `p` (length n+p+1):
-// p+1 zeros, interior knots 1..(n-p-1), then p+1 copies of (n-p). The curve's
-// parameter domain is [0, n-p]. This is exactly the knot vector OCC builds for
-// a clamped BSpline with the same poles/degree, so the header evaluator below
-// and the OCC profile edge agree.
-inline std::vector<double> BSplineKnots(int n, int p) {
+// The clamped-uniform knot vector for `n` poles of degree `p` (length
+// n+p+1): p+1 zeros, interior knots 1..(n-p-1), then p+1 copies of (n-p) --
+// exactly the knot vector OCC builds for a clamped BSpline with the same
+// poles and degree. What an EMPTY `BSpline::knots` means; nothing but
+// SplineKnots and the writer's "is it the default?" reads it (a convention
+// test holds that).
+inline std::vector<double> ClampedUniformKnots(int n, int p) {
   std::vector<double> U;
   U.reserve(n + p + 1);
   for (int i = 0; i <= p; i++)
@@ -196,7 +204,108 @@ inline std::vector<double> BSplineKnots(int n, int p) {
   return U;
 }
 
-// Evaluate the clamped B-spline at global parameter u in [0, n-p] (de Boor).
+// Why `s.knots` cannot be this spline's knot vector ("" = it can, and empty
+// always can): the count against the poles and the EFFECTIVE degree, a
+// decrease, an end that is not clamped, an interior knot repeated more than
+// the degree, a value that is not finite, a domain of no length.
+inline std::string SplineKnotsRefusal(const BSpline& s) {
+  if (s.knots.empty())
+    return {};
+  const int n = static_cast<int>(s.poles.size());
+  const int p = BSplineDegree(s);
+  if (p == 0)
+    return "a spline of fewer than two poles takes no knots";
+  const size_t want = static_cast<size_t>(n + p + 1);
+  if (s.knots.size() != want)
+    return "a spline of " + std::to_string(n) + " poles and degree " +
+           std::to_string(p) + " takes " + std::to_string(want) +
+           " knots, not " + std::to_string(s.knots.size());
+  for (double k : s.knots)
+    if (!std::isfinite(k))
+      return "a spline's knots must be finite numbers";
+  for (size_t i = 1; i < s.knots.size(); i++)
+    if (s.knots[i] < s.knots[i - 1])
+      return "a spline's knots must not decrease (knot " + std::to_string(i) +
+             " is less than knot " + std::to_string(i - 1) + ")";
+  const double a = s.knots[p], b = s.knots[n];
+  for (int i = 0; i <= p; i++)
+    if (s.knots[i] != a || s.knots[n + i] != b)
+      return "a spline's knots must be clamped: its first " +
+             std::to_string(p + 1) + " and last " + std::to_string(p + 1) +
+             " equal (degree + 1 each)";
+  if (!(b > a))
+    return "a spline's knots span nothing";
+  for (int i = p + 1; i < n;) {
+    int j = i;
+    while (j < n && s.knots[j] == s.knots[i])
+      j++;
+    if (j - i > p)
+      return "a spline's interior knot " + std::format("{}", s.knots[i]) +
+             " is repeated " + std::to_string(j - i) +
+             " times, more than its degree (" + std::to_string(p) + ")";
+    i = j;
+  }
+  return {};
+}
+
+// The spline's full knot vector: the stored one, or the clamped-uniform one
+// an empty `knots` means. One of the two accessors everything that
+// evaluates, cuts or builds a spline reads its knots through.
+inline std::vector<double> SplineKnots(const BSpline& s) {
+  const int n = static_cast<int>(s.poles.size());
+  const int p = BSplineDegree(s);
+  if (!s.knots.empty() && s.knots.size() == static_cast<size_t>(n + p + 1))
+    return s.knots;
+  return ClampedUniformKnots(n, p);
+}
+
+// The parameter domain [first, last] of the curve: [0, n-p] for a
+// clamped-uniform spline, the stored knots' ends otherwise. {0, 0} for a
+// degenerate spline.
+inline std::pair<double, double> SplineDomain(const BSpline& s) {
+  const int n = static_cast<int>(s.poles.size());
+  const int p = BSplineDegree(s);
+  if (p == 0)
+    return {0.0, 0.0};
+  if (!s.knots.empty() && s.knots.size() == static_cast<size_t>(n + p + 1))
+    return {s.knots[p], s.knots[n]};
+  return {0.0, static_cast<double>(n - p)};
+}
+
+// How many knot spans of non-zero length the domain holds (n-p for a
+// clamped-uniform spline): what a sampler spends its segments on.
+inline int SplineSpans(const BSpline& s) {
+  const int n = static_cast<int>(s.poles.size());
+  const int p = BSplineDegree(s);
+  if (p == 0)
+    return 0;
+  if (s.knots.empty())
+    return n - p;
+  const std::vector<double> U = SplineKnots(s);
+  int spans = 0;
+  for (int i = p; i < n; i++)
+    if (U[i + 1] > U[i])
+      spans++;
+  return spans;
+}
+
+// The same curve traversed the other way: the poles reversed and the knots
+// mirrored within the domain (k -> first + last - k), so the reversed
+// spline's parameter u is the original's first + last - u. Reversing the
+// poles alone of a spline with stored knots is a different curve.
+inline void ReverseSpline(BSpline& s) {
+  std::reverse(s.poles.begin(), s.poles.end());
+  if (s.knots.empty())
+    return;
+  const double sum = s.knots.front() + s.knots.back();
+  std::vector<double> rev(s.knots.size());
+  for (size_t i = 0; i < s.knots.size(); i++)
+    rev[i] = sum - s.knots[s.knots.size() - 1 - i];
+  s.knots = std::move(rev);
+}
+
+// Evaluate the clamped B-spline at global parameter u in its domain
+// (de Boor); clamped to the ends outside it.
 inline glm::dvec2 BSplineEvalUV(const BSpline& s, double u) {
   const int n = static_cast<int>(s.poles.size());
   if (n == 0)
@@ -204,11 +313,10 @@ inline glm::dvec2 BSplineEvalUV(const BSpline& s, double u) {
   const int p = BSplineDegree(s);
   if (p == 0)
     return s.poles[0];
-  const std::vector<double> U = BSplineKnots(n, p);
-  const double umax = U[n]; // = n - p
-  if (u <= 0.0)
+  const std::vector<double> U = SplineKnots(s);
+  if (u <= U[p])
     return s.poles.front();
-  if (u >= umax)
+  if (u >= U[n])
     return s.poles.back();
   // Knot span k in [p, n-1] with U[k] <= u < U[k+1].
   int k = p;
@@ -227,7 +335,8 @@ inline glm::dvec2 BSplineEvalUV(const BSpline& s, double u) {
   return d[p];
 }
 
-// Samples the spline into a polyline (`segsPerSpan` segments per knot span).
+// Samples the spline into a polyline (`segsPerSpan` segments per knot span
+// of non-zero length).
 inline std::vector<glm::dvec2> BSplineSampleUV(const BSpline& s,
                                                int segsPerSpan = 16) {
   std::vector<glm::dvec2> pts;
@@ -239,11 +348,29 @@ inline std::vector<glm::dvec2> BSplineSampleUV(const BSpline& s,
     pts = s.poles;
     return pts;
   }
-  const double umax = static_cast<double>(n - p);
-  const int total = std::max(2, segsPerSpan * (n - p));
-  pts.reserve(total + 1);
-  for (int i = 0; i <= total; i++)
-    pts.push_back(BSplineEvalUV(s, umax * i / total));
+  if (s.knots.empty()) {
+    // Evenly over [0, n-p]: one formula, so a uniform spline samples to
+    // the same bits it always did.
+    const double umax = static_cast<double>(n - p);
+    const int total = std::max(2, segsPerSpan * (n - p));
+    pts.reserve(total + 1);
+    for (int i = 0; i <= total; i++)
+      pts.push_back(BSplineEvalUV(s, umax * i / total));
+    return pts;
+  }
+  // Evenly within each span, so a short span is sampled as finely as a
+  // long one.
+  const std::vector<double> U = SplineKnots(s);
+  const int per = std::max(1, segsPerSpan);
+  pts.push_back(s.poles.front());
+  for (int i = p; i < n; i++) {
+    if (!(U[i + 1] > U[i]))
+      continue;
+    for (int j = 1; j <= per; j++)
+      pts.push_back(j == per
+                        ? BSplineEvalUV(s, U[i + 1])
+                        : BSplineEvalUV(s, U[i] + (U[i + 1] - U[i]) * j / per));
+  }
   return pts;
 }
 

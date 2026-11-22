@@ -294,6 +294,13 @@ void HashSketch(inputhash::Hasher& h, const DerivedSketch& s) {
             h.U64(x.poles.size());
             for (const glm::dvec2& p : x.poles)
               HashVec(h, p);
+            // The knots are the curve too; none (clamped-uniform) adds
+            // nothing, so an old sketch hashes as it did.
+            if (!x.knots.empty()) {
+              h.U64(x.knots.size());
+              for (double k : x.knots)
+                h.F64(k);
+            }
           } else if constexpr (std::is_same_v<T, sketch::Text>) {
             HashVec(h, x.anchor);
             h.Str(x.text);

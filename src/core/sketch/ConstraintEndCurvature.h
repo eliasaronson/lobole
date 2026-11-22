@@ -21,12 +21,14 @@
 #include "Constraints.h"
 
 #include <array>
+#include <vector>
 
 namespace sketch {
 
-// c above for a clamped-uniform spline of `poles` poles and degree `degree`
-// (>= 2), at its first end (`atStart`) or its last.
-double EndCurvatureFactor(int poles, int degree, bool atStart);
+// c above for a clamped spline of degree `degree` (>= 2) on the full knot
+// vector `knots` (SplineKnots), at its first end (`atStart`) or its last.
+double EndCurvatureFactor(const std::vector<double>& knots, int degree,
+                          bool atStart);
 
 class ConstraintEndCurvature : public GCS::Constraint {
 public:

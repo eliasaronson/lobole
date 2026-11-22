@@ -2224,6 +2224,41 @@ TEST_CASE("a volume is integrated through cad::Integrate", "[convention]") {
   CHECK(offenders.empty());
 }
 
+TEST_CASE("a spline's knots and domain come from SplineKnots and "
+          "SplineDomain alone",
+          "[convention][sketch]") {
+  // A spline carries its own knots (docs/sketching/README.md#representation).
+  // Code that rebuilt the clamped-uniform vector from the pole count, or
+  // took the domain as `poles - degree`, read a spline with stored knots as
+  // another curve -- right on every old file, wrong on the new ones.
+  const std::regex use(
+      R"(\bClampedUniformKnots\s*\(|-\s*(sketch::)?BSplineDegree\s*\()");
+  std::vector<std::string> offenders;
+  for (const std::string& ext : {".cpp", ".h"})
+    for (const SourceFile& src : SourcesUnder("src", ext)) {
+      const std::string rel = Relative(src.path);
+      // The accessors themselves, and the writer's "is it the default?".
+      const bool owner = rel == "src/core/features/SketchFeature.h";
+      for (const auto& [n, row] : CodeLines(src.text)) {
+        if (!std::regex_search(row, use))
+          continue;
+        if (owner || (rel == "src/core/io/SerializeFeatures.cpp" &&
+                      row.find("ClampedUniformKnots") != std::string::npos))
+          continue;
+        offenders.push_back(rel + ":" + std::to_string(n) + ": " + row);
+      }
+    }
+  INFO("read a spline's knots through sketch::SplineKnots and its domain "
+       "through sketch::SplineDomain (core/features/SketchFeature.h):\n" +
+       [&] {
+         std::string s;
+         for (const std::string& o : offenders)
+           s += "  " + o + "\n";
+         return s;
+       }());
+  CHECK(offenders.empty());
+}
+
 TEST_CASE("a curve is sampled through cad::SampleCurve", "[convention]") {
   // GCPnts_QuasiUniformDeflection judges a span by its end tangents, and on
   // OCC 7.6 (what Ubuntu 24.04 ships, and CI tests) a span that ends where

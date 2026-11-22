@@ -46,10 +46,12 @@ struct Affine2 {
 [[nodiscard]] sketch::Entity TransformEntity(const sketch::Entity& e,
                                              const Affine2& a);
 
-// A non-rational B-spline of any knot vector as clamped pieces the sketch
-// stores exactly: itself when its knots are clamped-uniform and it has at
-// most 255 poles, else one Bezier piece per knot span (knot insertion, which
-// changes no point of the curve).
+// A non-rational B-spline of any knot vector as clamped splines the sketch
+// stores exactly (docs/sketching/README.md#importing-dxf-and-svg): ONE spline
+// on its own knots, an unclamped end clamped by knot insertion (which changes
+// no point of the curve); cut only at an interior knot of multiplicity degree
+// or more (a corner) and where a piece would carry more than 255 poles.
+// Evenly spaced knots come back as a plain spline (no `knots`).
 [[nodiscard]] std::vector<sketch::BSpline>
 SplineToSketch(const std::vector<double>& knots,
                const std::vector<glm::dvec2>& poles, int degree);

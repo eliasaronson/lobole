@@ -116,9 +116,17 @@ json EntityToJson(const sketch::Entity& entity) {
           json poles = json::array();
           for (const glm::dvec2& p : e.poles)
             poles.push_back(Vec2ToJson(p));
-          return {{"type", "spline"},
-                  {"poles", std::move(poles)},
-                  {"degree", e.degree}};
+          json sp = {{"type", "spline"},
+                     {"poles", std::move(poles)},
+                     {"degree", e.degree}};
+          // vNEXT: written only when not the clamped-uniform vector an
+          // absent `knots` means, so every older spline writes as it did.
+          if (!e.knots.empty() &&
+              e.knots !=
+                  sketch::ClampedUniformKnots(static_cast<int>(e.poles.size()),
+                                              sketch::BSplineDegree(e)))
+            sp["knots"] = e.knots;
+          return sp;
         }
       },
       entity);
@@ -279,6 +287,27 @@ sketch::Entity EntityFromJson(const json& j) {
     for (const auto& pj : j.at("poles"))
       bs.poles.push_back(Vec2FromJson(pj));
     bs.degree = j.value("degree", 3);
+    if (j.contains("knots")) { // vNEXT
+      const json& kj = j.at("knots");
+      if (!kj.is_array())
+        throw std::runtime_error("spline knots must be an array of numbers");
+      for (const json& k : kj) {
+        if (!k.is_number())
+          throw std::runtime_error("spline knots must be an array of "
+                                   "numbers, not " +
+                                   k.dump());
+        bs.knots.push_back(k.get<double>());
+      }
+      if (bs.knots.empty())
+        throw std::runtime_error("spline knots are empty: leave the key out "
+                                 "for the clamped-uniform vector");
+      if (const std::string why = sketch::SplineKnotsRefusal(bs); !why.empty())
+        throw std::runtime_error("spline: " + why);
+      if (bs.knots ==
+          sketch::ClampedUniformKnots(static_cast<int>(bs.poles.size()),
+                                      sketch::BSplineDegree(bs)))
+        bs.knots.clear(); // the default, spelled out
+    }
     e = std::move(bs);
   } else if (type == "text") { // v137
     // Refused, never substituted: an unknown font or alignment word that
@@ -353,7 +382,7 @@ sketch::Entity EntityFromJson(const json& j) {
             {"ellipse_arc",
              {"center", "r_major", "r_minor", "rotation", "rotation_deg",
               "start_param", "end_param"}},
-            {"spline", {"poles", "degree"}},
+            {"spline", {"poles", "degree", "knots"}},
             {"text",
              {"text", "font", "height", "anchor", "angle", "angle_deg",
               "halign", "valign", "spacing"}},
@@ -2724,7 +2753,10 @@ static constexpr SketchEntityInfo kSketchEntityTypes[] = {
      "unless the ellipse is a circle, so it has no _deg twin. which 0 = "
      "centre, 1/2 = start/end, 3..6 = the axis ends as for ellipse"},
     {"spline", 40,
-     "poles [[x,y], ...], degree? (default 3). which k = pole k; the first "
+     "poles [[x,y], ...], degree? (default 3), knots? (the full knot "
+     "vector: poles + degree + 1 numbers, non-decreasing, the first and "
+     "last degree + 1 each equal, no interior value more than degree "
+     "times; absent = clamped-uniform). which k = pole k; the first "
      "and last poles are the curve's ends, and equal ones close it"},
     // Not an entity the sketch keeps: FeatureFromJson expands it, so it is
     // here to be documented and get_state never reports one.

@@ -382,6 +382,10 @@ uint64_t ContentHash(const sketch::Entity& e) {
         } else if constexpr (std::is_same_v<T, sketch::BSpline>) {
           for (const glm::dvec2& pole : x.poles)
             f.Vec(pole);
+          // Stored knots are the curve too (an empty vector hashes as it
+          // always did).
+          for (double k : x.knots)
+            f.Num(k);
         } else if constexpr (std::is_same_v<T, sketch::Text>) {
           f.Vec(x.anchor);
           f.Text(x.text);

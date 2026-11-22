@@ -81,11 +81,10 @@ void Hodograph(std::vector<double>& U, std::vector<glm::dvec2>& P, int& p) {
 }
 
 glm::dvec2 Deriv(const BSpline& s, double u, int order) {
-  const int n = static_cast<int>(s.poles.size());
   int p = BSplineDegree(s);
   if (p < order)
     return glm::dvec2(0.0);
-  std::vector<double> U = BSplineKnots(n, p);
+  std::vector<double> U = SplineKnots(s);
   std::vector<glm::dvec2> P = s.poles;
   for (int i = 0; i < order; i++)
     Hodograph(U, P, p);
@@ -109,11 +108,11 @@ double SplineParamNearest(const BSpline& s, glm::dvec2 p) {
   const int deg = BSplineDegree(s);
   if (n < 2 || deg == 0)
     return 0.0;
-  const double umax = static_cast<double>(n - deg);
-  const int samples = 64 * (n - deg);
-  double best = 0.0, bestD = std::numeric_limits<double>::infinity();
+  const auto [lo, hi] = SplineDomain(s);
+  const int samples = 64 * SplineSpans(s);
+  double best = lo, bestD = std::numeric_limits<double>::infinity();
   for (int i = 0; i <= samples; i++) {
-    const double u = umax * i / samples;
+    const double u = lo + (hi - lo) * i / samples;
     const double d = glm::length(BSplineEvalUV(s, u) - p);
     if (d < bestD) {
       bestD = d;
@@ -128,7 +127,7 @@ double SplineParamNearest(const BSpline& s, glm::dvec2 p) {
     const double df = glm::dot(d1, d1) + glm::dot(r, d2);
     if (!(df > 0.0))
       break;
-    const double next = std::clamp(u - f / df, 0.0, umax);
+    const double next = std::clamp(u - f / df, lo, hi);
     if (std::abs(next - u) < 1e-15) {
       u = next;
       break;
@@ -141,32 +140,91 @@ double SplineParamNearest(const BSpline& s, glm::dvec2 p) {
   return u;
 }
 
+bool UniformUpToScale(const std::vector<double>& U, int p) {
+  const int n = static_cast<int>(U.size()) - p - 1;
+  if (p < 1 || n < p + 1)
+    return false;
+  const double a = U[p], b = U[n];
+  if (!(b > a))
+    return false;
+  for (int i = 0; i <= p; i++)
+    if (U[i] != a || U[n + i] != b)
+      return false;
+  const double step = (b - a) / (n - p);
+  for (int i = 1; i < n - p; i++)
+    if (!(std::abs(U[p + i] - (a + i * step)) <= 1e-12 * (b - a)))
+      return false;
+  return true;
+}
+
+BSpline SliceSpline(const std::vector<double>& U,
+                    const std::vector<glm::dvec2>& P, int p, double b0,
+                    double b1, const std::vector<int>* src,
+                    std::vector<int>* srcOut) {
+  const auto first = [&](double v) {
+    return static_cast<int>(std::find(U.begin(), U.end(), v) - U.begin());
+  };
+  const auto mult = [&](double v) {
+    return static_cast<int>(std::count(U.begin(), U.end(), v));
+  };
+  // The pole the curve passes through at b0, read leaving it, and at b1,
+  // read arriving: past b0's knots by their excess over p, and the one
+  // before b1's first.
+  const int start = first(b0) + mult(b0) - p - 1;
+  const int end = first(b1) - 1;
+  BSpline out;
+  out.degree = p;
+  out.poles.assign(P.begin() + start, P.begin() + end + 1);
+  if (srcOut && src)
+    srcOut->assign(src->begin() + start, src->begin() + end + 1);
+  out.knots.assign(static_cast<size_t>(p + 1), b0);
+  for (double k : U)
+    if (k > b0 && k < b1)
+      out.knots.push_back(k);
+  out.knots.insert(out.knots.end(), static_cast<size_t>(p + 1), b1);
+  return out;
+}
+
 std::optional<SplineCut> CutSpline(const BSpline& s, double u) {
   const int n = static_cast<int>(s.poles.size());
   const int p = BSplineDegree(s);
   if (n < 2 || p == 0)
     return std::nullopt;
-  const int m = n - p;
-  if (!(u > 0.0 && u < m))
+  const auto [lo, hi] = SplineDomain(s);
+  if (!(u > lo && u < hi))
     return std::nullopt;
-  const double nearestKnot = std::round(u);
-  const bool onKnot = std::abs(u - nearestKnot) < 1e-9;
-  if (onKnot)
-    u = nearestKnot;
+  std::vector<double> U = SplineKnots(s);
+  // The distinct interior knots, and the one a cut that close is on.
+  std::vector<double> inner;
+  for (int i = p + 1; i < n; i++)
+    if (inner.empty() || inner.back() != U[i])
+      inner.push_back(U[i]);
+  const double tol = 1e-9 * (hi - lo) / std::max(1, SplineSpans(s));
+  bool onKnot = false;
+  for (double k : inner)
+    if (std::abs(u - k) < tol) {
+      u = k;
+      onKnot = true;
+    }
 
   // The breaks between pieces, each raised to multiplicity p.
   std::vector<double> breaks;
   if (onKnot) {
     breaks.push_back(u);
   } else {
-    const double k = std::floor(u);
-    if (k > 0.0)
-      breaks.push_back(k);
+    double before = lo, after = hi;
+    for (double k : inner) {
+      if (k < u)
+        before = k;
+      else if (k > u && after == hi)
+        after = k;
+    }
+    if (before > lo)
+      breaks.push_back(before);
     breaks.push_back(u);
-    if (k + 1.0 < m)
-      breaks.push_back(k + 1.0);
+    if (after < hi)
+      breaks.push_back(after);
   }
-  std::vector<double> U = BSplineKnots(n, p);
   std::vector<glm::dvec2> P = s.poles;
   std::vector<int> src(n);
   for (int i = 0; i < n; i++)
@@ -175,32 +233,28 @@ std::optional<SplineCut> CutSpline(const BSpline& s, double u) {
     while (std::count(U.begin(), U.end(), b) < p)
       InsertKnot(U, P, p, b, &src);
 
-  // The pole the curve passes through at break b: the one before b's first
-  // knot (p equal knots there), the first pole at the start.
-  const auto poleAt = [&](double b) -> int {
-    if (b <= 0.0)
-      return 0;
-    const auto it = std::find(U.begin(), U.end(), b);
-    return static_cast<int>(it - U.begin()) - 1;
-  };
-  std::vector<double> all{0.0};
+  std::vector<double> all{lo};
   all.insert(all.end(), breaks.begin(), breaks.end());
-  all.push_back(static_cast<double>(m));
+  all.push_back(hi);
   SplineCut cut;
   for (size_t i = 0; i + 1 < all.size(); i++) {
-    const int a = poleAt(all[i]), c = poleAt(all[i + 1]);
     SplinePiece piece;
-    piece.spline.degree = p;
+    piece.spline =
+        SliceSpline(U, P, p, all[i], all[i + 1], &src, &piece.source);
     piece.spline.construction = s.construction;
-    piece.spline.poles.assign(P.begin() + a, P.begin() + c + 1);
-    piece.source.assign(src.begin() + a, src.begin() + c + 1);
+    // A piece whose knots are evenly spaced is stored as a plain spline:
+    // the same curve, reparametrised.
+    if (UniformUpToScale(piece.spline.knots, p))
+      piece.spline.knots.clear();
     cut.pieces.push_back(std::move(piece));
     if (all[i + 1] <= u)
       cut.before = cut.pieces.size();
     if (i + 2 < all.size()) {
       const double b = all[i + 1];
-      // Mid-span the curve is a polynomial; at a knot it is C^(p-1).
-      const int smooth = b == u && !onKnot ? p + 1 : p - 1;
+      // Mid-span the curve is a polynomial; at a knot it is C^(p-m).
+      const std::vector<double> orig = SplineKnots(s);
+      const int had = static_cast<int>(std::count(orig.begin(), orig.end(), b));
+      const int smooth = b == u && !onKnot ? p + 1 : p - had;
       cut.joints.push_back(smooth >= 2   ? PieceJoint::G2
                            : smooth == 1 ? PieceJoint::G1
                                          : PieceJoint::C0);

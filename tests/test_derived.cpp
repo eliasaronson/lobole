@@ -1036,3 +1036,29 @@ TEST_CASE("the v193 derived-sketch golden builds from this recipe",
     fs::remove(path, ec);
   }
 }
+
+TEST_CASE("a copied sketch is behind its source when only a spline's knots "
+          "changed",
+          "[derived][sketch][spline]") {
+  // The knots are the curve as much as the poles are: a key that read the
+  // poles alone kept a copy of the old curve and called it current.
+  auto source = MakeSource();
+  auto sk = std::make_unique<SketchFeature>("Curve", kXY);
+  sketch::BSpline s{{{0, 0}, {3, 4}, {6, 5}, {9, 1}, {12, 3}}, 3};
+  s.knots = {0, 0, 0, 0, 0.4, 2, 2, 2, 2};
+  const uint32_t sp = sk->AddEntity(s);
+  source->AddFeature(std::move(sk));
+  REQUIRE(source->Regenerate());
+  Document host;
+  auto d = std::make_unique<DerivedFeature>("Curve copy", 7);
+  d->sourceName = "Servo";
+  d->sketches = {source->GetFeatures().back()->GetId()};
+  REQUIRE(derived::TakeSnapshot(*d, *source, host).empty());
+  REQUIRE(d->sketchSnapshot.size() == 1);
+  REQUIRE(!derived::IsStale(*d, *source, host));
+  auto* src = dynamic_cast<SketchFeature*>(source->GetFeatures().back().get());
+  std::get<sketch::BSpline>(src->entities[src->IndexOfEntity(sp)]).knots = {
+      0, 0, 0, 0, 1.6, 2, 2, 2, 2};
+  REQUIRE(source->Regenerate());
+  CHECK(derived::IsStale(*d, *source, host));
+}

@@ -251,8 +251,8 @@ std::vector<Loop> BuildLoops(const std::vector<Entity>& entities) {
           // already oriented a → b
         } else if (Near(cand.b, tail)) {
           std::swap(cand.a, cand.b); // traverse it backwards
-          if (cand.spline)           // keep poles in traversal order a → b
-            std::reverse(cand.spline->poles.begin(), cand.spline->poles.end());
+          if (cand.spline)           // keep the curve in traversal order a → b
+            ReverseSpline(*cand.spline);
         } else {
           continue;
         }
@@ -405,11 +405,11 @@ gp_Pnt ProfilePoint(const SketchPlane& plane, const glm::dvec2& uv) {
                                      gp_Vec(frame.YDirection()) * uv.y);
 }
 
-// Builds an OCC clamped, uniform, non-rational B-spline curve on the plane
-// from UV control poles. The knot vector matches the header's BSplineKnots
-// (distinct knots 0..(n-p) with clamped end multiplicities), so the OCC edge
-// and the UV tessellation (de Boor) trace the same curve — the property that
-// keeps a spline profile watertight against its rendered/area polyline.
+// Builds an OCC clamped, non-rational B-spline curve on the plane from UV
+// control poles, on the spline's own knots (SplineKnots: distinct values
+// and multiplicities), so the OCC edge and the UV tessellation (de Boor)
+// trace the same curve — the property that keeps a spline profile
+// watertight against its rendered/area polyline.
 Handle(Geom_BSplineCurve)
     MakeBSplineCurve(const SketchPlane& plane, const BSpline& s) {
   const int n = static_cast<int>(s.poles.size());
@@ -418,15 +418,23 @@ Handle(Geom_BSplineCurve)
   for (int i = 0; i < n; i++) {
     poles.SetValue(i + 1, ProfilePoint(plane, s.poles[i]));
   }
-  const int nDistinct = n - p + 1;
+  const std::vector<double> U = SplineKnots(s);
+  std::vector<double> distinct;
+  std::vector<int> mult;
+  for (double k : U) {
+    if (distinct.empty() || distinct.back() != k) {
+      distinct.push_back(k);
+      mult.push_back(0);
+    }
+    mult.back()++;
+  }
+  const int nDistinct = static_cast<int>(distinct.size());
   TColStd_Array1OfReal knots(1, nDistinct);
   TColStd_Array1OfInteger mults(1, nDistinct);
   for (int i = 0; i < nDistinct; i++) {
-    knots.SetValue(i + 1, static_cast<double>(i));
-    mults.SetValue(i + 1, 1);
+    knots.SetValue(i + 1, distinct[i]);
+    mults.SetValue(i + 1, mult[i]);
   }
-  mults.SetValue(1, p + 1);
-  mults.SetValue(nDistinct, p + 1);
   return new Geom_BSplineCurve(poles, knots, mults, p);
 }
 
@@ -1131,7 +1139,7 @@ TopoDS_Wire BuildOpenPathWire(const SketchPlane& plane,
       if (e.spline) {
         BSpline sp = *e.spline;
         if (!Near(sp.poles.front(), e.a))
-          std::reverse(sp.poles.begin(), sp.poles.end());
+          ReverseSpline(sp);
         BRepBuilderAPI_MakeEdge mk(MakeBSplineCurve(plane, sp), from, to);
         if (!addEdge(mk))
           return TopoDS_Wire();
@@ -1494,9 +1502,8 @@ const LoopEdge* MatchTextEdge(const TopoDS_Edge& edge, const SketchPlane& plane,
         continue;
       glm::dvec2 m = 0.5 * (le.a + le.b);
       if (le.spline) {
-        const double span = static_cast<double>(le.spline->poles.size()) -
-                            BSplineDegree(*le.spline);
-        m = BSplineEvalUV(*le.spline, 0.5 * span);
+        const auto [lo, hi] = SplineDomain(*le.spline);
+        m = BSplineEvalUV(*le.spline, 0.5 * (lo + hi));
       }
       if (glm::length(m - mid) < tol)
         return &le;

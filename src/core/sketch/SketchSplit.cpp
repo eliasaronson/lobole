@@ -83,12 +83,11 @@ std::optional<Param> ParamOf(const Entity& e) {
                  [g](double t) { return EllipseArcEvalUV(g, t); }};
   }
   if (const auto* bs = std::get_if<BSpline>(&e)) {
-    const int n = static_cast<int>(bs->poles.size());
-    const int p = BSplineDegree(*bs);
-    if (n < 2 || p == 0)
+    if (bs->poles.size() < 2 || BSplineDegree(*bs) == 0)
       return std::nullopt;
     const BSpline g = *bs;
-    return Param{0.0, static_cast<double>(n - p), 64 * (n - p),
+    const auto [lo, hi] = SplineDomain(g);
+    return Param{lo, hi, 64 * SplineSpans(g),
                  [g](double u) { return BSplineEvalUV(g, u); }};
   }
   return std::nullopt; // a point or a label: no curve

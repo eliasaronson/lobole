@@ -351,9 +351,8 @@ bool Cholesky(std::vector<double>& A, std::vector<glm::dvec2>& b, size_t n) {
 // parameter.
 double SplineDeviation(const BSpline& s, const std::vector<glm::dvec2>& pts,
                        const std::vector<double>& params) {
-  const int n = static_cast<int>(s.poles.size());
-  const int p = BSplineDegree(s);
-  const int spans = n - p;
+  // The fit's own spline: clamped-uniform, so span q is [q, q+1].
+  const int spans = SplineSpans(s);
   constexpr int kPer = 32;
   std::vector<glm::dvec2> poly;
   poly.reserve(static_cast<size_t>(spans * kPer + 1));
@@ -400,15 +399,17 @@ std::optional<BSpline> FitOne(const std::vector<glm::dvec2>& pts,
     s.poles = {pts.front(), pts.back()};
     return s;
   }
-  const int p = std::min(3, n - 1);
   s.degree = 3;
-  const std::vector<double> U = BSplineKnots(n, p);
+  s.poles.assign(static_cast<size_t>(n), glm::dvec2(0.0)); // set below
+  const int p = BSplineDegree(s);
+  const std::vector<double> U = SplineKnots(s);
+  const double umax = SplineDomain(s).second;
   const size_t unknowns = static_cast<size_t>(n - 2);
   std::vector<double> A(unknowns * unknowns, 0.0);
   std::vector<glm::dvec2> b(unknowns, glm::dvec2(0.0));
   double N[8];
   for (size_t k = 1; k + 1 < m; k++) {
-    const size_t first = Basis(U, n, p, t[k] * (n - p), N);
+    const size_t first = Basis(U, n, p, t[k] * umax, N);
     glm::dvec2 r = pts[k];
     for (int a = 0; a <= p; a++) {
       const size_t ia = first + static_cast<size_t>(a);
@@ -456,7 +457,7 @@ std::optional<BSpline> FitOne(const std::vector<glm::dvec2>& pts,
   }
   if (!Cholesky(A, b, unknowns))
     return std::nullopt;
-  s.poles.reserve(static_cast<size_t>(n));
+  s.poles.clear();
   s.poles.push_back(pts.front());
   s.poles.insert(s.poles.end(), b.begin(), b.end());
   s.poles.push_back(pts.back());
@@ -515,9 +516,9 @@ void FitSplinePiece(const std::vector<glm::dvec2>& pts, double tol,
        n = std::min(most, std::max(n + 1, n * 3 / 2))) {
     if (auto s = FitOne(pts, t, n)) {
       std::vector<double> params(m);
-      const int p = BSplineDegree(*s);
+      const auto [lo, hi] = SplineDomain(*s);
       for (size_t k = 0; k < m; k++)
-        params[k] = t[k] * (static_cast<int>(s->poles.size()) - p);
+        params[k] = lo + t[k] * (hi - lo);
       const double dev = SplineDeviation(*s, pts, params);
       if (dev < bestDev) {
         bestDev = dev;

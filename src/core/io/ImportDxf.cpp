@@ -543,7 +543,6 @@ private:
 
   void Spline(const Record& r, const Ctx& ctx) {
     Extrusion(r);
-    const int flags = IntOr(r, 70, 0);
     const int degree = IntOr(r, 71, 3);
     std::vector<double> knots, weights;
     std::vector<glm::dvec2> poles;
@@ -574,7 +573,9 @@ private:
     for (double w : weights)
       if (std::abs(w - weights.front()) > 1e-12 * std::abs(weights.front()))
         rational = true;
-    if ((flags & 4) != 0 && rational)
+    // Weights that differ ARE a rational curve whether or not the writer
+    // set flag 4: read without them it would be another curve.
+    if (rational)
       throw std::runtime_error(r.Name() +
                                ": a rational spline (weighted poles) is not "
                                "read; the sketch's splines are non-rational");

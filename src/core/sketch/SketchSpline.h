@@ -27,16 +27,16 @@ void InsertKnot(std::vector<double>& U, std::vector<glm::dvec2>& P, int p,
 // and a Tangent); C0, a Coincident alone.
 enum class PieceJoint { C0, G1, G2 };
 
-// One piece of a cut spline: a storable (clamped-uniform) spline, and for
+// One piece of a cut spline: a storable spline, and for
 // each of its poles the original pole it is (-1 for a pole the cut made).
 struct SplinePiece {
   BSpline spline;
   std::vector<int> source;
 };
 
-// The pieces cutting `s` at parameter `u` (in its domain [0, n-p], strictly
-// inside) makes, in order along it. Over the span u lies in, each side is a
-// Bezier; past the next knot, raised to full multiplicity, the whole spans
+// The pieces cutting `s` at parameter `u` (strictly inside its domain,
+// SplineDomain) makes, in order along it. Over the span u lies in, each side is
+// a Bezier; past the next knot, raised to full multiplicity, the whole spans
 // are one clamped-uniform spline; a side inside one span is one Bezier, and
 // a cut on a knot leaves two clamped-uniform splines. `before` pieces end at
 // u, the rest start there. `joints[i]` joins pieces i and i+1. Every piece
@@ -48,6 +48,21 @@ struct SplineCut {
   size_t before = 0; // pieces[0 .. before) lie before the cut
 };
 std::optional<SplineCut> CutSpline(const BSpline& s, double u);
+
+// Whether the knot vector `U` of degree `p` is clamped with evenly spaced
+// single interior knots: an affine image of the clamped-uniform vector, so
+// the curve is the same stored with no knots at all.
+bool UniformUpToScale(const std::vector<double>& U, int p);
+
+// The clamped spline over [b0, b1] of the degree-`p` spline (U, P), where
+// each of b0 and b1 is an end of the domain or a knot of multiplicity at
+// least p: its poles and its knots (the parent's between b0 and b1, not
+// renormalised). `src`, when given, runs beside `P` and is sliced into
+// `srcOut`.
+BSpline SliceSpline(const std::vector<double>& U,
+                    const std::vector<glm::dvec2>& P, int p, double b0,
+                    double b1, const std::vector<int>* src = nullptr,
+                    std::vector<int>* srcOut = nullptr);
 
 // The parameter of the point of `s` nearest `p`: a sample per 1/64 of a span,
 // then Newton on the distance.

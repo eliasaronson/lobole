@@ -88,7 +88,7 @@ already orthonormal is kept bit for bit, so a plane saves and loads unchanged.
 | `Arc` | `center, radius, startAngle, endAngle` | `arc` | centre, start, end points + radius + angles, tied by `addConstraintArcRules` |
 | `Ellipse` | `center, rMajor, rMinor, rotation` | `ellipse` | `GCS::Ellipse` (centre, focus, minor radius); axis ends are points tied to it ([below](#ellipses-and-splines)) |
 | `EllipseArc` | ellipse + `startParam, endParam` | `ellipse_arc` | `GCS::ArcOfEllipse`: the ellipse plus start/end points and params, tied by `addConstraintArcOfEllipseRules` |
-| `BSpline` | `poles, degree` | `spline` | `GCS::BSpline` over the poles (each a free point), knots and weights fixed |
+| `BSpline` | `poles, degree, knots` | `spline` | `GCS::BSpline` over the poles (each a free point), knots and weights fixed |
 | `Text` | `anchor, text, font, height, angle, halign, valign, spacing` | `text` | the anchor a free point; the glyphs rigid; the box corners ride the anchor ([Text](#text)) |
 
 Every entity also has `id` and `construction`. Rules that hold everywhere:
@@ -98,11 +98,11 @@ Every entity also has `id` and `construction`. Rules that hold everywhere:
   when a wire is built, so no CW flag exists anywhere in the model; every
   transform (`ReflectEntity`, which flips winding and swaps the ends) keeps
   the invariant.
-- **A B-spline is non-rational, clamped and uniform.** Weights and knots are
-  not stored — `BSplineKnots` produces exactly the knot vector OCC builds for
-  the same poles, so the header evaluator (`BSplineEvalUV`) and the OCC
-  profile edge agree. Degree is cubic, reduced to poles−1 for short splines.
-  Poles are capped at 255 because `PointRef::which` is a `uint8_t`.
+- **A B-spline is non-rational and clamped, on its own knots.** Weights are
+  not stored; knots are, when they are not clamped-uniform
+  ([Representation](#representation)). Degree is cubic, reduced to poles−1
+  for short splines. Poles are capped at 255 because `PointRef::which` is a
+  `uint8_t`.
 - **Rectangles are not a primitive.** `AddRectangle` emits four lines, four
   corner coincidents, two horizontal and two vertical constraints, so every
   side is editable and trimmable. `AddRectangleCentered` adds a centre point.
@@ -429,14 +429,48 @@ An **elliptical arc** is a `GCS::ArcOfEllipse` with real start/end points
 from the major axis, as the model stores `startParam`/`endParam`, so they
 write back directly, renormalized CCW like an `Arc`'s. DOF 7.
 
-A **spline** is a `GCS::BSpline` over its pole points, with the
-clamped-uniform knots (`BSplineKnots`) and unit weights, both fixed. A
+A **spline** is a `GCS::BSpline` over its pole points, with its knots
+(`SplineKnots`, as distinct values and multiplicities) and unit weights,
+both fixed. A
 clamped spline's ends ARE poles 0 and n−1, so they need no points of their
 own. A spline whose first and last poles are equal is closed, and a
 definitional coincident keeps it closed (skipped when both are held — say
 expression-driven — since it would have no unknown). Point-on-spline adds
 one unknown, the point's curve parameter, seeded at the nearest point. DOF
 2 per pole (2 fewer when closed).
+
+#### Representation
+
+`BSpline::knots` is the full knot vector: poles + degree + 1 values,
+non-decreasing, clamped (the first and last degree + 1 equal) and no
+interior value more than the degree times, the degree being the EFFECTIVE
+one (`BSplineDegree`, poles − 1 for a short spline). EMPTY means
+clamped-uniform — p+1 zeros, 1 … n−p−1, p+1 copies of n−p, exactly what OCC
+builds for the same poles — which is every spline drawn, and every spline
+in a file older than the field. The writer omits `knots` when they are
+clamped-uniform, so those files write byte for byte as they did, and the
+reader clears a clamped-uniform vector spelled out. Anything else is refused
+by name on load (`SplineKnotsRefusal`): a wrong count, a decrease, an
+unclamped end, an interior knot past the degree, a non-number, a vector
+spanning nothing.
+
+Two accessors are the only readers: `SplineKnots(s)` (the stored or the
+implied vector) and `SplineDomain(s)` (its first and last value; `[0, n−p]`
+uniform). Evaluation, the hodographs, the nearest parameter, sampling (per
+non-empty span; a uniform spline samples to the same bits as before),
+Split's and Crossings' parametrisation, Fillet's walk and trim, the
+solver's `GCS::BSpline` and `EndCurvatureFactor`, the profile's OCC curve
+(`MakeBSplineCurve`) and the section fit all go through them;
+`tests/test_conventions.cpp` fails on `ClampedUniformKnots(` or
+`- BSplineDegree(` anywhere else. A profile loop or path wire that runs a
+spline backwards calls `ReverseSpline`, which mirrors the knots with the
+poles — reversing the poles alone of a non-uniform spline is a different
+curve. The derived-sketch snapshot key hashes the knots, so a copy is behind
+when only they changed. `tests/test_spline_knots.cpp` checks degrees 1–3,
+uniform and not, open and closed, against `Geom2d_BSplineCurve` on the same
+knots to 1e-9, forwards and reversed, and a polyline's full-multiplicity
+corners (and a cubic's knot of multiplicity 3) through extrude and mass
+properties. Golden `vNEXT-spline-knots`.
 
 #### A spline cut exactly
 
@@ -771,13 +805,14 @@ by `std::from_chars` (never the locale). A binary DXF is refused.
 | ARC | Arc (degrees CCW → radians) |
 | LWPOLYLINE, 2D POLYLINE/VERTEX | Lines, and an Arc per non-zero bulge (sweep 4·atan(bulge), negative = clockwise, stored reversed); flag 70 bit 1 closes it |
 | ELLIPSE | Ellipse when the parameters span a full turn, else EllipseArc; rMinor = ratio·\|major axis\| |
-| SPLINE, non-rational | BSpline: as is when the knots are clamped-uniform (and ≤ 255 poles), else one Bézier piece per knot span by knot insertion, each exact |
+| SPLINE, non-rational | ONE BSpline on the file's knots (stored plain when they are evenly spaced); an unclamped end clamped by knot insertion; cut only at an interior knot of full multiplicity (a corner) and where a piece would pass 255 poles, each piece exact (`sketchimport::SplineToSketch`) |
 | POINT | Point |
 | INSERT | its BLOCK expanded with position, rotation and scale (a negative scale mirrors), nested up to 16 deep; a block's layer-0 entities take the INSERT's layer |
 
 **Refused whole, naming the kind and handle** (a plate missing one curve
-cuts wrong), importing nothing: a rational spline (weights that differ; equal
-weights are the non-rational curve), a spline given only by fit points, a
+cuts wrong), importing nothing: a rational spline (weights that differ,
+whether or not the writer set the rational flag; equal weights are the
+non-rational curve), a spline given only by fit points, a
 polyline with width, an INSERT scaled unevenly over a curve (a line or spline
 under one is exact and allowed), an MINSERT array, an extrusion other than
 ±Z (−Z, the mirrored OCS, is mapped: OCS x is −X), mixed Z elevations, 3D
@@ -1619,7 +1654,8 @@ There is no RPC to delete a single constraint, trim, paste or break a link; `mod
 - Tangency to a spline away from its ends, or between an ellipse and a
   circle or another ellipse without a shared end; an ellipse's radii as
   expression-driven entity fields (drive the distance to an axis end).
-- Spline weights and knots as unknowns (rational or non-uniform splines);
+- Spline weights (rational splines); knots as unknowns (a spline's knots
+  are stored and fixed, never solved for), and no tool or RPC edits them;
   continuity at a closed spline's seam beyond C0.
 - G2 with an ellipse or elliptical arc; an arc length on an elliptical arc
   or a spline.

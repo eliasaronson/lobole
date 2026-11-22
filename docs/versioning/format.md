@@ -367,6 +367,7 @@ into the history above, numbered, when the branch lands
 
 | v | Change |
 |---|--------|
+| vNEXT | A sketch `spline` may carry `knots`: its full knot vector, poles + degree + 1 numbers (the EFFECTIVE degree, poles − 1 for a short spline), non-decreasing, clamped (the first and last degree + 1 each equal) and no interior value more than the degree times ([representation](../sketching/README.md#representation)). Written only when it is not the clamped-uniform vector an absent `knots` means, so every older spline writes as it did; a written clamped-uniform one reads as none. A wrong count, a decrease, an unclamped end, an interior knot repeated past the degree, a non-number and a vector spanning nothing are refused by name. Golden `vNEXT-spline-knots` |
 
 ## Paths in a project
 

@@ -1922,7 +1922,7 @@ def main():
         expect(rep["up_axis"]["applied"] == "+y", rep)
         for name, kinds in [
                 ("plate-ezdxf.dxf", {"arc": 1, "circle": 3, "ellipse": 1,
-                                     "line": 3, "spline": 3}),
+                                     "line": 3, "spline": 1}),
                 ("flat-pattern.dxf", {"circle": 1, "line": 9}),
                 ("mirrored-ocs.dxf", {"arc": 1}),
                 ("unitless.dxf", {"line": 4}),

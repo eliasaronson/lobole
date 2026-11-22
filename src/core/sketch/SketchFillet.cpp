@@ -362,13 +362,12 @@ std::optional<Walk> WalkOf(const Entity& e, uint8_t which) {
     const auto ends = EndsOf(e);
     if (std::find(ends.begin(), ends.end(), which) == ends.end())
       return std::nullopt;
-    const int n = static_cast<int>(bs->poles.size());
-    const double m = n - BSplineDegree(*bs);
-    w.sMax = m;
+    const auto [lo, hi] = SplineDomain(*bs);
+    w.sMax = hi - lo;
     const bool first = which == 0;
     const BSpline g = *bs;
     w.eval = [=](double s, glm::dvec2& p, glm::dvec2& d1, glm::dvec2& d2) {
-      const double u = first ? s : m - s;
+      const double u = first ? lo + s : hi - s;
       p = BSplineEvalUV(g, u);
       d1 = (first ? 1.0 : -1.0) * BSplineDerivUV(g, u);
       d2 = BSplineDeriv2UV(g, u);
@@ -523,8 +522,8 @@ FilletByNewton(const Entity& c1, uint8_t w1, const Entity& c2, uint8_t w2,
         ea->endParam -= sig;
       param = w == 1 ? ea->startParam : ea->endParam;
     } else if (const auto* bs = std::get_if<BSpline>(&out)) {
-      const double m = bs->poles.size() - BSplineDegree(*bs);
-      param = w == 0 ? sig : m - sig;
+      const auto [lo, hi] = SplineDomain(*bs);
+      param = w == 0 ? lo + sig : hi - sig;
     }
   };
   trim(c1, w1, x, g.t1, g.trimmed1, g.param1);

@@ -173,11 +173,11 @@ AxisAlignment(uint8_t which) {
 double NearestSplineParam(const BSpline& s, glm::dvec2 p) {
   const int n = static_cast<int>(s.poles.size());
   const int deg = BSplineDegree(s);
-  const double umax = static_cast<double>(n - deg);
-  const int samples = std::max(16, 64 * (n - deg));
-  double best = 0.0, bestD = INFINITY;
+  const auto [lo, hi] = SplineDomain(s);
+  const int samples = std::max(16, 64 * SplineSpans(s));
+  double best = lo, bestD = INFINITY;
   for (int i = 0; i <= samples; i++) {
-    const double u = umax * i / samples;
+    const double u = lo + (hi - lo) * i / samples;
     const double d = glm::length(BSplineEvalUV(s, u) - p);
     if (d < bestD)
       bestD = d, best = u;
@@ -187,14 +187,15 @@ double NearestSplineParam(const BSpline& s, glm::dvec2 p) {
   // Then Gauss-Newton on (C(u) − p)·C'(u) = 0, to machine precision: a point
   // already on the curve must start the solve AT its parameter, or every
   // re-solve would nudge it (and the poles) by the seed's error. C' is the
-  // clamped-uniform spline of degree p−1 over p·ΔP/Δknot -- the same family,
-  // so BSplineEvalUV evaluates it.
-  const std::vector<double> U = BSplineKnots(n, deg);
+  // spline of degree p−1 over p·ΔP/Δknot on the knots without their ends --
+  // the same family, so BSplineEvalUV evaluates it.
+  const std::vector<double> U = SplineKnots(s);
   BSpline d;
   d.degree = deg - 1;
   for (int i = 0; i + 1 < n; i++)
     d.poles.push_back(static_cast<double>(deg) * (s.poles[i + 1] - s.poles[i]) /
                       (U[i + deg + 1] - U[i + 1]));
+  d.knots.assign(U.begin() + 1, U.end() - 1);
   double u = best;
   for (int it = 0; it < 30; it++) {
     const glm::dvec2 c1 = BSplineEvalUV(d, u);
@@ -202,8 +203,8 @@ double NearestSplineParam(const BSpline& s, glm::dvec2 p) {
     if (den < 1e-300)
       break;
     const double step = glm::dot(BSplineEvalUV(s, u) - p, c1) / den;
-    u = std::clamp(u - step, 0.0, umax);
-    if (std::abs(step) < 1e-16 * std::max(1.0, umax))
+    u = std::clamp(u - step, lo, hi);
+    if (std::abs(step) < 1e-16 * std::max(1.0, hi - lo))
       break;
   }
   return u;
@@ -760,9 +761,10 @@ void Solver::Impl::LoadFrom(const SketchFeature& sketch,
       }
     } else if (auto* bs = std::get_if<BSpline>(&e)) {
       // Each pole is a solver point (which = pole index); the curve itself
-      // is a GCS::BSpline over those points with the clamped-uniform knots
-      // and unit weights the model implies, both held fixed. which is
-      // uint8_t, so at most 256 poles are addressable.
+      // is a GCS::BSpline over those points with the spline's knots
+      // (SplineKnots: distinct values and multiplicities) and unit weights,
+      // both held fixed. which is uint8_t, so at most 256 poles are
+      // addressable.
       const size_t nPoles = std::min<size_t>(bs->poles.size(), 256);
       std::vector<GCS::Point> poles;
       for (size_t k = 0; k < nPoles; k++)
@@ -778,11 +780,15 @@ void Solver::Impl::LoadFrom(const SketchFeature& sketch,
           im.constants.push_back(1.0);
           gb.weights.push_back(&im.constants.back());
         }
-        const int spans = static_cast<int>(nPoles) - deg;
-        for (int k = 0; k <= spans; k++) {
-          im.constants.push_back(static_cast<double>(k));
+        const std::vector<double> U = SplineKnots(*bs);
+        for (size_t k = 0; k < U.size();) {
+          size_t j = k;
+          while (j < U.size() && U[j] == U[k])
+            j++;
+          im.constants.push_back(U[k]);
           gb.knots.push_back(&im.constants.back());
-          gb.mult.push_back(k == 0 || k == spans ? deg + 1 : 1);
+          gb.mult.push_back(static_cast<int>(j - k));
+          k = j;
         }
         gb.degree = deg;
         gb.periodic = false;
@@ -1135,9 +1141,8 @@ void Solver::Impl::LoadFrom(const SketchFeature& sketch,
       } else {
         const auto a3 = endPoles(joint->first);
         const GCS::BSpline& sa = *im.splineOf[ea];
-        const double fa =
-            EndCurvatureFactor(static_cast<int>(sa.poles.size()), sa.degree,
-                               joint->first.which == 0);
+        const double fa = EndCurvatureFactor(sa.flattenedknots, sa.degree,
+                                             joint->first.which == 0);
         if (isLine(eb)) {
           // Zero curvature: with the tangent, the third pole on the line.
           GCS::Point third = a3[2];
@@ -1158,9 +1163,8 @@ void Solver::Impl::LoadFrom(const SketchFeature& sketch,
           } else {
             const auto b3 = endPoles(joint->second);
             const GCS::BSpline& sb = *im.splineOf[eb];
-            const double fb =
-                EndCurvatureFactor(static_cast<int>(sb.poles.size()), sb.degree,
-                                   joint->second.which == 0);
+            const double fb = EndCurvatureFactor(sb.flattenedknots, sb.degree,
+                                                 joint->second.which == 0);
             const glm::dvec2 tb = leg(b3);
             const double s = glm::dot(ta, tb) < 0.0 ? -1.0 : 1.0;
             const double length = 0.5 * (glm::length(ta) + glm::length(tb));

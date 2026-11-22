@@ -5,17 +5,17 @@
 
 #ifdef HAVE_PLANEGCS
 
-#include "core/features/SketchFeature.h" // BSplineKnots
-
 #include <cmath>
 
 namespace sketch {
 
-double EndCurvatureFactor(int poles, int degree, bool atStart) {
-  const int n = poles, p = degree;
+double EndCurvatureFactor(const std::vector<double>& knots, int degree,
+                          bool atStart) {
+  const int p = degree;
+  const int n = static_cast<int>(knots.size()) - p - 1;
   if (p < 2 || n < p + 1)
     return 0.0;
-  std::vector<double> U = BSplineKnots(n, p);
+  std::vector<double> U = knots;
   if (!atStart) {
     // The same curve read from its other end: the knot vector mirrored.
     const double last = U.back();

@@ -1,0 +1,121 @@
+{
+  "features": [
+    {
+      "type": "Sketch",
+      "name": "Profile",
+      "id": 1,
+      "next_entity_id": 3,
+      "plane": {
+        "origin": [
+          0,
+          0,
+          0
+        ],
+        "normal": [
+          0,
+          0,
+          1
+        ],
+        "uAxis": [
+          1,
+          0,
+          0
+        ]
+      },
+      "entities": [
+        {
+          "type": "spline",
+          "id": 1,
+          "degree": 3,
+          "poles": [
+            [
+              0,
+              0
+            ],
+            [
+              2,
+              6
+            ],
+            [
+              7,
+              9
+            ],
+            [
+              12,
+              4
+            ],
+            [
+              16,
+              10
+            ],
+            [
+              20,
+              0
+            ]
+          ],
+          "knots": [
+            0,
+            0,
+            0,
+            0,
+            0.3,
+            1.7,
+            2.5,
+            2.5,
+            2.5,
+            2.5
+          ]
+        },
+        {
+          "type": "line",
+          "id": 2,
+          "a": [
+            20,
+            0
+          ],
+          "b": [
+            0,
+            0
+          ]
+        }
+      ],
+      "constraints": [
+        {
+          "kind": "coincident",
+          "a": [
+            1,
+            5
+          ],
+          "b": [
+            2,
+            0
+          ],
+          "value": 0
+        },
+        {
+          "kind": "coincident",
+          "a": [
+            2,
+            1
+          ],
+          "b": [
+            1,
+            0
+          ],
+          "value": 0
+        }
+      ]
+    },
+    {
+      "type": "Extrude",
+      "name": "Pad",
+      "id": 2,
+      "sketch_id": 1,
+      "distance": 5.0,
+      "mode": "new_body",
+      "reversed": false
+    }
+  ],
+  "format": "designer-document",
+  "version": 232
+}
