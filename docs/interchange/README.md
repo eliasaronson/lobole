@@ -130,7 +130,12 @@ The GUI's import job checks on its worker, beside the volume it already
 measures there, so the frame does not wait on BRepCheck; an `import_step`
 checks in the feature. A solid of more than 20,000 faces
 (`kImportCheckFaceLimit`) is not checked, and the warning says so with its
-count, rather than passing it unseen.
+count, rather than passing it unseen. In the GUI the warning is also said
+where the user is looking: the viewport's import note, in the warning
+colour, "Imported with a warning: body \"Part 1\" came in open: 4 free
+edges" (`ImportAsFeature`), beside the warning glyph on the import's row
+(`import/an_open_solid_says_so`, through the import job with
+`box-open.step`).
 
 ## Editing a downloaded part
 

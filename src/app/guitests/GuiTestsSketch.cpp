@@ -3398,6 +3398,36 @@ void RegisterSketchGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(std::abs(height() - 30.0) < 1e-6);
   };
 
+  // An imported solid that is open still comes in, and says so where the
+  // user is looking (docs/interchange/README.md#an-imported-body-is-checked):
+  // the box with one face taken out of its shell, through the import job,
+  // lands with the viewport's note -- in the warning colour -- naming the
+  // body and why, and its row in the tree carries the same warning.
+  t = IM_REGISTER_TEST(engine, "import", "an_open_solid_says_so");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    std::string error;
+    IM_CHECK(
+        ui::StartImport(*s_App, SourceFixture("import/box-open.step"), &error));
+    IM_CHECK(WaitFor(ctx, "the import to land",
+                     [] { return !ui::ImportRunning(*s_App); }));
+    IM_CHECK(s_App->importError.empty());
+    IM_CHECK_EQ(Doc()->FeatureCount(), (size_t)1);
+    IM_CHECK_EQ(Doc()->GetBodies().size(), (size_t)1);
+    const Feature* imp = Doc()->GetFeature(0);
+    const std::string warning = imp->GetWarning();
+    // The body by the name the file gives it, and why.
+    IM_CHECK(warning.find("body \"Part 1\" came in open: 4 free edges") !=
+             std::string::npos);
+    ctx->Yield(2);
+    IM_CHECK(s_App->importNote.find(warning) != std::string::npos);
+    IM_CHECK(s_App->importNoteWarn);
+    IM_CHECK(s_App->importNoteUntil > 0.0);
+    GuiShot(ctx, "import_open_solid");
+  };
+
   // A downloaded STL is recognised by default
   // (docs/interchange/README.md#recognising-a-faceted-mesh): its holes are
   // cylinders, the viewport's note says what was found, and the Import's

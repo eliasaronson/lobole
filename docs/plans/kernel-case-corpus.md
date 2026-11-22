@@ -106,9 +106,7 @@ Each merges on its own with the suites green and its failures rowed.
 
 - **C (the rest).** A pinned manifest for `tools/step-bakeoff.py`
   (docs/interchange/README.md#the-step-bake-off): which public STEP
-  corpora, their SHA-256 and reference volumes; and a GUI test that the
-  import of `tests/fixtures/import/box-open.step` shows the warning naming
-  the body and its free edges.
+  corpora, their SHA-256 and reference volumes.
 - **D. Metamorphic checks**: `moved`, `order`, `self`, `mirror` and
   `split`; then `step` and `scan`.
 - **E. The tolerance watch, the deep check, the conditions.**

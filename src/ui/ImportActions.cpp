@@ -296,6 +296,9 @@ bool ImportAsFeature(AppState& state, const std::string& filename,
     LOG_ERROR("Import of '{}': {}", filename, why);
     return false;
   }
+  // The note is this import's: one an earlier import left must not be
+  // carried into it.
+  state.importNote.clear();
   // A part `auto` turned says so where the user is looking: a model that
   // arrives standing differently from the file is a surprise unless it is
   // explained, and the editor is where it is undone.
@@ -337,6 +340,21 @@ bool ImportAsFeature(AppState& state, const std::string& filename,
           (imp->GetWarning().empty() ? "" : ". " + imp->GetWarning()) +
           (state.importNote.empty() ? "" : ". " + state.importNote);
       state.importNoteWarn = !imp->GetWarning().empty();
+      state.importNoteUntil = -1.0;
+    }
+  // A body that came in open, invalid or inside out still comes in
+  // (docs/interchange/README.md#an-imported-body-is-checked); the warning
+  // naming it and why is said where the user is looking, not only on the
+  // import's row in the tree. A mesh's is in its own note above.
+  if (const size_t n = state.document->FeatureCount())
+    if (const auto* imp = dynamic_cast<const ImportFeature*>(
+            state.document->GetFeature(n - 1));
+        imp != nullptr && !imp->GetWarning().empty() &&
+        imp->RepresentationChosen() != "mesh") {
+      state.importNote =
+          "Imported with a warning: " + imp->GetWarning() +
+          (state.importNote.empty() ? "" : ". " + state.importNote);
+      state.importNoteWarn = true;
       state.importNoteUntil = -1.0;
     }
   FitCameraToDocument(state);
