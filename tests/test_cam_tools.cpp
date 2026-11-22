@@ -313,6 +313,39 @@ TEST_CASE("cam: an edge break follows the break the model already has",
   CHECK(rv.maxGouge < 0.05);
 }
 
+TEST_CASE("cam: a ball smaller than the modelled round still takes its radius",
+          "[cam]") {
+  // The probe looked only a tool radius in from the wall, so an R11 on the
+  // speaker floor under a 4 mm ball read "2 mm wide and 6.33 mm tall, which
+  // is not a round" and was refused. A ball walks the arc; its size bounds
+  // the cusp, not the round.
+  auto doc = BrokenBlockDoc(8.0, EdgeBlendOp::Fillet); // 40 x 30 x 20
+  cam::Setup setup = BasicSetup();
+  setup.tools = {ShapedTool(cam::ToolType::Ball, 4.0)};
+  const ElementRef wall = SideWall(*doc);
+  REQUIRE(wall.IsSet());
+  const cam::DerivedOp d = cam::DeriveOperation(
+      setup, doc->GetBodies(), cam::OpType::EdgeRound, cam::Target{0, wall});
+  INFO(d.why);
+  REQUIRE(d.ok);
+  CHECK_THAT(d.op.topZ, WithinAbs(20.0, 0.01));
+  CHECK_THAT(d.op.edgeSize, WithinAbs(8.0, 0.02));
+
+  // Cut and checked through the post and the verifier, not by its numbers.
+  cam::Setup job = setup;
+  cam::Operation op = d.op;
+  op.id = 1;
+  job.operations.push_back(op);
+  const std::vector<cam::Toolpath> paths =
+      cam::GenerateAll(job, doc->GetBodies());
+  REQUIRE(paths[0].error.empty());
+  std::string gcode, error;
+  REQUIRE(cam::PostProcess("mach3", job, paths, {}, gcode, &error));
+  const cam::Verdict v = cam::VerifyGcode(gcode, job, doc->GetBodies(), 0.25);
+  INFO("gouge " << v.maxGouge << " at " << v.gougeAt.x << "," << v.gougeAt.y);
+  CHECK(v.maxGouge < 0.05);
+}
+
 TEST_CASE("cam: a ball nose rounds the edge over an arc", "[cam]") {
   auto doc = BlockDoc();
   cam::Setup setup = BasicSetup();
