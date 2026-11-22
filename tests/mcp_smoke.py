@@ -146,9 +146,19 @@ async def run(port):
             expect(lobole.mcp.WORKFLOW.strip()[:60] in text,
                    "the served prompt is WORKFLOW")
             unknown = agent_prose.unknown_names(
-                text, desc, names, agent_prose.VOCABULARY["WORKFLOW"])
+                text, desc, names, agent_prose.VOCABULARY["WORKFLOW"],
+                topics=set(lobole.mcp.DOC_TOPICS) | {"examples"})
             expect(not unknown,
                    f"the served prompt names no such tool or RPC: {unknown}")
+
+            # The documents and examples help() serves, over the transport.
+            checklist = await call("help", method="review-checklist")
+            expect(checklist["text"].startswith("# Design review checklist"),
+                   f"help serves the checklist: {checklist['text'][:60]}")
+            listed = await call("help", method="examples")
+            one = await call("help", example=listed["examples"][0]["name"])
+            expect(one["calls"] and one["expect"],
+                   f"help(example=...) hands one out: {one.keys()}")
 
             # The bracket, parameters-first (the workflow the prompt teaches)
             await call("new_project")

@@ -9,7 +9,8 @@ Core code is `src/core/Measure.{h,cpp}` (measurement, contact, sections,
 comparison, geometry checks) and `src/core/MeshCollide.{h,cpp}` (triangle
 clash tests). A part's mass and the area a plane cuts through it are
 `src/core/PartMeasures.{h,cpp}` (`partmeasure::MassOf`,
-`partmeasure::SectionOf`, `partmeasure::ResolveBodies`), on a
+`partmeasure::SectionOf`, `partmeasure::ResolveBodies`; a part's body
+count and measured box, `partmeasure::BodyCount` and `partmeasure::BoxSize`), on a
 `const Document&`: `mass_properties` on a part and `section` answer with
 them, and a [requirement](../requirements/README.md#measures) and a
 [design sweep](../requirements/README.md#design-sweep)'s point read them,

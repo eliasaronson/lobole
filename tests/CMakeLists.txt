@@ -1684,6 +1684,21 @@ add_test(NAME mcp_formats_gate
                  $<TARGET_FILE:designer>)
 set_tests_properties(mcp_formats_gate PROPERTIES TIMEOUT 120)
 
+# A failed transport says what is safe, and nothing is sent twice: a
+# timeout, a loss mid-call and a stale socket, against a stand-in server
+# that counts what it is sent (docs/scripting/sdk.md#errors). No app.
+# The worked examples help() hands an agent build what they state, before
+# and after their change, and so does the SDK page's first block
+# (docs/scripting/mcp.md#worked-examples). Headless.
+add_test(NAME agent_examples_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/agent_examples_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(agent_examples_smoke PROPERTIES TIMEOUT 180)
+
+add_test(NAME client_transport_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/client_transport_smoke.py)
+set_tests_properties(client_transport_smoke PROPERTIES TIMEOUT 60)
+
 # generators/*.py are parts written as programs (a spur gear first); this
 # runs one against a headless app and checks the part by numbers. It is the
 # standing answer to "do we need scripted features for X" — so it stays on

@@ -414,6 +414,11 @@ body called it.
   `lobole/client.py` raises `NonFiniteError` on it in strict mode
   (`Client(strict=True)`, or `LOBOLE_REMOTE_STRICT=1`, which
   `tests/smoke_app.py` sets, so every smoke is strict) and warns otherwise.
+- **`expect_failed`** on the message of a `batch` or a `check_expect` whose
+  [`expect`](#expect) missed: one sentence per miss, top-level beside
+  `result` as `nonfinite` is (`RemoteServer::Send` lifts it out of the
+  answer). The call has happened; `lobole/client.py` raises
+  `ExpectationFailed` on it.
 - **`receipt`** on every RPC that returns a verdict — the clash sweeps of
   `interference` and `contact_report`, `check_geometry`, `check_fits`,
   `compare_geometry`, `run_motion_study`, `check_fasteners`,
@@ -664,11 +669,18 @@ as one transaction:
   References point backward only; one to a call that failed, or to a key it
   did not return, is refused naming what it did return.
 - **Results.** `{calls, results[{call, method, id?, result}],
-  regenerations, failed?, regen, digest}`, `id` the one the call created, at the top
+  regenerations, failed?, regen, digest, expect?}` (`expect` when the batch
+  stated one, [below](#expect)), `id` the one the call created, at the top
   of its entry as the call alone answers it. Each call's own `regen` and `digest` are stripped: under a
   deferred regeneration they would describe a document that has not been
   rebuilt. Geometry is answered once, by the batch's `regen` and `digest`
-  (against the bodies before its first call).
+  (against the bodies before its first call). In the batch's
+  `regen.warnings`, the rows whose `warning` text is the same are folded
+  into one, `{warning, count, features: [{index, name}], more?}` (the list
+  capped at ten, `more` the rest): fifty cuts that each missed every body
+  are one sentence with `count: 50`, not fifty. A warning only one feature
+  has keeps its row as a single call answers it, and a single call's
+  `regen` and `get_state` list a row per feature as before.
 - **Refused inside a batch:** another `batch`, any `NotInBatch` method,
   UI actions, unknown methods, a key outside a call's row, and — under
   `stop_on_error` — a value a call's [contract](#typed-contracts) refuses,
@@ -729,7 +741,62 @@ call would rebuild everything after it; appends are already incremental.
 a failed call (the project scope and another part's stack included), a rejected key refused before any call runs, `stop_on_error: false`, `$ref` and its
 refusals, a mid-batch query seeing current geometry, an assembly batch, and
 each call above refused before anything runs (the per-call ones on another
-tab, and accepted on the active one).
+tab, and accepted on the active one), and fifty identical warnings folded
+into one row where the same features answered by a single call keep fifty.
+
+### `expect`
+
+A batch can state what it should produce, and be told in its own answer
+when it did not: `batch {calls, expect: {volume_mm3?, mass_g?, body_count?,
+bbox_mm?, tolerance_pct?, part?}}`. `expect_revision` guards what a batch
+starts from; `expect` guards what it produced, so the caller does not
+compare the digest's numbers in a second step it can skip.
+
+- `bbox_mm` is `[x, y, z]`, the size of the part's measured box (the tight
+  box the digest reports per body, over every body that is not a
+  reference); `body_count` is exact and does not count reference bodies.
+  `tolerance_pct` applies to every number of the three others and is
+  required whenever one is given: how close the caller's own arithmetic is
+  is the caller's to state. `part` names another part than the active one,
+  as the reads do ([reads name their part](#reads-name-their-part)); an
+  assembly tab is judged on `volume_mm3` and `mass_g`, and refuses the
+  other two.
+- It is read and checked before the first call, with the rest of the
+  batch's parameters: an unknown key (naming the accepted ones), a negative
+  number, a `bbox_mm` that is not three numbers, a count that is not whole,
+  a missing `tolerance_pct`, a part key on an assembly tab, any of it on a
+  drawing or a job are refused with the document unchanged
+  (`remote::ReadExpectations`).
+- It is judged after the batch's last regeneration by the requirement code
+  and nothing else (`remote::JudgeExpectations`): one transient requirement
+  per number (`volume`, `mass`, [`body_count` and
+  `bbox`](../requirements/README.md#measures) per axis) with a `within`
+  bound from the tolerance, measured by the kind's own function and judged
+  by `Judge`, as a stored requirement is. Nothing is stored and no evidence
+  is written, and a requirement stating the same number agrees by
+  construction. The measure reads the part where it is: it never switches
+  the tab.
+- The answer gains `expect: {ok, checks: [{quantity, expected, measured,
+  unit, deviation_pct, pass, error?}]}` (`quantity` `volume_mm3`, `mass_g`,
+  `body_count` or `bbox_mm.x|y|z`). A miss leaves the batch applied, as one
+  undo step, because the model is the evidence the caller needs to see why;
+  the message carries `expect_failed` ([what a response
+  carries](#what-a-response-carries)), one sentence per miss: "volume_mm3:
+  measured 59680, expected 59824.9 (-0.24 %, tolerance 0.1 %)". A number
+  that could not be measured (no material, so no mass) is a miss with its
+  reason.
+
+`check_expect {…the same keys}` judges the active part (or assembly) as it
+stands, without a batch. The python client raises `ExpectationFailed` (a
+`LoboleError` that is not a `Refused`, carrying `.result`, `.checks` and
+`.misses`) on either, so the MCP server's tool error is those sentences and
+"the batch was applied; undo takes it back". `execute_script` takes
+`expect` and judges it with `check_expect` after a script that exits 0;
+the SDK's `Batch` (`App.transaction(expect=)`, `Part.batch(expect=)`, which
+names its part) takes it too. `batch_smoke` holds a hit, a miss of each
+kind with the bodies kept and one undo removing them, the malformed ones
+refused before any call runs, and `check_expect` reading the number a
+`volume` requirement reads.
 
 ## Typed contracts
 

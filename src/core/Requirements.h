@@ -64,6 +64,8 @@ inline constexpr const char* kMeasureKinds[] = {
     "cam_verify",        // cam_verify: ok and complete
     "expression",        // a formula over the variables, in its scope
     "follower",          // check_followers: liftoff, pressure angle, gap
+    "body_count",        // a part's bodies (not reference ones): a count
+    "bbox",              // a part's measured box along one axis, mm
 };
 inline constexpr const char* kBoundKinds[] = {"at_most", "at_least", "within",
                                               "pass"};

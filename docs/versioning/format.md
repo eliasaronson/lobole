@@ -370,6 +370,7 @@ into the history above, numbered, when the branch lands
 
 | v | Change |
 |---|--------|
+| vNEXT | A requirement's measure kinds `body_count` {`document`: a part}, its bodies with reference ones not counted, and `bbox` {`document`: a part, `axis`: `x`\|`y`\|`z`}, mm, the size of its measured box along that axis ([measures](../requirements/README.md#measures)). A build that knows neither refuses the file; an `axis` other than the three is refused. Golden `vNEXT-expect-kinds` |
 
 ## Paths in a project
 

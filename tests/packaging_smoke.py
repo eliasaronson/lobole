@@ -91,6 +91,9 @@ def main():
             shutil.copy(ROOT / name, src)
         shutil.copytree(ROOT / "python", src / "python",
                         ignore=shutil.ignore_patterns("__pycache__"))
+        # The documents help() serves ship as package data from docs/.
+        shutil.copytree(ROOT / "docs", src / "docs",
+                        ignore=shutil.ignore_patterns("*.jpg", "*.png"))
         dist = tmp / "dist"
 
         def build(kind, cwd):
@@ -127,6 +130,17 @@ def main():
         for mod in modules:
             if f"lobole/{mod}.py" not in names:
                 failures.append(f"lobole/{mod}.py is not in the wheel")
+        # Every document help() serves is in the wheel, and no plan is.
+        served = sorted(
+            "lobole/_docs/" + p.relative_to(ROOT / "docs").as_posix()
+            for p in (ROOT / "docs").rglob("*.md")
+            if p.relative_to(ROOT / "docs").parts[0] != "plans")
+        missing = [n for n in served if n not in names]
+        if missing:
+            failures.append(f"documents help() serves are not in the wheel: "
+                            f"{missing[:5]}")
+        if any(n.startswith("lobole/_docs/plans/") for n in names):
+            failures.append("a plan shipped in the wheel")
         if "lobole/py.typed" not in names:
             failures.append("lobole/py.typed is not in the wheel: a type "
                             "checker would ignore the installed package")
@@ -151,6 +165,19 @@ def main():
                     f"import lobole.{mod} as m; print(m.__file__)").stdout:
                 failures.append(f"lobole.{mod} imported from outside the "
                                 "wheel; the check proves nothing")
+
+        # help() reads the documents from the wheel, not the checkout.
+        r = run("import lobole.mcp as m; t = m.document_section("
+                "'review-checklist'); print(m._docs_root()); "
+                "print(bool(t) and t.startswith('# '))")
+        if r.returncode == 0:
+            root, _, ok = r.stdout.strip().partition("\n")
+            if "/lobole-wheel-" not in root or ok != "True":
+                failures.append("help('review-checklist') does not read the "
+                                f"wheel's document: {r.stdout.strip()}")
+        elif "No module named 'mcp'" not in r.stderr:
+            failures.append(f"help()'s documents fail from the wheel:\n"
+                            f"{r.stderr.strip()}")
 
         info = next(site.glob("*.dist-info"))
         eps = configparser.ConfigParser()

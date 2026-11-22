@@ -38,12 +38,13 @@ COLUMNS: dict[str, str] = {
     'autosave_now': '',
     'autosave_status': '',
     'background_jobs': '',
-    'batch': 'calls:object[], stop_on_error?:bool, expect_revision?:revision',
+    'batch': 'calls:object[], stop_on_error?:bool, expect_revision?:revision, expect?:object',
     'bom': '',
     'branch_list': '',
     'build_feature': 'feature_id:int>=0',
     'cancel_pending': '',
     'check_assembly_sequence': '',
+    'check_expect': 'volume_mm3?:number>=0, mass_g?:number>=0, body_count?:int>=0, bbox_mm?:number[3], tolerance_pct?:number>=0, part?:string|int',
     'check_fasteners': '',
     'check_fits': '',
     'check_followers': 'study:int>=0, relations?:int[], speed_rpm?:number>0, max_pressure_angle_deg?:number>0',
@@ -199,9 +200,18 @@ class BatchParams(TypedDict):
     calls: Sequence[Mapping[str, Any]]
     stop_on_error: NotRequired[bool]
     expect_revision: NotRequired[Revision]
+    expect: NotRequired[Mapping[str, Any]]
 
 class BuildFeatureParams(TypedDict):
     feature_id: int
+
+class CheckExpectParams(TypedDict):
+    volume_mm3: NotRequired[float]
+    mass_g: NotRequired[float]
+    body_count: NotRequired[int]
+    bbox_mm: NotRequired[Sequence[float]]
+    tolerance_pct: NotRequired[float]
+    part: NotRequired[str | int]
 
 class CheckFollowersParams(TypedDict):
     study: int
@@ -1436,6 +1446,7 @@ RESULT_SCHEMAS: dict[str, dict[str, Any]] = {
     'build_feature': {'type': 'object', 'properties': {'digest': {'type': 'object'}, 'regen': {'type': 'object'}, 'links_updated': {'type': 'array', 'items': {'type': 'object', 'properties': {'part': {'type': 'string'}, 'part_id': {'type': 'integer'}, 'features': {'type': 'array', 'items': {'type': 'integer'}}, 'broken': {'type': 'array', 'items': {'type': 'object'}}}, 'required': ['part', 'part_id', 'features', 'broken'], 'additionalProperties': False}}}, 'required': ['digest', 'regen'], 'additionalProperties': False},
     'check_assembly_sequence': {'type': 'object', 'properties': {'pass': {'type': 'boolean'}, 'allowance_mm': {'type': 'number'}, 'steps': {'type': 'array', 'items': {'type': 'object'}}, 'missing': {'type': 'array', 'items': {'type': 'string'}}, 'seconds': {'type': 'number'}, 'sections': {'type': 'object'}, 'reused': {'type': 'boolean'}, 'links_updated': {'type': 'array', 'items': {'type': 'object', 'properties': {'part': {'type': 'string'}, 'part_id': {'type': 'integer'}, 'features': {'type': 'array', 'items': {'type': 'integer'}}, 'broken': {'type': 'array', 'items': {'type': 'object'}}}, 'required': ['part', 'part_id', 'features', 'broken'], 'additionalProperties': False}}}, 'required': ['pass', 'allowance_mm', 'steps', 'missing', 'seconds', 'sections'], 'additionalProperties': False},
     'check_drawing': {'type': 'object', 'properties': {'dims': {'type': 'integer'}, 'issues': {'type': 'array', 'items': {'type': 'object', 'properties': {'detail': {'type': 'string'}, 'kind': {'type': 'string'}, 'view': {'type': 'integer'}, 'other_view': {'type': 'integer'}, 'dim': {'type': 'integer'}, 'note': {'type': 'integer'}}, 'required': ['detail', 'kind'], 'additionalProperties': False}}, 'ok': {'type': 'boolean'}, 'receipt': {'type': 'object', 'properties': {'claims': {'type': 'array', 'items': {'type': 'object'}}, 'schema': {'type': 'string'}, 'standing': {'type': 'string'}, 'summary': {'type': 'string'}}, 'required': ['claims', 'schema', 'standing', 'summary'], 'additionalProperties': False}, 'views': {'type': 'integer'}, 'links_updated': {'type': 'array', 'items': {'type': 'object', 'properties': {'part': {'type': 'string'}, 'part_id': {'type': 'integer'}, 'features': {'type': 'array', 'items': {'type': 'integer'}}, 'broken': {'type': 'array', 'items': {'type': 'object'}}}, 'required': ['part', 'part_id', 'features', 'broken'], 'additionalProperties': False}}}, 'required': ['dims', 'issues', 'ok', 'receipt', 'views'], 'additionalProperties': False},
+    'check_expect': {'type': 'object', 'properties': {'ok': {'type': 'boolean'}, 'checks': {'type': 'array', 'items': {'type': 'object', 'properties': {'quantity': {'type': 'string'}, 'expected': {'type': 'number'}, 'measured': {'anyOf': [{'type': 'number'}, {'type': 'null'}]}, 'unit': {'type': 'string'}, 'deviation_pct': {'type': 'number'}, 'pass': {'type': 'boolean'}, 'error': {'type': 'string'}}, 'required': ['quantity', 'expected', 'measured', 'pass'], 'additionalProperties': False}}, 'links_updated': {'type': 'array', 'items': {'type': 'object', 'properties': {'part': {'type': 'string'}, 'part_id': {'type': 'integer'}, 'features': {'type': 'array', 'items': {'type': 'integer'}}, 'broken': {'type': 'array', 'items': {'type': 'object'}}}, 'required': ['part', 'part_id', 'features', 'broken'], 'additionalProperties': False}}}, 'required': ['ok', 'checks'], 'additionalProperties': False},
     'check_fasteners': {'type': 'object', 'properties': {'examined': {'type': 'integer'}, 'findings': {'type': 'array', 'items': {'type': 'object', 'properties': {'occurrence': {'type': 'integer'}, 'part': {'type': 'string'}, 'why': {'type': 'string'}}, 'required': ['occurrence', 'part', 'why'], 'additionalProperties': False}}, 'ok': {'type': 'boolean'}, 'receipt': {'type': 'object', 'properties': {'claims': {'type': 'array', 'items': {'type': 'object'}}, 'schema': {'type': 'string'}, 'standing': {'type': 'string'}, 'summary': {'type': 'string'}}, 'required': ['claims', 'schema', 'standing', 'summary'], 'additionalProperties': False}, 'skipped': {'type': 'integer'}, 'links_updated': {'type': 'array', 'items': {'type': 'object', 'properties': {'part': {'type': 'string'}, 'part_id': {'type': 'integer'}, 'features': {'type': 'array', 'items': {'type': 'integer'}}, 'broken': {'type': 'array', 'items': {'type': 'object'}}}, 'required': ['part', 'part_id', 'features', 'broken'], 'additionalProperties': False}}}, 'required': ['examined', 'findings', 'ok', 'receipt', 'skipped'], 'additionalProperties': False},
     'check_fit': {'type': 'object', 'properties': {'hole': {'type': 'object', 'properties': {'class': {'type': 'string'}, 'it': {'type': 'number'}, 'it_grade': {'type': 'integer'}, 'lower': {'type': 'number'}, 'max': {'type': 'number'}, 'min': {'type': 'number'}, 'upper': {'type': 'number'}}, 'required': ['class', 'it', 'it_grade', 'lower', 'max', 'min', 'upper'], 'additionalProperties': False}, 'print': {'type': 'object', 'properties': {'hole': {'type': 'object'}, 'shaft': {'type': 'object'}}, 'required': [], 'additionalProperties': False}, 'print_notes': {'type': 'array', 'items': {'type': 'string'}}, 'size': {'type': 'number'}, 'size_from': {'type': 'string'}, 'measured': {'type': 'object', 'properties': {'hole': {'type': 'number'}, 'shaft': {'type': 'number'}}, 'required': [], 'additionalProperties': False}, 'intent': {'type': 'string'}, 'intent_ok': {'type': 'boolean'}, 'kind': {'type': 'string'}, 'max_clearance': {'type': 'number'}, 'min_clearance': {'type': 'number'}, 'note': {'type': 'string'}, 'shaft': {'type': 'object', 'properties': {'class': {'type': 'string'}, 'it': {'type': 'number'}, 'it_grade': {'type': 'integer'}, 'lower': {'type': 'number'}, 'max': {'type': 'number'}, 'min': {'type': 'number'}, 'upper': {'type': 'number'}}, 'required': ['class', 'it', 'it_grade', 'lower', 'max', 'min', 'upper'], 'additionalProperties': False}, 'links_updated': {'type': 'array', 'items': {'type': 'object', 'properties': {'part': {'type': 'string'}, 'part_id': {'type': 'integer'}, 'features': {'type': 'array', 'items': {'type': 'integer'}}, 'broken': {'type': 'array', 'items': {'type': 'object'}}}, 'required': ['part', 'part_id', 'features', 'broken'], 'additionalProperties': False}}}, 'required': ['hole', 'size', 'size_from'], 'additionalProperties': False},
     'check_fits': {'type': 'object', 'properties': {'failed': {'type': 'integer'}, 'fits': {'type': 'array', 'items': {'type': 'object', 'properties': {'hole': {'type': 'object'}, 'kind': {'type': 'string'}, 'mate': {'type': 'integer'}, 'mate_name': {'type': 'string'}, 'mate_type': {'type': 'string'}, 'max_clearance': {'type': 'number'}, 'min_clearance': {'type': 'number'}, 'note': {'type': 'string'}, 'shaft': {'type': 'object'}, 'size': {'type': 'number'}, 'status': {'type': 'string'}, 'reason': {'type': 'string'}}, 'required': ['mate', 'mate_name', 'mate_type', 'status'], 'additionalProperties': False}}, 'passed': {'type': 'integer'}, 'receipt': {'type': 'object', 'properties': {'claims': {'type': 'array', 'items': {'type': 'object'}}, 'schema': {'type': 'string'}, 'standing': {'type': 'string'}, 'summary': {'type': 'string'}}, 'required': ['claims', 'schema', 'standing', 'summary'], 'additionalProperties': False}, 'reported': {'type': 'integer'}, 'status': {'type': 'string'}, 'unverified': {'type': 'integer'}, 'warned': {'type': 'integer'}, 'links_updated': {'type': 'array', 'items': {'type': 'object', 'properties': {'part': {'type': 'string'}, 'part_id': {'type': 'integer'}, 'features': {'type': 'array', 'items': {'type': 'integer'}}, 'broken': {'type': 'array', 'items': {'type': 'object'}}}, 'required': ['part', 'part_id', 'features', 'broken'], 'additionalProperties': False}}}, 'required': ['failed', 'fits', 'passed', 'receipt', 'reported', 'status', 'unverified', 'warned'], 'additionalProperties': False},
@@ -1618,6 +1629,21 @@ CheckDrawingResult = TypedDict('CheckDrawingResult', {
     'ok': bool,
     'receipt': CheckDrawingResultReceipt,
     'views': int,
+})
+
+CheckExpectResultChecks = TypedDict('CheckExpectResultChecks', {
+    'quantity': str,
+    'expected': float,
+    'measured': float | None,
+    'unit': NotRequired[str],
+    'deviation_pct': NotRequired[float],
+    'pass': bool,
+    'error': NotRequired[str],
+})
+
+CheckExpectResult = TypedDict('CheckExpectResult', {
+    'ok': bool,
+    'checks': list[CheckExpectResultChecks],
 })
 
 CheckFastenersResultFindings = TypedDict('CheckFastenersResultFindings', {
@@ -4119,6 +4145,9 @@ class RpcSurface:
         raise NotImplementedError
 
     def check_drawing(self, _timeout: float | None = None, **params: Any) -> CheckDrawingResult:
+        raise NotImplementedError
+
+    def check_expect(self, _timeout: float | None = None, **params: Unpack[CheckExpectParams]) -> CheckExpectResult:
         raise NotImplementedError
 
     def check_fasteners(self, _timeout: float | None = None) -> CheckFastenersResult:

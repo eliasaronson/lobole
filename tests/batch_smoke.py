@@ -19,6 +19,7 @@ import tempfile
 import time
 
 from lobole.client import Client  # noqa: E402
+from lobole.errors import ExpectationFailed, Refused  # noqa: E402
 from smoke_app import launch_app  # noqa: E402
 from smoke_shapes import box  # noqa: E402
 
@@ -55,6 +56,127 @@ def boss_calls(n, r=2.0):
             "type": "Extrude", "name": f"Boss{i}", "sketch_id": None,
             "distance": 3.0, "mode": "add"}}})
     return out
+
+
+def expectations(d):
+    """A batch states what it should produce (docs/scripting/rpc.md#expect):
+    a hit answers expect.ok; each kind of miss raises ExpectationFailed
+    naming the measured and the expected number, with the bodies there and
+    one undo taking them back; a malformed expect is refused before any
+    call runs; and check_expect reads what a volume requirement reads."""
+    d.call("add_part", name="expects")
+    part = next(p for p in d.call("list_parts")["parts"]
+                if p["name"] == "expects")["id"]
+
+    def slab(name, height=5.0):
+        return [{"method": "add_feature", "params": {"feature": {
+            "type": "Box", "name": name, "on": "Top", "centered": False,
+            "width": 20, "depth": 10, "height": height,
+            "material": "steel"}}}]
+
+    def features():
+        return len(d.call("get_state")["features"])
+
+    r = d.call("batch", calls=slab("Hit"), expect={
+        "volume_mm3": 1000, "body_count": 1, "bbox_mm": [20, 10, 5],
+        "mass_g": 7.85, "tolerance_pct": 0.5})
+    expect(r["expect"]["ok"] and len(r["expect"]["checks"]) == 6
+           and all(c["pass"] for c in r["expect"]["checks"]),
+           f"a batch that builds what it says answers expect.ok: {r['expect']}")
+    d.call("undo")
+
+    misses = [
+        ({"volume_mm3": 1100, "tolerance_pct": 1}, "volume_mm3",
+         ["measured 1000", "expected 1100", "tolerance 1 %"]),
+        ({"body_count": 2}, "body_count", ["measured 1", "expected 2"]),
+        ({"bbox_mm": [20, 10, 6], "tolerance_pct": 1}, "bbox_mm.z",
+         ["measured 5", "expected 6"]),
+        ({"mass_g": 9, "tolerance_pct": 1}, "mass_g",
+         ["measured 7.85", "expected 9"]),
+    ]
+    for spec, quantity, needles in misses:
+        before = features()
+        try:
+            d.call("batch", calls=slab("Miss"), expect=spec)
+            raise AssertionError(f"a miss of {quantity} answered quietly")
+        except ExpectationFailed as e:
+            for needle in needles:
+                expect(needle in str(e) and quantity in str(e),
+                       f"the miss names '{needle}': {e}")
+            expect("undo takes it back" in str(e), str(e))
+            expect([c["quantity"] for c in e.checks if not c["pass"]]
+                   == [quantity], f"the checks say which: {e.checks}")
+            expect(not isinstance(e, Refused), "a miss is not a refusal")
+        expect(features() > before, "the missed batch stays applied")
+        d.call("undo")
+        expect(features() == before, "and one undo takes it back")
+
+    before = features()
+    for spec, needle in [
+            ({"volume_mm3": 1000, "tolerance_pct": 1, "colour": "red"},
+             "colour"),
+            ({"volume_mm3": -1, "tolerance_pct": 1}, "volume_mm3"),
+            ({"bbox_mm": [20, 10], "tolerance_pct": 1}, "bbox_mm"),
+            ({"volume_mm3": 1000}, "tolerance_pct"),
+            ({"body_count": 1.5}, "body_count")]:
+        refused(d, "batch", [needle, "unchanged"], calls=slab("Never"),
+                expect=spec)
+        expect(features() == before,
+               f"a malformed expect ran nothing: {spec}")
+
+    # check_expect and a volume requirement read the same number.
+    d.call("add_feature", feature={
+        "type": "Box", "name": "Odd", "on": "Top", "centered": False,
+        "width": 13.7, "depth": 9.1, "height": 4.3})
+    rid = d.call("add_requirement", name="its volume", measure={
+        "kind": "volume", "document": part},
+        bound={"kind": "at_least", "value": 0})["id"]
+    checked = d.call("check_requirements", ids=[rid])["requirements"][0]
+    judged = d.call("check_expect", volume_mm3=checked["value"],
+                    tolerance_pct=0)
+    expect(judged["ok"] and judged["checks"][0]["measured"]
+           == checked["value"],
+           f"check_expect and the requirement agree: {judged}, {checked}")
+    d.call("remove_requirement", id=rid)
+    try:
+        d.call("check_expect", body_count=3)
+        raise AssertionError("check_expect missed quietly")
+    except ExpectationFailed as e:
+        expect("body_count: measured 1, expected 3" in str(e), str(e))
+
+
+def folded_warnings(d):
+    """Fifty cuts that each miss the block warn the same sentence: a batch
+    answers it once, with the count and the first ten features; a single
+    call's regen still lists a row per feature
+    (docs/scripting/rpc.md#batch)."""
+    d.call("add_part", name="misses")
+    box(d, (0, 0, 0), (10, 10, 10), "Block")
+    calls = []
+    for i in range(50):
+        calls.append({"method": "add_feature", "params": {"feature": {
+            "type": "Sketch", "name": f"Far{i}", "plane": plane(),
+            "entities": [{"type": "circle", "center": [200.0 + 6 * i, 0],
+                          "radius": 1.0}]}}})
+        calls.append({"method": "add_feature", "params": {"feature": {
+            "type": "Extrude", "name": f"Miss{i}",
+            "sketch_id": {"$ref": len(calls)}, "distance": 5.0,
+            "mode": "cut"}}})
+    regen = d.call("batch", calls=calls)["regen"]
+    rows = [w for w in regen["warnings"] if "removed no material"
+            in w["warning"]]
+    expect(len(rows) == 1 and rows[0]["count"] == 50
+           and len(rows[0]["features"]) == 10 and rows[0]["more"] == 40
+           and rows[0]["features"][0]["name"] == "Miss0"
+           and "index" in rows[0]["features"][0],
+           f"fifty identical warnings fold into one row: {rows}")
+    # The same fifty features, answered by one call alone: a row each.
+    single = d.call("set_variable", name="fold_probe", expression="1",
+                    scope="part")["regen"]
+    rows = [w for w in single["warnings"] if "removed no material"
+            in w["warning"]]
+    expect(len(rows) == 50 and all("count" not in w for w in rows),
+           f"a single call's regen keeps a row per feature: {len(rows)}")
 
 
 def never_in_a_batch(d):
@@ -522,6 +644,8 @@ def main():
                "the assembly is as it was before the batch")
 
         never_in_a_batch(d)
+        folded_warnings(d)
+        expectations(d)
         print("batch_smoke: ok")
     finally:
         app.terminate()

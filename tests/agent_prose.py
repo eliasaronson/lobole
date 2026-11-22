@@ -169,12 +169,14 @@ def _top_level_keys(body):
 
 
 def unknown_names(text, desc, tools, vocabulary=None, known=None,
-                  literals=None):
+                  literals=None, topics=()):
     """The call-shaped names in `text` that nothing registers, sorted.
 
     `tools` are the MCP tools' names; `vocabulary` the words allowed for
     this text beyond them (VOCABULARY's entry, which says why); `literals`,
-    where given, the source's quoted words, which count as existing too.
+    where given, the source's quoted words, which count as existing too;
+    `topics` what help('x') answers besides a method (a document, the
+    examples).
     A path or a file name is not a name and is skipped (docs_paths checks
     paths)."""
     rows = {m["name"]: m for m in desc["methods"]}
@@ -196,7 +198,7 @@ def unknown_names(text, desc, tools, vocabulary=None, known=None,
     # rpc('x') and help('x') are calls whatever else x may be: x must be a
     # method or a tool.
     unknown |= {c for c in _CALLED.findall(stripped)
-                if c not in rows and c not in tools}
+                if c not in rows and c not in tools and c not in topics}
     # rpc('m', {a, b}) names m's keys: each must be one m takes.
     for m in _CALL_KEYS.finditer(stripped):
         row = rows.get(m.group(1))
@@ -227,17 +229,40 @@ def agent_texts(m, desc, tools):
         out["reference:" + name] = entry["doc"]
     for row in desc["methods"]:
         out["row:" + row["name"]] = row["doc"]
+    for path in getattr(m, "AGENT_DOCS", ()):
+        out["doc:" + path] = m.document_section(path) or ""
     return out
 
 
-def scan(texts, desc, tools, literals):
+def unserved_paths(name, text, m):
+    """The docs/... citations in `text` that help() does not serve, or whose
+    #anchor names no heading there. A served document's relative links
+    (`../variables/README.md#x`) are its citations too."""
+    import posixpath
+    cited = docs_paths(text)
+    if name.startswith("doc:"):
+        base = posixpath.dirname(name[len("doc:"):])
+        for link in re.findall(r"\]\(([^)\s]+)\)", text):
+            if "://" in link or link.startswith("#"):
+                continue
+            cited.append(posixpath.normpath(posixpath.join(base, link)))
+    bad = []
+    for c in cited:
+        path, _, anchor = c.partition("#")
+        if m.document_section(path, anchor) is None:
+            bad.append(c)
+    return sorted(set(bad))
+
+
+def scan(texts, desc, tools, literals, topics=()):
     """{text name: [unknown names]} for every text with any."""
     known = known_names(desc)
     found = {}
     for name, text in texts.items():
         u = unknown_names(text, desc, tools, VOCABULARY.get(name),
                           known=known,
-                          literals=None if name in STRICT else literals)
+                          literals=None if name in STRICT else literals,
+                          topics=topics)
         if u:
             found[name] = u
     return found

@@ -65,6 +65,8 @@ const std::vector<KindSpec>& Specs() {
       {"assembly_sequence", false, "assembly", {"document"}, {"document"}},
       {"mass", true, "part|assembly", {"document"}, {"document"}},
       {"volume", true, "part|assembly", {"document"}, {"document"}},
+      {"body_count", true, "part", {"document"}, {"document"}},
+      {"bbox", true, "part", {"document", "axis"}, {"document", "axis"}},
       {"fit_class",
        false,
        "assembly",
@@ -243,6 +245,8 @@ void ValidateValues(const std::string& kind, const json& m) {
     throw std::runtime_error(kind + ": unknown " + key + " '" + v +
                              "' (accepted: " + list + ")");
   };
+  if (kind == "bbox")
+    oneOf("axis", {"x", "y", "z"});
   if (kind == "study_probe") {
     oneOf("quantity", {"translation", "rotation", "displacement_at",
                        "von_mises_max", "von_mises_mean"});

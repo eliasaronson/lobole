@@ -113,7 +113,11 @@ const MethodDoc RequirementMethods[] = {
      "sequence goes home against everything placed before it, and no "
      "occurrence is missed; check_assembly_sequence), "
      "mass / volume {document: part "
-     "or assembly}, fit_class {document, mate, class: clearance|transition|"
+     "or assembly}, body_count {document: part} (its bodies, reference "
+     "ones not counted), bbox {document: part, axis: x|y|z} (mm: the size "
+     "of its measured box along that axis, the digest's bbox_min..bbox_max "
+     "over every body that is not a reference), fit_class {document, mate, "
+     "class: clearance|transition|"
      "interference}, check_fits {document, allow_unverified?}, check_seat "
      "{document, occurrences: [bearing ids], allow_unverified?}, "
      "bearing_bore {document: assembly, occurrences: [bearing ids]} (mm, "
@@ -174,6 +178,24 @@ const MethodDoc RequirementMethods[] = {
      "limit_min?:number, unit?:string, value?:number}"},
     {"remove_requirement", "Remove a requirement {id}.", "id", NotInBatch,
      "removed:int"},
+    {"check_expect",
+     "Judge the part (or the assembly) as it stands against numbers you "
+     "state, without storing anything (docs/scripting/rpc.md#expect): "
+     "{volume_mm3?, mass_g?, body_count?, bbox_mm?: [x, y, z] the size of "
+     "its measured box, tolerance_pct (required beside volume_mm3, mass_g "
+     "or bbox_mm; body_count is exact), part?: another part than the "
+     "active one}. An assembly tab takes volume_mm3 and mass_g. Each "
+     "number is a transient requirement measured and judged as a stored "
+     "one is (volume, mass, body_count, bbox). A miss answers `ok: false` "
+     "and the message carries `expect_failed`, one sentence per miss, "
+     "which the python client raises as ExpectationFailed. batch takes the "
+     "same object as `expect`, judged after its last regeneration.",
+     "volume_mm3?:number>=0, mass_g?:number>=0, body_count?:int>=0, "
+     "bbox_mm?:number[3], tolerance_pct?:number>=0, part?:string|int",
+     NoFlags,
+     "ok:bool, checks:{quantity:string, expected:number, "
+     "measured:number|null, unit?:string, deviation_pct?:number, "
+     "pass:bool, error?:string}[]"},
     {"list_requirements",
      "Every requirement and where it stands, WITHOUT measuring: state pass | "
      "fail (evidence for the current model and revision) | stale (the model "
@@ -245,7 +267,8 @@ const MethodDoc RequirementMethods[] = {
      "regen ok|broken with the broken features {feature_id, name, error}, "
      "each sketch that does not solve or whose dof moved {feature_id, ok, "
      "dof, conflicting}, volume_mm3 and mass_g; and every expression, mass, "
-     "volume and section_area requirement of a rebuilt part, measured as "
+     "volume, section_area, body_count and bbox requirement of a rebuilt "
+     "part, measured as "
      "the check measures it. A study_result (max_displacement, "
      "max_von_mises, factor_of_safety) or study_probe (one face's "
      "translation, rotation, von_mises_max, von_mises_mean) requirement on "
@@ -1861,6 +1884,39 @@ Taken MeasureMass(ui::AppState& state, const json& m, bool mass) {
   return t;
 }
 
+// A part's own document, read where it is, without visiting its tab: what
+// body_count and bbox measure (and a batch's `expect`, which must not move
+// the caller's tab).
+const Document& PartToMeasure(ui::AppState& state, const json& m) {
+  const auto slot = ui::SlotIndexById(state, m.at("document").get<uint64_t>());
+  const Document* doc = slot && state.parts[*slot].kind == ui::DocKind::Part
+                            ? ui::SlotDoc(state, *slot)
+                            : nullptr;
+  if (doc == nullptr)
+    throw std::runtime_error("document " + m.at("document").dump() +
+                             " is not a loaded part");
+  return *doc;
+}
+
+// body_count: the part's bodies, reference ones not counted.
+Taken MeasureBodyCount(ui::AppState& state, const json& m) {
+  Taken t;
+  t.value =
+      static_cast<double>(partmeasure::BodyCount(PartToMeasure(state, m)));
+  t.unit = "bodies";
+  return t;
+}
+
+// bbox: the part's measured box along one axis, as the digest's.
+Taken MeasureBox(ui::AppState& state, const json& m) {
+  Taken t;
+  const glm::dvec3 size = partmeasure::BoxSize(PartToMeasure(state, m));
+  const std::string axis = m.at("axis").get<std::string>();
+  t.value = axis == "x" ? size.x : axis == "y" ? size.y : size.z;
+  t.unit = "mm";
+  return t;
+}
+
 Taken MeasureCheckFits(ui::AppState& state, const json& m) {
   Taken t;
   const json r = Call(state, "check_fits", json::object());
@@ -2358,6 +2414,10 @@ Taken MeasureOn(ui::AppState& state, const req::Requirement& r,
     return MeasureSequence(state, ctx);
   if (kind == "mass" || kind == "volume")
     return MeasureMass(state, m, kind == "mass");
+  if (kind == "body_count")
+    return MeasureBodyCount(state, m);
+  if (kind == "bbox")
+    return MeasureBox(state, m);
   if (kind == "fit_class")
     return MeasureFitClass(state, m);
   if (kind == "check_fits")
@@ -3457,7 +3517,8 @@ SweepPlan PlanSweep(ui::AppState& state, const RpcParams& p) {
       if (r.measure.contains("document") && !rebuilt.contains(r.Document()))
         why = "its part is not rebuilt, so none of the swept variables "
               "reaches it";
-    } else if (kind == "mass" || kind == "volume" || kind == "section_area") {
+    } else if (kind == "mass" || kind == "volume" || kind == "section_area" ||
+               kind == "body_count" || kind == "bbox") {
       const auto slot = ui::SlotIndexById(state, r.Document());
       if (slot && state.parts[*slot].kind == ui::DocKind::Assembly)
         why = "an assembly reads every part it places; the sweep rebuilds "
@@ -3856,6 +3917,230 @@ uint64_t PanelCheck(ui::AppState& state, bool recompute) {
 
 } // namespace
 
+// ---- `expect` (docs/scripting/rpc.md#expect) -------------------------------
+//
+// What a build says it should produce, judged by the requirement code: one
+// transient requirement per number, measured by the kind's own function and
+// judged by Judge, as a stored one is. Nothing is stored and no evidence is
+// written, so a requirement stating the same number and this agree by
+// construction.
+
+namespace {
+
+constexpr const char* kExpectKeys[] = {
+    "volume_mm3", "mass_g", "body_count", "bbox_mm", "tolerance_pct", "part"};
+
+ContractError ExpectRefusal(const std::string& method, const std::string& key,
+                            const json& expected, const json& observed,
+                            const std::string& why) {
+  return ContractError(method, "invalid_argument", "/params/expect/" + key,
+                       expected, observed,
+                       method + ": expect." + key + " " + why +
+                           ". Nothing was run, and the document is unchanged.");
+}
+
+// The slot id of a part's live document.
+uint64_t SlotIdOf(ui::AppState& state, const Document* doc) {
+  for (size_t i = 0; i < state.parts.size(); i++)
+    if (ui::SlotDoc(state, i) == doc)
+      return state.parts[i].id;
+  return 0;
+}
+
+std::string Number(double v) { return std::format("{:.6g}", v); }
+
+} // namespace
+
+Expectations ReadExpectations(ui::AppState& state, const json& spec,
+                              const std::string& method) {
+  if (!spec.is_object())
+    throw ContractError(method, "invalid_argument", "/params/expect",
+                        "an object", spec,
+                        method + ": expect is {volume_mm3?, mass_g?, "
+                                 "body_count?, bbox_mm?, tolerance_pct?, "
+                                 "part?}");
+  std::vector<std::string> accepted(std::begin(kExpectKeys),
+                                    std::end(kExpectKeys));
+  for (auto it = spec.begin(); it != spec.end(); ++it)
+    if (std::find(accepted.begin(), accepted.end(), it.key()) ==
+        accepted.end()) {
+      ContractError e(method, "unknown_argument", "/params/expect/" + it.key(),
+                      accepted, it.key(),
+                      method + ": expect has no key '" + it.key() +
+                          "' (accepted: " + KnownList(accepted) +
+                          "). Nothing was run, and the document is "
+                          "unchanged.");
+      e.diagnostic["accepted"] = accepted;
+      throw e;
+    }
+  const auto nonNegative = [&](const char* key) {
+    if (spec.contains(key) &&
+        !(spec.at(key).is_number() && spec.at(key).get<double>() >= 0.0))
+      throw ExpectRefusal(method, key, "a number >= 0", spec.at(key),
+                          "is a number, at least 0");
+  };
+  nonNegative("volume_mm3");
+  nonNegative("mass_g");
+  if (spec.contains("body_count") &&
+      !(spec.at("body_count").is_number_integer() &&
+        spec.at("body_count").get<int64_t>() >= 0))
+    throw ExpectRefusal(method, "body_count", "an integer >= 0",
+                        spec.at("body_count"), "is a count, a whole number");
+  if (spec.contains("bbox_mm")) {
+    const json& b = spec.at("bbox_mm");
+    bool ok = b.is_array() && b.size() == 3;
+    for (size_t i = 0; ok && i < 3; i++)
+      ok = b[i].is_number() && b[i].get<double>() >= 0.0;
+    if (!ok)
+      throw ExpectRefusal(method, "bbox_mm", "[x, y, z], three numbers >= 0", b,
+                          "is the size of the measured box, [x, y, z] in mm");
+  }
+  const bool numbers = spec.contains("volume_mm3") || spec.contains("mass_g") ||
+                       spec.contains("bbox_mm");
+  if (spec.contains("tolerance_pct") &&
+      !(spec.at("tolerance_pct").is_number() &&
+        spec.at("tolerance_pct").get<double>() >= 0.0))
+    throw ExpectRefusal(method, "tolerance_pct", "a number >= 0",
+                        spec.at("tolerance_pct"),
+                        "is a percentage, at least 0");
+  if (numbers && !spec.contains("tolerance_pct"))
+    throw ExpectRefusal(method, "tolerance_pct", "a number >= 0", nullptr,
+                        "is required beside volume_mm3, mass_g or bbox_mm: "
+                        "how close your own arithmetic is, in percent, is "
+                        "yours to state (body_count is exact)");
+  if (!numbers && !spec.contains("body_count"))
+    throw ExpectRefusal(method, "volume_mm3", "a number to check", nullptr,
+                        "-- an expect states at least one of volume_mm3, "
+                        "mass_g, body_count, bbox_mm");
+
+  Expectations out;
+  out.spec = spec;
+  if (spec.contains("part")) {
+    const Document* doc = nullptr;
+    try {
+      doc = ResolvePartParam(state, spec.at("part"));
+    } catch (const std::exception& e) {
+      throw ExpectRefusal(method, "part",
+                          "a part's name, stable id or slot "
+                          "index (list_parts)",
+                          spec.at("part"),
+                          std::string("names no part: ") + e.what());
+    }
+    out.document = SlotIdOf(state, doc);
+  } else if (state.document) {
+    out.document = SlotIdOf(state, state.document.get());
+  } else if (state.assembly && state.activePart >= 0 &&
+             state.activePart < static_cast<int>(state.parts.size())) {
+    out.document = state.parts[state.activePart].id;
+    out.assembly = true;
+  } else {
+    const char* tab = state.drawing ? "a drawing"
+                      : state.job   ? "a CAM job"
+                      : state.sim   ? "a simulation"
+                                    : "no document";
+    throw ExpectRefusal(method, "part", "a part or an assembly tab", nullptr,
+                        std::string("-- the active tab is ") + tab +
+                            ", which has no bodies to judge; name a part "
+                            "with expect.part");
+  }
+  if (out.document == 0)
+    throw ExpectRefusal(method, "part", "a loaded part",
+                        spec.value("part", json()),
+                        "names a part that is not loaded");
+  if (out.assembly)
+    for (const char* key : {"body_count", "bbox_mm"})
+      if (spec.contains(key))
+        throw ExpectRefusal(method, key, "volume_mm3 or mass_g", spec.at(key),
+                            "is a part's: an assembly tab is judged on "
+                            "volume_mm3 and mass_g (name a part with "
+                            "expect.part)");
+  return out;
+}
+
+json JudgeExpectations(ui::AppState& state, const Expectations& x) {
+  const json& spec = x.spec;
+  const double tol = spec.value("tolerance_pct", 0.0);
+  struct Ask {
+    std::string quantity, kind, axis;
+    double expected;
+    bool exact;
+  };
+  std::vector<Ask> asks;
+  if (spec.contains("volume_mm3"))
+    asks.push_back({"volume_mm3", "volume", "",
+                    spec.at("volume_mm3").get<double>(), false});
+  if (spec.contains("mass_g"))
+    asks.push_back(
+        {"mass_g", "mass", "", spec.at("mass_g").get<double>(), false});
+  if (spec.contains("body_count"))
+    asks.push_back({"body_count", "body_count", "",
+                    static_cast<double>(spec.at("body_count").get<int64_t>()),
+                    true});
+  if (spec.contains("bbox_mm"))
+    for (int i = 0; i < 3; i++)
+      asks.push_back({std::string("bbox_mm.") + "xyz"[i], "bbox",
+                      std::string(1, "xyz"[i]),
+                      spec.at("bbox_mm")[i].get<double>(), false});
+
+  json checks = json::array();
+  json missed = json::array();
+  bool ok = true;
+  for (const Ask& a : asks) {
+    req::Requirement r;
+    r.name = "expect " + a.quantity;
+    r.measure = {{"kind", a.kind}, {"document", x.document}};
+    if (!a.axis.empty())
+      r.measure["axis"] = a.axis;
+    const double band = a.exact ? 0.0 : std::abs(a.expected) * tol / 100.0;
+    r.bound.kind = "within";
+    r.bound.min = a.expected - band;
+    r.bound.max = a.expected + band;
+    json check = {{"quantity", a.quantity}, {"expected", a.expected}};
+    try {
+      Taken t;
+      if (a.kind == "volume" || a.kind == "mass")
+        t = MeasureMass(state, r.measure, a.kind == "mass");
+      else if (a.kind == "body_count")
+        t = MeasureBodyCount(state, r.measure);
+      else
+        t = MeasureBox(state, r.measure);
+      req::Evidence e;
+      Judge(state, r, t, e);
+      const double measured = *e.value;
+      check["measured"] = measured;
+      check["unit"] = e.unit;
+      check["pass"] = e.pass;
+      if (a.expected != 0.0)
+        check["deviation_pct"] =
+            (measured - a.expected) / std::abs(a.expected) * 100.0;
+      if (!e.pass) {
+        std::string why = a.quantity + ": measured " + Number(measured) +
+                          ", expected " + Number(a.expected);
+        std::vector<std::string> said;
+        if (check.contains("deviation_pct"))
+          said.push_back(
+              std::format("{:+.2f} %", check["deviation_pct"].get<double>()));
+        if (!a.exact)
+          said.push_back("tolerance " + Number(tol) + " %");
+        if (!said.empty())
+          why += " (" + said[0] + (said.size() > 1 ? ", " + said[1] : "") + ")";
+        missed.push_back(why);
+      }
+    } catch (const std::exception& e) {
+      check["measured"] = nullptr;
+      check["pass"] = false;
+      check["error"] = e.what();
+      missed.push_back(a.quantity + ": could not be measured: " + e.what());
+    }
+    ok = ok && check["pass"].get<bool>();
+    checks.push_back(std::move(check));
+  }
+  json out = {{"ok", ok}, {"checks", std::move(checks)}};
+  if (!ok)
+    out["expect_failed"] = std::move(missed);
+  return out;
+}
+
 std::span<const MethodDoc> RequirementMethodDocs() {
   return RequirementMethods;
 }
@@ -3962,6 +4247,23 @@ std::unique_ptr<Parking> ParkRequirementsRequest(ui::AppState& state,
 std::optional<json> HandleRequirementsRpc(ui::AppState& state,
                                           const std::string& m,
                                           const RpcParams& p) {
+  if (m == "check_expect") {
+    json spec = json::object();
+    if (p.contains("volume_mm3"))
+      spec["volume_mm3"] = p.at("volume_mm3");
+    if (p.contains("mass_g"))
+      spec["mass_g"] = p.at("mass_g");
+    if (p.contains("body_count"))
+      spec["body_count"] = p.at("body_count");
+    if (p.contains("bbox_mm"))
+      spec["bbox_mm"] = p.at("bbox_mm");
+    if (p.contains("tolerance_pct"))
+      spec["tolerance_pct"] = p.at("tolerance_pct");
+    if (p.contains("part"))
+      spec["part"] = p.at("part");
+    // rpc-returns-from: src/remote/RemoteRequirements.cpp
+    return JudgeExpectations(state, ReadExpectations(state, spec, m));
+  }
   if (m == "add_requirement") {
     req::Requirement r;
     r.name = p.at("name").get<std::string>();

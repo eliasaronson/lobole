@@ -59,6 +59,26 @@ std::unique_ptr<Parking> ParkRequirementsRequest(ui::AppState& state,
                                                  const std::string& method,
                                                  const nlohmann::json& request);
 
+// A batch's (or check_expect's) `expect` (docs/scripting/rpc.md#expect):
+// {volume_mm3?, mass_g?, body_count?, bbox_mm?, tolerance_pct?, part?}.
+// Read and checked before anything runs -- an unknown key, a negative
+// number, a tolerance missing beside a number, a key the active tab cannot
+// measure -- and refused (a ContractError naming the key) with nothing
+// changed. Judged afterwards by the requirement code: one transient
+// requirement per number, measured and judged as a stored one is, nothing
+// stored.
+struct Expectations {
+  nlohmann::json spec;   // as given
+  uint64_t document = 0; // the part or assembly it is judged on
+  bool assembly = false;
+};
+Expectations ReadExpectations(ui::AppState& state, const nlohmann::json& spec,
+                              const std::string& method);
+// {ok, checks: [{quantity, expected, measured, unit, deviation_pct, pass}]},
+// and `expect_failed` (one sentence per miss) beside them when one misses,
+// which the server lifts to the top of the message.
+nlohmann::json JudgeExpectations(ui::AppState& state, const Expectations& e);
+
 // Every requirement's row with its state, as list_requirements answers it.
 nlohmann::json RequirementRows(ui::AppState& state);
 

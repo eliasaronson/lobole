@@ -435,6 +435,29 @@ void RemoteServer::Send(int client, const json& message) {
   // answer should be. Each one is still written as null, and the message
   // lists where they are (docs/scripting/rpc.md#what-a-response-carries).
   // Not an error after the fact: a mutating call has already happened.
+  // A stated expectation that missed (docs/scripting/rpc.md#expect): the
+  // judge leaves its sentences in the answer, and they travel beside it, as
+  // `nonfinite` does, so a client raises on them without reading the result.
+  if (message.is_object() && message.contains("result") &&
+      message["result"].is_object()) {
+    const json& result = message["result"];
+    const json* missed = nullptr;
+    if (result.contains("expect_failed"))
+      missed = &result["expect_failed"];
+    else if (result.contains("expect") && result["expect"].is_object() &&
+             result["expect"].contains("expect_failed"))
+      missed = &result["expect"]["expect_failed"];
+    if (missed != nullptr) {
+      json lifted = message;
+      lifted["expect_failed"] = *missed;
+      json& r = lifted["result"];
+      if (r.contains("expect_failed"))
+        r.erase("expect_failed");
+      else
+        r["expect"].erase("expect_failed");
+      return Send(client, lifted);
+    }
+  }
   std::string line;
   if (std::vector<std::string> bad = remote::NonFinitePointers(message);
       !bad.empty() && message.is_object()) {

@@ -31,11 +31,18 @@ lobole-mcp = "lobole.mcp:main"
 lobole-remote = "lobole.client:main"
 
 [tool.setuptools]
-package-dir = { "" = "python" }
-packages = ["lobole"]
+# lobole._docs is the repo's docs/, shipped so help() can serve the pages the
+# prompt and the describe rows cite to an agent with no checkout
+# (docs/scripting/mcp.md#served-documents); the plans stay out.
+package-dir = { "" = "python", "lobole._docs" = "docs" }
+packages = ["lobole", "lobole._docs"]
 
 [tool.setuptools.dynamic]
 version = { file = "VERSION" }
 
 [tool.setuptools.package-data]
 lobole = ["py.typed"]
+"lobole._docs" = ["*.md", "**/*.md"]
+
+[tool.setuptools.exclude-package-data]
+"lobole._docs" = ["plans/*"]

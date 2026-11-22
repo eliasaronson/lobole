@@ -48,6 +48,8 @@ and the call a person would make agree by construction.
 | `insertion` | assembly | `check_insertion` | verdict: `a` reaches its seat with no more travel under interference than its own press ([insertion](../inspect/README.md#insertion)) | `a` (the occurrence slid on), `b` (the one it goes on), `entry`: positive \| negative \| either, `mate?` (a mate id; else the one mate joining them), `allowance_mm?`, `samples?`, `rotations?`, `lead_in_mm?` |
 | `assembly_sequence` | assembly | `check_assembly_sequence` | verdict: every step of the assembly's sequence goes home against everything placed before it, and none is missed ([sequences](../assemblies/README.md#assembly-sequences)) | |
 | `mass`, `volume` | part or assembly | `mass_properties` | g, mm3 | |
+| `body_count` | part | the part's bodies | a count (`bodies`), reference bodies not counted | |
+| `bbox` | part | the digest's measured box (`BodyBounds`, tight) | mm, its size along `axis` over every body that is not a reference | `axis`: x \| y \| z |
 | `fit_class` | assembly | `check_fits` | verdict | `mate`, `class`: clearance \| transition \| interference |
 | `check_fits` | assembly | `check_fits` | verdict | `allow_unverified?` |
 | `check_seat` | assembly | `check_seat` | verdict | `occurrences` (the bearings), `allow_unverified?` |
@@ -60,11 +62,15 @@ and the call a person would make agree by construction.
 | `cam_verify` | job | `cam_verify` | verdict | `setup`, `resolution?`, `allow_uncut?` [what prefixes] |
 | `expression` | none, or a part | the evaluator (`req::EvaluateIn`) | as `unit` says (default mm) | `expression`, `unit?`, `document?` (a part), `configuration?` (that part's; 0 = base) ([expression](#expression)) |
 
-A part's `mass`, `volume` and `section_area` go through the functions
-`mass_properties` and `section` answer with, on a `const Document&`
-(`partmeasure::MassOf`, `partmeasure::SectionAreaMeasure` in
-`src/core/PartMeasures.{h,cpp}`), which a [design sweep](#design-sweep)'s
-point reads too, so the three agree by construction.
+A part's `mass`, `volume`, `section_area`, `body_count` and `bbox` go
+through the functions `mass_properties`, `section` and the digest answer
+with, on a `const Document&` (`partmeasure::MassOf`,
+`partmeasure::SectionAreaMeasure`, `partmeasure::BodyCount`,
+`partmeasure::BoxSize` in `src/core/PartMeasures.{h,cpp}`), which a [design
+sweep](#design-sweep)'s point reads too, so they agree by construction. "Fits
+a 256 mm bed" is a `bbox` requirement per axis, `at_most` 256. A batch's
+[`expect`](../scripting/rpc.md#expect) is judged by the same kinds, as
+transient requirements nothing stores.
 
 What a verdict needs to pass:
 
@@ -256,7 +262,7 @@ the requirement is checked; the evidence keeps what it evaluated to.
 
 **Refused, naming what is accepted:** an unknown measure kind, an unknown
 key for the kind (in a saved file, also in the requirement or its evidence),
-a missing required key, an unknown value of a key that has a vocabulary (`quantity`, `mode`, `expect`, `class`), an unknown bound
+a missing required key, an unknown value of a key that has a vocabulary (`quantity`, `mode`, `expect`, `class`, `axis`), an unknown bound
 kind, a number bounded `pass` or a verdict bounded by a number, `within`
 with its min above its max, and a requirement naming a document, study,
 occurrence, mate or setup that does not exist. A key of the wrong type is
@@ -547,8 +553,8 @@ broken features `{feature_id, name, error}`, each sketch `{feature_id,
 name, ok, dof, conflicting, why?}` that does not solve (a value edit the
 regeneration refused, keeping the previous geometry, is one) or whose DOF
 differs from the base, and `volume_mm3` and `mass_g`. And every requirement
-it can measure on the copies -- `expression`, and `mass`, `volume` and
-`section_area` of a rebuilt part -- through the functions the check calls,
+it can measure on the copies -- `expression`, and `mass`, `volume`,
+`section_area`, `body_count` and `bbox` of a rebuilt part -- through the functions the check calls,
 as `{id, name, state, value?, unit?, note?}`, and the study requirements
 below, solved. The others (a motion study's, an assembly's, CAM,
 `check_literals`, a study requirement a sweep does not solve, and a part's
@@ -661,6 +667,7 @@ reference for every parameter and key.
 | `add_assertion`, `list_assertions`, `remove_assertion`, `verify_assertions` | clearance requirements in the old words |
 | `design_sweep {variables?, from_requirements?, samples?, corners?, refine?, documents?, max_points?, study_budget_s?, async?, outlive_client?}` | the model over ranges of its variables, on copies, its study requirements solved at every point ([design sweep](#design-sweep)) |
 | `design_sweep_result {job?}` | a sweep's answer, kept in memory |
+| `check_expect {volume_mm3?, mass_g?, body_count?, bbox_mm?, tolerance_pct?, part?}` | the part as it stands against stated numbers, as transient requirements nothing stores ([expect](../scripting/rpc.md#expect)) |
 
 The SDK (`python/lobole/sdk.py`): `App.require(name, measure, at_most= |
 at_least= | within=(lo, hi), source=)` states one, or edits the one of that

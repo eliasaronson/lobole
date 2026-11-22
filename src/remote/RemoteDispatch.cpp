@@ -351,7 +351,8 @@ static constexpr remote::MethodDoc kServerMethods[] = {
      "throws rolls the WHOLE batch back and names which call failed and why "
      "(stop_on_error, default true; false runs on and reports each error in "
      "place). Returns {results: [...], regen, digest, calls, failed?, "
-     "regenerations}: each result is {call, method, id?, result} -- `id` "
+     "regenerations, expect?}: each result is {call, method, id?, result} -- "
+     "`id` "
      "the one the call created (a feature, a mate, an occurrence), as "
      "the call alone answers it -- and the per-call `regen`/`digest` are "
      "STRIPPED: geometry is answered once, at the end, by the batch's own "
@@ -364,8 +365,18 @@ static constexpr remote::MethodDoc kServerMethods[] = {
      "edit (DeleteFace, OffsetFace, MoveFace, ReplaceFace), which "
      "add_feature and modify_feature refuse. `expect_revision` "
      "(a part revision, as get_state reports it) is checked once before the "
-     "first call and refused as stale_revision if the part has moved.",
-     "calls:object[], stop_on_error?:bool, expect_revision?:revision"},
+     "first call and refused as stale_revision if the part has moved. "
+     "`expect` {volume_mm3?, mass_g?, body_count?, bbox_mm?: [x, y, z], "
+     "tolerance_pct, part?} states what the batch should produce: checked "
+     "with the rest before the first call (a malformed one is refused, the "
+     "document unchanged) and judged after the last regeneration as "
+     "check_expect judges it, answered as `expect` {ok, checks}. A miss "
+     "leaves the batch applied, as one undo step, and the message carries "
+     "`expect_failed` (one sentence per miss). In the batch's "
+     "regen.warnings, rows with the same warning text are folded into one, "
+     "{warning, count, features: [{index, name}], more?}.",
+     "calls:object[], stop_on_error?:bool, expect_revision?:revision, "
+     "expect?:object"},
     {"describe",
      "This endpoint: methods (each with the parameter keys it accepts, and "
      "a request_schema where the row is typed), "
@@ -892,6 +903,50 @@ uint8_t MethodFlags(const std::string& m) {
 // Every method any module documents. The describe tables are the registry
 // (a branch without a row is caught by its own test), so this needs no
 // second list to drift out of step.
+// A batch's `regen.warnings`, with the rows whose `warning` text is the same
+// folded into one: {warning, count, features: [{index, name, ...}], more?}.
+// Fifty cuts that each missed every body were fifty rows of one sentence. A
+// warning only one feature has keeps its row as a single call answers it
+// (docs/scripting/rpc.md#batch).
+static void FoldRepeatedWarnings(json& regen) {
+  constexpr size_t kListed = 10;
+  if (!regen.contains("warnings") || !regen["warnings"].is_array())
+    return;
+  const json& rows = regen["warnings"];
+  std::map<std::string, size_t> count;
+  for (const json& row : rows)
+    if (row.contains("warning") && row["warning"].is_string())
+      count[row["warning"].get<std::string>()]++;
+  json out = json::array();
+  std::map<std::string, size_t> folded; // text -> its row in `out`
+  for (const json& row : rows) {
+    const std::string text =
+        row.contains("warning") && row["warning"].is_string()
+            ? row["warning"].get<std::string>()
+            : std::string();
+    if (text.empty() || count[text] < 2) {
+      out.push_back(row);
+      continue;
+    }
+    json feature = row;
+    feature.erase("warning");
+    const auto it = folded.find(text);
+    if (it == folded.end()) {
+      folded[text] = out.size();
+      out.push_back({{"warning", text},
+                     {"count", count[text]},
+                     {"features", json::array({std::move(feature)})}});
+      continue;
+    }
+    json& entry = out[it->second];
+    if (entry["features"].size() < kListed)
+      entry["features"].push_back(std::move(feature));
+    else
+      entry["more"] = entry.value("more", 0) + 1;
+  }
+  regen["warnings"] = std::move(out);
+}
+
 static bool IsKnownMethod(const std::string& m) {
   return FindMethod(m) != nullptr;
 }
@@ -1428,6 +1483,12 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
       }
     }
 
+    // What the batch says it will produce, read and checked with the rest
+    // before anything runs (docs/scripting/rpc.md#expect).
+    std::optional<remote::Expectations> expectations;
+    if (p.contains("expect"))
+      expectations = remote::ReadExpectations(state, p.at("expect"), "batch");
+
     // The marks a rollback rewinds to. Both are taken before anything runs:
     // a part batch unwinds its commands, an assembly batch restores the
     // snapshot its first mutation pushed.
@@ -1655,6 +1716,12 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     if (!batchLinks.empty())
       out["links_updated"] = std::move(batchLinks);
     remote::AttachRegen(out, state.document.get(), preDigest);
+    if (out.contains("regen"))
+      FoldRepeatedWarnings(out["regen"]);
+    // Judged after the last regeneration. A miss leaves the batch applied:
+    // the bodies are the evidence the caller needs to see why.
+    if (expectations)
+      out["expect"] = remote::JudgeExpectations(state, *expectations);
     return out;
   }
 

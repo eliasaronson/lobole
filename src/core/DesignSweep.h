@@ -109,8 +109,9 @@ struct Inputs {
   std::vector<Parameter> projectParameters;
   std::vector<lookuptable::Table> tables;
   std::vector<PartCopy> parts;
-  // Measured at every point: `expression`, and `mass`, `volume` and
-  // `section_area` of a rebuilt part. The app lists the rest as not swept.
+  // Measured at every point: `expression`, and `mass`, `volume`,
+  // `section_area`, `body_count` and `bbox` of a rebuilt part. The app lists
+  // the rest as not swept.
   std::vector<req::Requirement> requirements;
   // Measured at every point too, each by a solve (or a cached one), under
   // `studyBudgetS` of solving in all: once it is spent, a point's study

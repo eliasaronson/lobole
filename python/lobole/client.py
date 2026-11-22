@@ -24,8 +24,9 @@ import socket
 import sys
 import time
 
-from lobole.errors import (ConnectionLost, LoboleError, NonFiniteError,
-                           Refused, UnknownArgument, refusal)
+from lobole.errors import (CallTimedOut, ConnectionLost, ExpectationFailed,
+                           LoboleError, NonFiniteError, Refused,
+                           UnknownArgument, refusal)
 
 
 def _check_result(method, result):
@@ -44,6 +45,27 @@ def _check_result(method, result):
         raise LoboleError(f"{method}: the answer breaks its returns "
                           f"contract — {e}") from None
 
+
+
+def expectation_failed(method, misses, result):
+    """ExpectationFailed for an answer whose `expect` missed: the sentences,
+    and the checks from the result (a batch's under `expect`)."""
+    checks = []
+    if isinstance(result, dict):
+        judged = result.get("expect", result)
+        if isinstance(judged, dict):
+            checks = judged.get("checks", [])
+    applied = (" The batch was applied; undo takes it back."
+               if method == "batch" else "")
+    return ExpectationFailed(
+        f"{method}: the expectation missed: " + "; ".join(misses) + "."
+        + applied, misses, result, checks)
+
+
+_UNKNOWN_IF_APPLIED = (
+    "Whether the call was applied is not known: compare get_state's "
+    "revision with the one before it, and send it again only if it has not "
+    "moved.")
 
 
 def plain_params(value):
@@ -74,8 +96,14 @@ class Client:
     tests/smoke_app.py sets, so every smoke runs strict."""
 
     def __init__(self, port, host="127.0.0.1", timeout=60.0, strict=None):
+        self._address = (host, port)
+        self._timeout = timeout
         self.sock = socket.create_connection((host, port), timeout=timeout)
-        self.file = self.sock.makefile("rw")
+        # Read through our own buffer, not makefile(): a socket file that
+        # has timed out refuses every later read, and a call that timed out
+        # must leave the connection usable (closing it would cancel what the
+        # app is still running for it: docs/scripting/sdk.md#errors).
+        self._buffer = b""
         self._id = 0
         if strict is None:
             import os
@@ -91,7 +119,9 @@ class Client:
 
     def help(self, method=""):
         """What `method` does and takes — `method_help` below, the same
-        answer the MCP server's help() gives. With no method, the index.
+        answer the MCP server's help() gives for a method. With no method,
+        the index. The documents and the worked examples the MCP server's
+        help() also serves are lobole.mcp's (document_section, EXAMPLES).
         `call("help", method=...)` and `request("help", ...)` reach it too:
         the MCP instructions tell an agent to ask help(), and over this
         client that used to be "unknown method"."""
@@ -120,47 +150,143 @@ class Client:
             return self.help((params or {}).get("method", ""))
         self._id += 1
         request = {"id": self._id, "method": method, "params": {} if params is None else params}
+        line = json.dumps(request, allow_nan=False, default=_jsonable) + "\n"
+        self._ensure_connected(method)
         previous = self.sock.gettimeout()
         if timeout is not None:
             self.sock.settimeout(timeout)
         try:
-            self.file.write(json.dumps(request, allow_nan=False,
-                                       default=_jsonable) + "\n")
-            self.file.flush()
-            while True:
-                line = self.file.readline()
-                if not line:
-                    raise ConnectionLost(f"{method}: the app disconnected "
-                                         "before answering")
-                msg = json.loads(line)
-                # A line the server could not parse is answered with a null
-                # id (it cannot know ours); with one request in flight it is
-                # this one's, and waiting for our id would wait forever.
-                if msg.get("id") is None and str(
-                        msg.get("error", "")).startswith("parse:"):
-                    raise refusal(msg["error"], msg.get("diagnostic"))
-                if msg.get("id") == self._id:
-                    if "nonfinite" in msg:
-                        said = (f"{method}: the answer held non-finite "
-                                f"numbers, sent as null, at "
-                                f"{', '.join(msg['nonfinite'][:5])}")
-                        if self.strict:
-                            raise NonFiniteError(said, msg["nonfinite"],
-                                                 msg.get("result"))
-                        import warnings
-                        warnings.warn(said, RuntimeWarning, stacklevel=3)
-                    if "error" in msg:
-                        raise refusal(msg["error"], msg.get("diagnostic"))
-                    if self.strict:
-                        _check_result(method, msg.get("result"))
-                    return msg.get("result")
+            # What failed before the request was written did not reach the
+            # app: a stale socket (the app restarted, or closed an idle
+            # connection) is found here, and the call is safe to send again.
+            if self._peer_closed():
+                self._drop()
+                raise ConnectionLost(
+                    f"{method}: the connection was closed before the call "
+                    "was sent; nothing was sent", sent=False)
+            try:
+                self.sock.sendall(line.encode("utf-8"))
+            except OSError as e:
+                self._drop()
+                raise ConnectionLost(
+                    f"{method}: the connection failed while sending ({e}); "
+                    "the call was not sent", sent=False) from e
+            try:
+                return self._answer(method)
+            except TimeoutError:
+                waited = timeout if timeout is not None else previous
+                # The connection stays: closing it would cancel a call the
+                # app runs for as long as its client is there, and the late
+                # answer is skipped by the next call (its id is not that
+                # call's).
+                raise CallTimedOut(
+                    f"{method}: no answer in {waited:g} s. The app is still "
+                    f"running {method}; do not send it again. "
+                    "`background_jobs` shows what is running; raise "
+                    "`timeout`, or use `async` where the method takes it.",
+                    method, waited) from None
+            except ConnectionLost:
+                self._drop()
+                raise
+            except OSError as e:
+                self._drop()
+                raise ConnectionLost(
+                    f"{method}: the connection failed while the app had the "
+                    f"call ({e}). {_UNKNOWN_IF_APPLIED}") from e
         finally:
-            if timeout is not None:
+            if timeout is not None and self.sock is not None:
                 self.sock.settimeout(previous)
 
+    def _readline(self):
+        """One line from the app, or "" at the end of the stream. A timeout
+        leaves what was read in the buffer, for the next call to finish."""
+        while b"\n" not in self._buffer:
+            chunk = self.sock.recv(1 << 16)
+            if not chunk:
+                return ""
+            self._buffer += chunk
+        line, _, self._buffer = self._buffer.partition(b"\n")
+        return line.decode("utf-8")
+
+    def _answer(self, method):
+        """Read lines until this call's answer."""
+        while True:
+            line = self._readline()
+            if not line:
+                raise ConnectionLost(f"{method}: the app disconnected "
+                                     "before answering. "
+                                     + _UNKNOWN_IF_APPLIED)
+            msg = json.loads(line)
+            # A line the server could not parse is answered with a null id
+            # (it cannot know ours); with one request in flight it is this
+            # one's, and waiting for our id would wait forever.
+            if msg.get("id") is None and str(
+                    msg.get("error", "")).startswith("parse:"):
+                raise refusal(msg["error"], msg.get("diagnostic"))
+            # Anything else not ours is a late answer to a call that timed
+            # out: skipped.
+            if msg.get("id") == self._id:
+                if "nonfinite" in msg:
+                    said = (f"{method}: the answer held non-finite "
+                            f"numbers, sent as null, at "
+                            f"{', '.join(msg['nonfinite'][:5])}")
+                    if self.strict:
+                        raise NonFiniteError(said, msg["nonfinite"],
+                                             msg.get("result"))
+                    import warnings
+                    warnings.warn(said, RuntimeWarning, stacklevel=4)
+                if "error" in msg:
+                    raise refusal(msg["error"], msg.get("diagnostic"))
+                if self.strict:
+                    _check_result(method, msg.get("result"))
+                if "expect_failed" in msg:
+                    raise expectation_failed(method, msg["expect_failed"],
+                                             msg.get("result"))
+                return msg.get("result")
+
+    def _ensure_connected(self, method):
+        """A connection found closed is opened again, once, for the next
+        call."""
+        if self.sock is not None:
+            return
+        try:
+            self.sock = socket.create_connection(self._address,
+                                                 timeout=self._timeout)
+        except OSError as e:
+            raise ConnectionLost(
+                f"{method}: could not reconnect to the app on port "
+                f"{self._address[1]} ({e}); nothing was sent",
+                sent=False) from e
+        self._buffer = b""
+
+    def _peer_closed(self):
+        """Whether the app has closed this connection: it reads as ready,
+        and a peek finds the end of the stream. A late answer waiting to be
+        read is not a close."""
+        if self._buffer:
+            return False
+        import select
+        try:
+            ready, _, _ = select.select([self.sock], [], [], 0)
+            if not ready:
+                return False
+            return self.sock.recv(1, socket.MSG_PEEK) == b""
+        except BlockingIOError:
+            return False
+        except OSError:
+            return True
+
+    def _drop(self):
+        try:
+            self.sock.close()
+        except OSError:
+            pass
+        self.sock = None
+
     def close(self):
-        # makefile() dups the socket fd — close BOTH, or the server never
-        # sees EOF and keeps serving a ghost client.
+        # Closing is what the app reads as the client leaving: a call it
+        # runs for as long as its client is there (a check, a solve without
+        # outlive_client) is cancelled.
         #
         # The server accepts up to EIGHT clients (RemoteServer.cpp's
         # runaway-connection backstop) and drains them through ONE main-thread
@@ -168,8 +294,8 @@ class Client:
         # earlier note here said it handled one client at a time; it does not,
         # and several agents driving several instances is the point of
         # docs/scripting/README.md#fan-out-several-agents-several-parts-one-project.
-        self.file.close()
-        self.sock.close()
+        if self.sock is not None:
+            self.sock.close()
 
     @staticmethod
     def instances():

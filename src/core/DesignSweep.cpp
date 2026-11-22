@@ -472,6 +472,14 @@ json MeasureOn(const Inputs& in, Worker& w, const req::Requirement& r) {
       } else if (kind == "section_area") {
         value = partmeasure::SectionAreaMeasure(*doc, r.measure).value;
         unit = "mm2";
+      } else if (kind == "body_count") {
+        value = static_cast<double>(partmeasure::BodyCount(*doc));
+        unit = "bodies";
+      } else if (kind == "bbox") {
+        const glm::dvec3 size = partmeasure::BoxSize(*doc);
+        const std::string axis = r.measure.at("axis").get<std::string>();
+        value = axis == "x" ? size.x : axis == "y" ? size.y : size.z;
+        unit = "mm";
       } else if (kind == "study_result" || kind == "study_probe") {
         for (size_t i = 0; i < in.studies.size(); ++i)
           if (in.studies[i].requirement.id == r.id)

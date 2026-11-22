@@ -1,0 +1,8 @@
+{"features": 1, "bodies": 1,
+ "volumes": [16000.0],
+ "requirements": [
+   {"name": "one solid", "kind": "body_count",
+    "bound": "within", "revision": 1, "evidence": true},
+   {"name": "fits a 256 mm bed", "kind": "bbox",
+    "bound": "at_most", "revision": 1, "evidence": false}
+ ]}

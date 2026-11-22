@@ -30,6 +30,7 @@ from mcp.server.mcpserver.exceptions import (  # type: ignore[import-not-found,u
     ToolError, UnexpectedToolError)
 
 from lobole.client import Client  # noqa: E402
+from lobole.errors import ConnectionLost  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Format reference, embedded into tool descriptions. Source of truth:
@@ -632,6 +633,12 @@ The loop that works — follow it every time:
    volume_mm3 moved, bodies added/removed; a batch answers one for the
    whole) — read it before anything else; a cut whose delta is ~0 or
    a body whose `solids` jumped to 2 is wrong NOW, not three features later.
+   Better: STATE the result and let the call judge it. rpc('batch', {calls,
+   expect: {volume_mm3, body_count, bbox_mm: [x, y, z], tolerance_pct}})
+   answers expect.ok, or an error naming each number it missed (the batch
+   stays applied; undo takes it back); rpc('check_expect', {...}) judges the
+   part as it stands. help('examples') lists complete builds that do this,
+   each with its stated numbers: copy one rather than a fragment.
    Check `regen.warnings` (a warning = built but likely did nothing, e.g. a
    cut whose profile missed every body). mass_properties is the oracle the
    render cannot fake (CoM, mass, inertia). THEN look: rpc('render_sheet')
@@ -649,8 +656,8 @@ The loop that works — follow it every time:
    difference as solids. Add {align: true} when you are checking the SHAPE
    and not where it sits — a re-draw whose volume matches to four figures
    scores IoU 0.333 if the reference is a few hundred mm away.
-   The full pre-delivery list: docs/inspect/review-checklist.md (one RPC
-   per box, plus a symptom->cause->fix table for the classic traps).
+   The full pre-delivery list: help('review-checklist') (one RPC per box,
+   plus a symptom->cause->fix table for the classic traps).
 5. For 3D fillets/chamfers: list_elements to get stable edge names, then
    add_feature with type Fillet/Chamfer referencing them. To FIND geometry
    (or assert it): query_geometry takes declarative predicates —
@@ -775,6 +782,195 @@ see every knob, and an explicit offer to adjust any of them.
 """
 
 # ---------------------------------------------------------------------------
+# Worked examples
+#
+# One complete build per recipe the prompt teaches, each with what it
+# builds stated: `calls` is a batch, `expect` its result (judged by the
+# batch itself, docs/scripting/rpc.md#expect), `setup` the calls a batch
+# cannot hold (a new tab) sent one at a time before it, and `then` a
+# variable changed with the result stated after it. help('examples') lists
+# them and help(example=name) hands one out; tests/agent_examples_smoke.py
+# sends every one as written, so the numbers here are the test's and there
+# is no second copy of them to drift. Each starts from a new project, which
+# is why an element name can carry its feature's id ("2/cap1": the second
+# feature's end cap): read them from list_elements in a project of your own.
+# ---------------------------------------------------------------------------
+
+def _xy_plane(z=0.0):
+    return {"origin": [0, 0, z], "normal": [0, 0, 1], "uAxis": [1, 0, 0]}
+
+
+def _feature(spec):
+    return {"method": "add_feature", "params": {"feature": spec}}
+
+
+def _var(name, expression):
+    return {"method": "set_variable",
+            "params": {"name": name, "expression": expression}}
+
+
+EXAMPLES = [
+    {"name": "plate-with-holes",
+     "about": "A 60 x 40 plate, plate_t thick, with four hole_d holes 8 mm "
+              "in from its corners: a sketch extruded, and a second sketch "
+              "cut through all, its circles driven by the variable. "
+              "Volume 60*40*t - 4*pi*(d/2)^2*t.",
+     "calls": [
+         _var("plate_t", "6"),
+         _var("hole_d", "6.6"),
+         _feature({"type": "Sketch", "name": "Outline", "plane": _xy_plane(),
+                   "entities": [{"type": "rect", "c1": [0, 0],
+                                 "c2": [60, 40]}]}),
+         _feature({"type": "Extrude", "name": "Plate", "sketch_id":
+                   {"$ref": 3}, "distance": 6, "distance_expr": "plate_t",
+                   "mode": "new_body"}),
+         _feature({"type": "Sketch", "name": "Holes", "plane": _xy_plane(),
+                   "entities": [
+                       {"type": "circle", "center": [x, y], "radius": 3.3,
+                        "r_expr": "hole_d / 2"}
+                       for x, y in ((8, 8), (52, 8), (8, 32), (52, 32))]}),
+         _feature({"type": "Extrude", "name": "Bores", "sketch_id":
+                   {"$ref": 5}, "distance": 1, "mode": "cut",
+                   "end_mode": "through_all"}),
+     ],
+     "expect": {"volume_mm3": 13578.913, "body_count": 1,
+                "bbox_mm": [60, 40, 6], "tolerance_pct": 0.1},
+     "then": {"calls": [_var("hole_d", "9")],
+              "expect": {"volume_mm3": 12873.186, "body_count": 1,
+                         "tolerance_pct": 0.1}}},
+    {"name": "revolved-bushing",
+     "about": "A bushing, bore 10, outside 20, 20 long: a rectangle drawn "
+              "in the XZ plane (normal -Y, so the sketch's V is +Z) and "
+              "revolved about Z through `sweep` degrees. Volume "
+              "pi*(10^2 - 5^2)*20 * sweep/360.",
+     "calls": [
+         _var("sweep", "360"),
+         _feature({"type": "Sketch", "name": "Profile",
+                   "plane": {"origin": [0, 0, 0], "normal": [0, -1, 0],
+                             "uAxis": [1, 0, 0]},
+                   "entities": [{"type": "rect", "c1": [5, 0],
+                                 "c2": [10, 20]}]}),
+         _feature({"type": "Revolve", "name": "Bushing", "sketch_id":
+                   {"$ref": 2}, "axis": {"kind": "z"}, "angle_deg": 360,
+                   "angle_expr": "sweep", "mode": "new_body"}),
+     ],
+     "expect": {"volume_mm3": 4712.389, "body_count": 1,
+                "bbox_mm": [20, 20, 20], "tolerance_pct": 0.1},
+     "then": {"calls": [_var("sweep", "180")],
+              "expect": {"volume_mm3": 2356.194, "bbox_mm": [20, 10, 20],
+                         "tolerance_pct": 0.1}}},
+    {"name": "boss-on-a-face",
+     "about": "A boss sketched ON the plate's top face (face_ref: feature "
+              "2's end cap, \"2/cap1\"; the sketch's origin is the face's "
+              "centroid) and extruded onto the body, so it follows the face "
+              "when the plate gets thicker. Volume 60*40*t + pi*5^2*10.",
+     "calls": [
+         _var("plate_t", "6"),
+         _feature({"type": "Sketch", "name": "Outline", "plane": _xy_plane(),
+                   "entities": [{"type": "rect", "c1": [0, 0],
+                                 "c2": [60, 40]}]}),
+         _feature({"type": "Extrude", "name": "Plate", "sketch_id":
+                   {"$ref": 2}, "distance": 6, "distance_expr": "plate_t",
+                   "mode": "new_body"}),
+         _feature({"type": "Sketch", "name": "Boss outline",
+                   "plane": _xy_plane(6),
+                   "face_ref": {"feature_id": {"$ref": 3},
+                                "element": "2/cap1"},
+                   "entities": [{"type": "circle", "center": [0, 0],
+                                 "radius": 5}]}),
+         _feature({"type": "Extrude", "name": "Boss", "sketch_id":
+                   {"$ref": 4}, "distance": 10, "mode": "add"}),
+     ],
+     "expect": {"volume_mm3": 15185.398, "body_count": 1,
+                "bbox_mm": [60, 40, 16], "tolerance_pct": 0.1},
+     "then": {"calls": [_var("plate_t", "10")],
+              "expect": {"volume_mm3": 24785.398, "bbox_mm": [60, 40, 20],
+                         "tolerance_pct": 0.1}}},
+    {"name": "pin-on-a-block",
+     "about": "Two parts and an assembly: a 40 x 40 x 10 block, fixed, and "
+              "a pin_l long 8 mm pin mated FASTENED face to face onto its "
+              "top (the block's end cap \"2/cap1\" to the pin's start cap "
+              "\"2/cap0\"). A tab is made outside a batch, so `setup` makes "
+              "the parts and the assembly first. pin_l is a project "
+              "variable: one change reaches the part and the assembly. "
+              "Volume 40*40*10 + pi*4^2*pin_l.",
+     "setup": [
+         _var("pin_l", "30"),
+         {"method": "add_part", "params": {"name": "block"}},
+         {"method": "batch", "params": {"calls": [_feature({
+             "type": "Box", "name": "Block", "on": "Top", "width": 40,
+             "depth": 40, "height": 10})]}},
+         {"method": "add_part", "params": {"name": "pin"}},
+         {"method": "batch", "params": {"calls": [_feature({
+             "type": "Cylinder", "name": "Pin", "on": "Top", "diameter": 8,
+             "height": 30, "height_expr": "pin_l"})]}},
+         {"method": "add_assembly", "params": {"name": "rig"}},
+     ],
+     "calls": [
+         {"method": "add_occurrence",
+          "params": {"part": "block", "fixed": True}},
+         {"method": "add_occurrence", "params": {"part": "pin"}},
+         {"method": "add_mate", "params": {
+             "type": "fastened",
+             "a": {"occurrence": {"$ref": 1},
+                   "face": {"feature_id": 2, "element": "2/cap1"}},
+             "b": {"occurrence": {"$ref": 2},
+                   "face": {"feature_id": 2, "element": "2/cap0"}}}},
+     ],
+     "expect": {"volume_mm3": 17507.964, "tolerance_pct": 0.1},
+     "then": {"calls": [_var("pin_l", "40")],
+              "expect": {"volume_mm3": 18010.619, "tolerance_pct": 0.1}}},
+    {"name": "sheet-metal-bracket",
+     "about": "A 50 x 30 steel blank of 2 mm sheet with a flange_l lip bent "
+              "up 90 degrees along its x = 50 top edge (\"2/cap1;U3\"), at "
+              "the sheet's own bend radius (2 mm): set_sheet_metal_rules "
+              "first, or the BaseFlange has no thickness. Volume 50*30*2 + "
+              "the bend pi/2*t*(r + t/2)*30 + the wall (flange_l - r - t)*"
+              "t*30; mass at 7.85 g/cm3.",
+     "calls": [
+         {"method": "set_sheet_metal_rules",
+          "params": {"material": "steel", "gauge": "2mm"}},
+         _var("flange_l", "20"),
+         _feature({"type": "Sketch", "name": "Blank", "plane": _xy_plane(),
+                   "entities": [{"type": "rect", "c1": [0, 0],
+                                 "c2": [50, 30]}]}),
+         _feature({"type": "BaseFlange", "name": "Base",
+                   "sketch_id": {"$ref": 3}}),
+         _feature({"type": "EdgeFlange", "name": "Lip",
+                   "edges": [{"feature_id": {"$ref": 4},
+                              "element": "2/cap1;U3"}],
+                   "length": 20, "length_expr": "flange_l",
+                   "angle_deg": 90}),
+     ],
+     "expect": {"volume_mm3": 4242.743, "mass_g": 33.306, "body_count": 1,
+                "bbox_mm": [50, 30, 24], "tolerance_pct": 0.1},
+     "then": {"calls": [_var("flange_l", "30")],
+              "expect": {"volume_mm3": 4842.743, "bbox_mm": [50, 30, 34],
+                         "tolerance_pct": 0.1}}},
+]
+
+
+def _example(name):
+    """One worked example, ready to send: rpc('batch', {calls, expect})
+    after its setup, then its `then`."""
+    for e in EXAMPLES:
+        if e["name"] == name:
+            import copy
+            out = copy.deepcopy(e)
+            out["how"] = ("In a new project: send each `setup` call as it "
+                          "is, then rpc('batch', {calls, expect}), then "
+                          "each of then.calls and rpc('check_expect', "
+                          "then.expect).")
+            return out
+    import difflib
+    names = [e["name"] for e in EXAMPLES]
+    near = difflib.get_close_matches(name, names, n=3)
+    raise ValueError(f"no example {name!r}; the examples: "
+                     f"{', '.join(names)}"
+                     + (f" (close: {', '.join(near)})" if near else ""))
+
+
+# ---------------------------------------------------------------------------
 # Connection
 # ---------------------------------------------------------------------------
 
@@ -808,7 +1004,8 @@ class _Server(MCPServer):
                 cause = e.__cause__
                 if isinstance(cause, (RuntimeError, ValueError, OSError)):
                     raise ToolError(
-                        f"Error executing tool {name}: {cause}") from cause
+                        f"Error executing tool {name}: {cause}"
+                        + _after(cause)) from cause
                 raise
 
 
@@ -829,7 +1026,20 @@ INSTRUCTIONS = ("Tools for driving a running Loböle CAD instance. Read the "
     "imported with rpc('import_step', {'path': ...}) whatever its 3D format "
     "(STEP, IGES, STL, OBJ, PLY, glTF, BREP; an STL's holes and flats "
     "recognised as "
-    "true faces), and a DXF or SVG into a sketch with rpc('import_sketch').")
+    "true faces), and a DXF or SVG into a sketch with rpc('import_sketch'). "
+    "Every documentation page a text here cites is served by help() with "
+    "its path, #section and all, and help('examples') lists complete builds "
+    "with their stated results.")
+
+def _after(cause):
+    """What a failed call's text says last: whether sending it again is
+    safe. A refusal changed nothing; the transport's own errors say what is
+    known in their message (lobole.errors)."""
+    from lobole.errors import Refused
+    if isinstance(cause, Refused):
+        return " — nothing was changed, so it is safe to send again corrected."
+    return ""
+
 
 mcp = _Server("lobole", instructions=INSTRUCTIONS)
 
@@ -1104,13 +1314,19 @@ def _given(**params):
 
 
 def _call(method, /, **params):
-    """Call the app, reconnecting once across a dropped connection.
+    """Call the app, once.
 
     `method` is positional-ONLY, like lobole.client.call's: an RPC
     parameter named "method" (describe narrows by one) would otherwise
     collide with this function's own first argument — which happened the
     first time an MCP client called describe(method=...). The body goes
     through request() because that is the call that takes a timeout.
+
+    A call is never sent twice. It is retried on a new connection only when
+    the old one was found closed BEFORE the call was written
+    (ConnectionLost.sent is False: the app restarted, or dropped an idle
+    connection); a loss after that, or a timeout, surfaces with its message,
+    which says what is known (docs/scripting/mcp.md#a-failed-call).
     """
     global _client
     for attempt in (1, 2):
@@ -1118,9 +1334,9 @@ def _call(method, /, **params):
             _connect()
         try:
             return _client.request(method, params)
-        except (ConnectionError, BrokenPipeError, OSError):
-            _client = None  # stale socket (app restarted?) — retry fresh
-            if attempt == 2:
+        except ConnectionLost as e:
+            _client = None
+            if e.sent or attempt == 2:
                 raise
 
 
@@ -2428,7 +2644,9 @@ _reference("add_drawing_view", "Add a projected VIEW of a part to the ACTIVE dra
           "scale_expr / position_expr ([x, y] texts, '' for a number) / "
           "rotation_deg_expr bind them to the project's variables. "
           "The view is added but NOT projected — call update_drawing. "
-          "Returns the new view id.")
+          "Returns the new view id, its `scale` and `position`. dry_run: true "
+          "answers that (no id) plus `issues`, the check_drawing rows it would "
+          "add, and adds nothing.")
 
 
 _reference("remove_drawing_view", "Remove a view (by id) from the active drawing.")
@@ -2504,7 +2722,8 @@ _reference("add_drawing_dim", "Add a driven dimension to a view of the active dr
           "when collinear and evenly spaced). offset = [x,y] label offset in "
           "sheet mm; OMIT it to auto-place the dim clear of the view. The "
           "value is MEASURED from the projected geometry (read-only). Returns "
-          "the id, measured value/text, and the stored offset.")
+          "the id, measured value/text, and the stored offset. dry_run: true "
+          "answers the same (no id) plus `issues` and adds nothing.")
 
 
 _reference("remove_drawing_dim", "Remove a dimension (by id) from the active drawing.")
@@ -2603,8 +2822,13 @@ def rpc(method: str, params: dict | None = None) -> dict:
           "for anything fancier). print() what matters: stdout/stderr come "
           "back (capped at 20000 chars each). Relative file paths land in "
           "the returned cwd, a scratch directory. Same trust domain as the "
-          "rpc tool — it drives the same instance with the same powers.")
-def execute_script(script: str, timeout: float = 120.0) -> dict:
+          "rpc tool — it drives the same instance with the same powers. "
+          "`expect` {volume_mm3?, mass_g?, body_count?, bbox_mm?, "
+          "tolerance_pct, part?} is what the script should have built: "
+          "after a script that exits 0 it is judged by check_expect, and a "
+          "miss is an error naming each number, with the script's output.")
+def execute_script(script: str, timeout: float = 120.0,
+                   expect: dict | None = None) -> dict:
     import pathlib
     import subprocess
     _connect_if_needed()
@@ -2638,6 +2862,19 @@ def execute_script(script: str, timeout: float = 120.0) -> dict:
     out = {"exit": proc.returncode, "stdout": cap(proc.stdout),
            "stderr": cap(proc.stderr), "cwd": cwd,
            "attached": attached_to()}
+    # A script that exits 0 is not thereby a script that built what it was
+    # for: the stated numbers are judged, as a batch's are.
+    if expect is not None and proc.returncode == 0:
+        from lobole.errors import ExpectationFailed
+        try:
+            out["expect"] = _call("check_expect", **expect)
+        except ExpectationFailed as e:
+            raise ExpectationFailed(
+                f"the script exited 0, and {e} Its output:\n"
+                + out["stdout"][-4000:]
+                + ("\nstderr:\n" + out["stderr"][-2000:]
+                   if out["stderr"] else ""),
+                e.misses, out, e.checks) from None
     return out
 
 
@@ -2662,12 +2899,146 @@ def instances() -> dict:
                      "Pin one with LOBOLE_PORT=<port> if several are up.")}
 
 
+# ---------------------------------------------------------------------------
+# The documents help() serves
+#
+# The prompt and the describe rows cite docs/... pages (the review
+# checklist, a section of the simulation README). An agent with this server
+# alone -- `uv tool install`, no checkout -- could not open one, so help()
+# serves them: every area document, shipped in the wheel as package data
+# (pyproject.toml: lobole/_docs), the plans left out. A citation's #anchor
+# narrows the answer to that section. mcp_formats_gate holds every docs/
+# path an agent-facing text cites to one served here, its anchor included
+# (docs/scripting/mcp.md#served-documents).
+# ---------------------------------------------------------------------------
+
+# Short names for the documents the prompt sends an agent to.
+DOC_TOPICS = {"review-checklist": "docs/inspect/review-checklist.md"}
+
+# The served documents written for an agent to follow, rather than as
+# reference: held to the method tables with every other agent-facing text.
+AGENT_DOCS = ("docs/inspect/review-checklist.md",)
+
+
+def _docs_root():
+    """Where the documents are: the wheel's package data, else the
+    checkout's docs/ (in the repo nothing is installed)."""
+    import pathlib
+    here = pathlib.Path(__file__).resolve().parent
+    shipped = here / "_docs"
+    if shipped.is_dir():
+        return shipped
+    return here.parent.parent / "docs"
+
+
+def served_documents():
+    """Every document help() serves, as its docs/... path."""
+    root = _docs_root()
+    if not root.is_dir():
+        return []
+    return sorted("docs/" + p.relative_to(root).as_posix()
+                  for p in root.rglob("*.md")
+                  if p.relative_to(root).parts[0] != "plans")
+
+
+def heading_anchor(heading):
+    """The #anchor a markdown heading gets: GitHub's rule, as the [docs]
+    convention test (tests/test_conventions.cpp) resolves them."""
+    out = []
+    for c in heading.strip():
+        if c.isalnum() or ord(c) >= 0x80:
+            out.append(c.lower())
+        elif c in " -":
+            out.append("-")
+        elif c == "_":
+            out.append("_")
+    slug = "".join(out).lstrip("-")
+    for dash in "\u2014\u2013\u203a\u2039\u00bb\u00ab\u201c\u201d" \
+                "\u2018\u2019\u2026\u00d7":
+        slug = slug.replace(dash, "")
+    return slug
+
+
+def document_section(path, anchor=""):
+    """A served document's text, or the section `anchor` names: from its
+    heading to the next heading of the same or a higher level. None when
+    the path is not served or the anchor names no heading."""
+    import re
+    if path in DOC_TOPICS:
+        path = DOC_TOPICS[path]
+    if not path.startswith("docs/") or path not in served_documents():
+        return None
+    text = (_docs_root() / path[len("docs/"):]).read_text(encoding="utf-8")
+    if not anchor:
+        return text
+    lines = text.splitlines()
+    fence = False
+    start = level = None
+    seen: dict[str, int] = {}
+    for i, line in enumerate(lines):
+        if line.startswith("```"):
+            fence = not fence
+        if fence:
+            continue
+        m = re.match(r"^(#{1,6})\s+(.*)$", line)
+        if not m:
+            continue
+        slug = heading_anchor(m.group(2))
+        seen[slug] = seen.get(slug, -1) + 1
+        if seen[slug]:
+            slug += f"-{seen[slug]}"
+        if start is None:
+            if slug == anchor:
+                start, level = i, len(m.group(1))
+        elif len(m.group(1)) <= level:
+            return "\n".join(lines[start:i]).rstrip() + "\n"
+    if start is None:
+        return None
+    return "\n".join(lines[start:]).rstrip() + "\n"
+
+
+def _document(ask):
+    """help()'s answer for a document: `ask` is a topic name or a docs/
+    path, an #anchor allowed."""
+    path, _, anchor = ask.partition("#")
+    text = document_section(path, anchor)
+    if text is None:
+        import difflib
+        known = sorted(DOC_TOPICS) + served_documents()
+        near = difflib.get_close_matches(path, known, n=3)
+        raise ValueError(
+            f"no served document {ask!r}" + (f" (an anchor that names no "
+                                              f"heading in {path})"
+                                              if document_section(path)
+                                              is not None else "")
+            + (f"; close: {', '.join(near)}" if near else "")
+            + ". help() lists the documents.")
+    return {"document": DOC_TOPICS.get(path, path)
+            + (f"#{anchor}" if anchor else ""), "text": text}
+
+
 @mcp.tool(description="Documentation for one RPC: what it does, its "
           "arguments, and the traps. Call with no argument for the index of "
-          "everything reachable through rpc(). This is the prose that used "
+          "everything reachable through rpc(), the documents it serves and "
+          "the worked examples. help('review-checklist') (or the path of any "
+          "document a text cites, #anchor and all) returns that document; "
+          "help('examples') lists complete builds with their stated "
+          "results, and help(example=name) returns one, ready to send. "
+          "This is the prose that used "
           "to be preloaded as 118 tool descriptions — same words, fetched "
           "when they matter.")
-def help(method: str = "") -> dict:
+def help(method: str = "", example: str = "") -> dict:
+    if example:
+        if method:
+            raise ValueError("help takes `method` or `example`, not both")
+        return _example(example)
+    if method == "examples":
+        return {"examples": [{"name": e["name"], "about": e["about"]}
+                             for e in EXAMPLES],
+                "hint": "help(example=name) returns one: send its `calls` "
+                        "as rpc('batch', {calls, expect}), then its `then`."}
+    if method in DOC_TOPICS or method.startswith("docs/"):
+        return _document(method)
     if not method:
         return {"methods": sorted(_REFERENCE),
                 "exposed_as_tools": sorted(_EXPOSED),
@@ -2676,8 +3047,14 @@ def help(method: str = "") -> dict:
                 "importing": {
                     "STEP, IGES, STL, OBJ, PLY, glTF, BREP": "import_step",
                     "DXF, SVG (into a sketch)": "import_sketch"},
+                "documents": {"topics": DOC_TOPICS,
+                              "served": served_documents()},
+                "examples": [e["name"] for e in EXAMPLES],
                 "hint": "help('add_mate') for one; describe() for the "
-                        "app's own authoritative type tables."}
+                        "app's own authoritative type tables; "
+                        "help('docs/simulation/README.md#buckling') for a "
+                        "document's section; help('examples') for builds "
+                        "that run."}
     if method in _EXPOSED and method not in _REFERENCE:
         return {"method": method,
                 "doc": "Exposed directly as the MCP tool of the same "

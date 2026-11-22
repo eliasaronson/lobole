@@ -10,9 +10,11 @@ app = connect()                         # the one announced instance, or port=
 part = app.part("piston")               # create a part tab (create=False opens one)
 bore = part.param("bore", 86)           # a variable, and a Param that knows it
 body = part.cylinder("Top", d="bore", height=40)  # a Body: a sketch + extrude
-part.fillet(body.edges(circular=True), r=2)
 seat = part.frame("wrist_pin", body.faces(kind="cylinder")[0])
+part.fillet(body.edges(circular=True), r=2)
 part.check()                            # raises on any broken feature
+# pi * 43^2 * 40, less the two 2 mm rims: raises ExpectationFailed on a miss
+app.check_expect(volume_mm3=231893.2, tolerance_pct=0.05, part=part.id)
 ```
 
 `connect()` with no port attaches to the one instance in the registry and
@@ -41,7 +43,9 @@ cannot drift from the server.
   `add_motion_study(from_=0, to=360)`.
 - `app.call(method, **params)` is the raw escape hatch; `app.methods()` and
   `app.help(method)` list and describe. `help` is the same lookup as the
-  plain client's and the MCP server's (`lobole.client.method_help`).
+  plain client's and the MCP server's for a method
+  (`lobole.client.method_help`); the documents and worked examples the MCP
+  server's `help` also serves are `lobole.mcp`'s ([mcp.md](mcp.md#served-documents)).
 - `app.transaction()` / `part.batch()` is a context manager over the `batch`
   RPC ([rpc.md](rpc.md#batch)); handles returned inside it are `$ref`s. On
   `App` it is `transaction` because `app.batch` is the generated RPC.
@@ -81,7 +85,8 @@ Everything the package raises is a `lobole.LoboleError`, in one hierarchy
 
 ```
 LoboleError
-├── ConnectionLost      the app went away mid-call (also a ConnectionError)
+├── ConnectionLost      the connection went (also a ConnectionError); .sent
+├── CallTimedOut        no answer in time; the app is still on it (a TimeoutError)
 ├── Refused             the call was not done, and nothing changed
 │   ├── MissingArgument, UnknownArgument, InvalidArgument
 │   ├── StaleRevision, StaleSnapshot, BudgetExceeded
@@ -89,6 +94,7 @@ LoboleError
 │   ├── DoesNotFit      a Fillet's or Chamfer's size does not build; .fits_mm does
 │   └── InternalError   the handler fell over; rolled back all the same
 ├── NonFiniteError      the call ran, and its answer held NaN/inf
+├── ExpectationFailed   the call ran, and missed what its `expect` stated
 └── SdkError            misuse the SDK caught without asking the app
 ```
 
@@ -102,6 +108,35 @@ same diagnostic the app would have sent, so a caller cannot tell which side
 refused (`rpc_contracts_smoke` holds the two equal). `SdkError` is never the
 app's: a keyword renamed to carry its unit, a handle used against another
 document.
+
+The two transport errors say what is known, because the one thing a caller
+must not do with either is guess:
+
+- **`CallTimedOut`**: no answer within the call's `timeout`
+  (`Client.request(..., timeout=s)`, or the connection's). The app is still
+  running the call and will finish it, so sending it again applies it
+  twice; the message says so, and points at `background_jobs`, a longer
+  `timeout`, or `async` where the method takes it. The connection stays
+  open, because closing it is what the app reads as the caller leaving (a
+  check or a solve without `outlive_client` is cancelled then); the late
+  answer is skipped by the next call, whose id it does not carry. The
+  client reads through its own buffer rather than `socket.makefile`, whose
+  file refuses every read after one timed out.
+- **`ConnectionLost`**: `.sent` is false when the connection was found
+  closed before the call was written (the app restarted, or dropped an idle
+  connection): nothing reached the app, and the next call opens a new
+  connection. True when it went while the app had the call: whether it was
+  applied is not known, and the message says to compare `get_state`'s
+  revision before sending it again.
+
+`ExpectationFailed` is a batch's or `check_expect`'s [`expect`](rpc.md#expect)
+missing: `.checks` the judged numbers, `.misses` the sentences, `.result`
+the answer. A batch is applied when it raises, as one undo step.
+
+A `Refused` keeps its meaning: nothing changed. `client_transport_smoke`
+holds the three cases against a stand-in server that counts what it is
+sent; `requirements_smoke` holds the timeout against the app, with a check
+held longer than its caller waits.
 
 ## The hand-written layer
 

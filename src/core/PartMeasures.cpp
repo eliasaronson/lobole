@@ -146,4 +146,28 @@ SectionReading SectionAreaMeasure(const Document& doc,
   return r;
 }
 
+size_t BodyCount(const Document& doc) {
+  size_t n = 0;
+  for (const Body& b : doc.GetBodies())
+    n += b.reference ? 0 : 1;
+  return n;
+}
+
+glm::dvec3 BoxSize(const Document& doc) {
+  bool any = false;
+  glm::dvec3 lo(0.0), hi(0.0);
+  for (const Body& b : doc.GetBodies()) {
+    if (b.reference)
+      continue;
+    glm::dvec3 mn(0.0), mx(0.0);
+    BodyBounds(b, mn, mx, /*tight=*/true);
+    lo = any ? glm::min(lo, mn) : mn;
+    hi = any ? glm::max(hi, mx) : mx;
+    any = true;
+  }
+  if (!any)
+    throw std::runtime_error("the part has no body to measure a box of");
+  return hi - lo;
+}
+
 } // namespace partmeasure

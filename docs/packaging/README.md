@@ -879,8 +879,11 @@ The Python package `lobole` — the client, the SDK and the MCP server — ships
 separately from the app: the repository's `pyproject.toml` builds it from
 `python/lobole/` with `lobole-mcp` / `lobole-remote` entry points
 (`uv tool install <repo>`, then `claude mcp add lobole -- lobole-mcp`).
-`tests/packaging_smoke.py` builds the wheel and imports every module from
-it alone. The app also stages the package beside its assets and installs it
+It also maps `lobole._docs` to `docs/` (the plans left out), so the wheel
+carries the documents the MCP server's `help()` serves
+([mcp.md](../scripting/mcp.md#served-documents)).
+`tests/packaging_smoke.py` builds the wheel, imports every module from it
+alone, and checks it carries those documents. The app also stages the package beside its assets and installs it
 under `share/lobole/python/`, so the terminal panel can start the MCP server
 (`python3 -m lobole.mcp`) against its own instance
 ([terminal](../ui/terminal.md)). See

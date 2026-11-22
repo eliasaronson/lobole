@@ -35,7 +35,7 @@ install from a path or a git URL. `mcp` is pinned to the 2.x line
 (`>=2,<3`), the SDK `shell.nix` gives and so the one every test here runs:
 1.x has no `MCPServer`, and the next major is a migration of the server, not
 a loosened pin. `packaging_smoke` builds the wheel and imports every module
-from it alone.
+from it alone, and checks it carries the documents `help()` serves.
 
 ## Finding the app
 
@@ -50,8 +50,10 @@ The server resolves which instance to talk to, in this order:
 4. **None** — autostart (below), or, with autostart off, refuse naming the
    exact start command for a Loböle that is actually installed here.
 
-It connects lazily on the first tool call and reconnects once across a
-dropped connection, so registering it before the app is running is fine.
+It connects lazily on the first tool call and reconnects across a
+connection found dropped before a call is sent ([a failed
+call](#a-failed-call)), so registering it before the app is running is
+fine.
 `describe` and `execute_script` report what they attached to (`attached`:
 "Loböle on port 9090: bracket.lob (unsaved changes), gui"), and the
 `instances` tool lists what is running. That line comes from `ping`, live.
@@ -113,6 +115,8 @@ reached with **`rpc(method, params)`** and documented by **`help(method)`**.
   this server's longer prose in place of the row's one-liner where it keeps
   some (`_reference` in `lobole/mcp.py`: prose, never a wrapper). The lookup
   is `lobole.client.method_help`, which the python client's `help` also is.
+  `help` also serves the documents the texts cite and the worked examples
+  ([served documents](#served-documents), [worked examples](#worked-examples)).
 - An announced tool in front of an RPC takes exactly that RPC's keys and
   passes only the ones given, so every default is the app's;
   `mcp_formats_gate` holds each tool's signature to its row.
@@ -123,6 +127,7 @@ reached with **`rpc(method, params)`** and documented by **`help(method)`**.
   prefix, so `_Server.call_tool` turns the `RuntimeError` (every
   `lobole.errors` refusal is one), `ValueError` and `OSError` the tools raise
   into one; any other exception is a bug here and stays a logged crash.
+- A call is never sent twice ([below](#a-failed-call)).
 - Tool calls run one at a time, in the order they arrive. mcp 2 runs each
   request as its own task and a sync tool on a worker thread, and two calls
   sharing the one app connection from two threads would interleave their
@@ -137,6 +142,21 @@ up front small; the `rpc-only` benchmark arm measures that trade
 questions: `mode` says whether a rendered frame exists, `ui_actions` whether
 this build can drive its GUI.
 
+### A failed call
+
+`_call` sends each call once. It reconnects and sends again only when the
+connection was found closed before the call was written
+(`ConnectionLost.sent` false: the app restarted, or dropped an idle
+connection), which the client checks before every write. A connection lost
+after that, or a timeout, reaches the model with its message, which says
+what is known ([the SDK's errors](sdk.md#errors)): a timeout, that the app
+is still running the call and it must not be sent again; a loss mid-call,
+that whether it was applied is unknown and `get_state`'s revision tells. It
+used to catch every `OSError`, which a timeout and a loss both are, and send
+the same call again on a new connection, so a slow `add_feature` landed
+twice. A refusal's tool error ends "nothing was changed, so it is safe to
+send again corrected". `client_transport_smoke` counts the sends.
+
 ### `execute_script`
 
 Runs a Python snippet in a subprocess with `d` pre-bound to a connected
@@ -147,7 +167,10 @@ scratch `cwd`, and `timeout` (default 120 s) bounds long solves. This is the
 path for building a part with loops or computed arguments — one round trip
 instead of a tool call per step — for an agent that has no shell of its own.
 It is the same trust domain as `rpc`: the same instance, the same powers,
-gated by the MCP host's tool approval.
+gated by the MCP host's tool approval. A script that exits 0 is not thereby one that built what it was
+for: `expect` (the keys of a batch's [`expect`](rpc.md#expect)) is judged
+by `check_expect` after it, and a miss is a tool error naming each number,
+with the script's output attached.
 
 ### The workflow prompt
 
@@ -184,6 +207,9 @@ test is taken out of the prompt rather than left in untested.
 | `get_state` carries `selection` and `selection_items` | `workflow_claims_smoke` |
 | a buckling study's `buckling_factor` (and `factor_of_safety`) is its governing factor; a study requirement never checked is `unchecked` | `buckling_smoke` |
 | the GUI-driving RPCs need a window; offscreen renders | `remote_smoke`, `offscreen_smoke` |
+| a batch given `expect` answers `expect.ok`, or an error naming each number missed with the batch applied | `batch_smoke` |
+| `help('examples')` lists builds that run to their stated numbers | `agent_examples_smoke`, `mcp_smoke` |
+| `help('review-checklist')` serves the checklist | `mcp_smoke`, `packaging_smoke` |
 | every name it uses is an announced tool or a registered RPC | `mcp_formats_gate`, `mcp_smoke` |
 
 The last row is the drift gate, and it covers every text, not only this
@@ -198,7 +224,8 @@ text it reads is held to the method tables by `tests/agent_prose.py`, run
 over all of them by `mcp_formats_gate` (headless, the default path):
 `WORKFLOW`, the server's `INSTRUCTIONS`, `FEATURE_FORMATS`,
 `CONSTRAINT_FORMATS`, every announced tool's description, every
-`_reference` text `help()` serves, and every `describe` row's prose.
+`_reference` text `help()` serves, every `describe` row's prose, and the
+served documents an agent is sent to follow ([below](#served-documents)).
 
 `unknown_names(text, describe, tools, vocabulary)` returns what nothing
 registers:
@@ -209,7 +236,8 @@ registers:
   `params` text, and its name lists: mate types, material slugs, ...), nor a
   word of that text's entry in `VOCABULARY`, which says where each comes
   from; an `x_expr` counts as the twin of `x`;
-- whatever `rpc('x')` or `help('x')` names that is not a method or a tool;
+- whatever `rpc('x')` or `help('x')` names that is not a method, a tool or
+  a `help()` topic (a document's short name, `examples`);
 - a key in `rpc('m', {a, b})`'s braces that `m`'s row does not take.
 
 The prompt texts (`WORKFLOW`, `INSTRUCTIONS`, the two format texts) are
@@ -221,6 +249,49 @@ gate plants a call, a word and a key in one text of each kind and fails
 unless all three come back. `mcp_smoke` keeps what only the transport
 shows: the prompt it is served is `WORKFLOW`, and names nothing the
 announced tools and the app lack.
+
+### Served documents
+
+The prompt and the `describe` rows cite `docs/...` pages: the review
+checklist, a section of the simulation README. An agent on this surface
+alone (`uv tool install`, no checkout) could not open one, so `help()`
+serves them: `help('docs/simulation/README.md#buckling')` returns that
+section (from its heading to the next of the same level), the path alone
+the whole page, and `help('review-checklist')` the checklist by its short
+name (`DOC_TOPICS`). `help()` with no argument lists every served document.
+They are every area document under `docs/`, the plans left out, shipped in
+the wheel as package data (`pyproject.toml` maps `lobole._docs` to `docs/`;
+in the checkout they are read where they are), and `packaging_smoke` holds
+the wheel to carrying each one and `help` to reading the wheel's.
+
+`mcp_formats_gate` fails on a `docs/` path in any agent-facing text that
+`help()` does not serve, or whose `#anchor` names no heading there (the
+anchor rule is the `[docs]` convention test's); a served document's own
+relative links count as its citations. The served documents an agent is
+sent to follow (`AGENT_DOCS`: the checklist) are scanned for names with the
+other texts; the rest are reference pages written for this repo's
+developers, full of test and GUI ids, and are held to their citations only.
+
+### Worked examples
+
+The prompt teaches by fragments; `EXAMPLES` in `lobole/mcp.py` are complete
+builds, one per recipe it teaches: a plate with holes, a revolved bushing, a
+boss sketched on a face, two parts mated in an assembly, a sheet-metal
+bracket. Each is `{name, about, setup?, calls, expect, then}`: `calls` a
+`batch`, `expect` its stated result (judged by the batch,
+[rpc.md](rpc.md#expect)), `setup` the calls a batch cannot hold (making a
+tab) sent one at a time before it, and `then` a variable changed with the
+result stated after it. `help('examples')` lists them and
+`help(example=name)` returns one, ready to send; `WORKFLOW` points at them
+where it describes the loop. Each starts from a new project, so an element
+name may carry its feature's id (`2/cap1`); the `about` says so.
+
+`agent_examples_smoke` (headless) sends every example as written, fails on
+an `expect_failed` before or after its `then`, and fails if an example with
+one number changed passes. The numbers are the examples' own, so there is no
+second copy of them to drift. The first fenced block of
+[sdk.md](sdk.md) is run the same way, against the test's own instance, and
+states its own volume with `check_expect`.
 
 ### Portable schemas
 
@@ -251,8 +322,15 @@ and its prose.
 
 - `mcp_formats_gate` — the prose against `describe`, each announced
   tool's signature against its RPC's row, every agent-facing text's names
-  ([above](#every-text-names-only-what-exists)) and the schemas'
-  portability, headless.
+  ([above](#every-text-names-only-what-exists)), every cited `docs/` path
+  and `#anchor` being one `help()` serves, no `help()` topic named as a
+  method or a tool, and the schemas' portability, headless (each with a
+  planted case).
+- `client_transport_smoke` — a timeout, a loss mid-call and a stale socket
+  against a stand-in server that counts what it is sent
+  ([a failed call](#a-failed-call)).
+- `agent_examples_smoke` (headless) — every worked example, and the first
+  block of sdk.md, build what they state ([worked examples](#worked-examples)).
 - `python_package_compiles` — compiles every module of the package on the
   default path, with no display and no SDK. `mcp_smoke` is GUI-labelled, so
   without it a syntax error in the server would pass every default run.
@@ -264,7 +342,8 @@ and its prose.
   neither a tool nor an RPC; skips without the `mcp` SDK.
 - `workflow_claims_smoke` (headless) and `rpc_digest_gate` (source, no
   app) — the prompt's claims in the table above.
-- `packaging_smoke` — the wheel `pyproject.toml` builds, imported alone.
+- `packaging_smoke` — the wheel `pyproject.toml` builds, imported alone,
+  carrying the served documents.
 
 `--only-tools a,b,c` serves only the named tools and refuses loudly if it
 cannot (an unknown name, or a tool still listed after `remove_tool`), because a

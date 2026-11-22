@@ -39,6 +39,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "generators"))
 sys.path.insert(0, HERE)
 from lobole.client import Client  # noqa: E402
+from lobole.errors import CallTimedOut  # noqa: E402
 from lobole.sdk import connect  # noqa: E402
 from fem_smoke import build_bar  # noqa: E402
 from slider_crank import build as build_crank  # noqa: E402
@@ -476,6 +477,58 @@ def unmeshed_part(d):
     expect(r["receipt"]["standing"] != "verified", r["receipt"])
 
 
+def count_and_box(d):
+    """body_count and bbox (docs/requirements/README.md#measures): stated,
+    checked, failed by an edit, and read by a design sweep's points."""
+    d.call("new_project")
+    d.call("set_variable", name="plate_w", expression="40")
+    d.call("add_feature", feature={
+        "type": "Box", "name": "Plate", "on": "Top", "centered": False,
+        "width": 40, "width_expr": "plate_w", "depth": 20, "height": 5})
+    doc = bar_part(d)
+    add(d, "one body", {"kind": "body_count", "document": doc},
+        {"kind": "within", "min": 1, "max": 1}, "it prints as one piece")
+    add(d, "fits the bed", {"kind": "bbox", "document": doc, "axis": "x"},
+        {"kind": "at_most", "value": 50}, "a 50 mm bed")
+    refused(d, "add_requirement", "accepted: x, y, z", name="x",
+            measure={"kind": "bbox", "document": doc, "axis": "w"},
+            bound={"kind": "at_most", "value": 1})
+    refused(d, "add_requirement", "needs `axis`", name="x",
+            measure={"kind": "bbox", "document": doc},
+            bound={"kind": "at_most", "value": 1})
+    r = {row["name"]: row for row in
+         d.call("check_requirements")["requirements"]}
+    expect(r["one body"]["state"] == "pass" and r["one body"]["value"] == 1
+           and r["fits the bed"]["state"] == "pass"
+           and abs(r["fits the bed"]["value"] - 40) < 1e-6
+           and r["fits the bed"]["unit"] == "mm", r)
+
+    # A sweep's every point reads them on its copy.
+    sweep = d.call("design_sweep", variables=[
+        {"name": "plate_w", "min": 30, "max": 70}], samples=5)
+    reads = {}
+    for point in sweep["points"]:
+        width = point["values"]["plate_w"]
+        rows_at = {q["name"]: q for q in point["requirements"]}
+        reads[width] = (rows_at["fits the bed"]["state"],
+                        rows_at["one body"]["state"])
+    expect(reads and all(st == ("pass" if w <= 50 else "fail")
+                         and one == "pass"
+                         for w, (st, one) in reads.items()),
+           f"each point judges the box at its width: {reads}")
+
+    # An edit fails both: a second body, and a wider plate.
+    box(d, (100, 0, 0), (5, 5, 5), "Stray")
+    d.call("set_variable", name="plate_w", expression="60")
+    r = {row["name"]: row for row in
+         d.call("check_requirements")["requirements"]}
+    expect(r["one body"]["state"] == "fail" and r["one body"]["value"] == 2,
+           r["one body"])
+    expect(r["fits the bed"]["state"] == "fail"
+           and abs(r["fits the bed"]["value"] - 105) < 1e-6,
+           r["fits the bed"])
+
+
 def expression(d):
     """An expression requirement over the variables is measured where the
     values move (docs/requirements/README.md#expression): the set_variable
@@ -596,6 +649,29 @@ def off_frame(binary):
                         "requirements_smoke")
         now = rows(d)["crank clears piston"]
         expect(now["state"] == "pass" and now["value"] == gap, now)
+
+        # A caller that gives the check less time than it takes: told the
+        # app is still on it and not to send it again, with the connection
+        # kept (closing it would cancel the check, below), and its next call
+        # answered with its own answer (docs/scripting/sdk.md#errors).
+        hurried = Client(app.port, timeout=30)
+        try:
+            hurried.request("check_requirements", {"recompute": True},
+                            timeout=0.5)
+            expect(False, "a 2 s check answered inside 0.5 s")
+        except CallTimedOut as e:
+            expect(isinstance(e, TimeoutError)
+                   and "do not send it again" in str(e), str(e))
+        t0 = time.time()
+        while any(j.get("kind") == "requirements" for j in
+                  other.call("background_jobs").get("jobs", [])):
+            expect(time.time() - t0 < 30, "the timed-out check never ended")
+            time.sleep(0.05)
+        expect(hurried.call("ping")["ok"],
+               "the timed-out client's next call gets its own answer")
+        expect(rows(other)["crank clears piston"]["state"] == "pass",
+               "the timed-out check ran to its end")
+        hurried.close()
 
         # The asking client leaves: its check goes with it.
         gone = Client(app.port, timeout=30)
@@ -739,6 +815,7 @@ def main():
         fits(d)
         cam(d)
         section_area(d)
+        count_and_box(d)
         expression(d)
     print("requirements_smoke: ok")
     return 0

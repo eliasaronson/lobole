@@ -138,10 +138,31 @@ def prose_problems(m, desc, tools):
     literals = agent_prose.source_literals(source_files())
     texts = agent_prose.agent_texts(
         m, desc, {n: d for n, (d, _) in tools.items()})
-    for name, unknown in agent_prose.scan(texts, desc, names,
-                                          literals).items():
+    topics = set(m.DOC_TOPICS) | {"examples"} | {
+        e["name"] for e in m.EXAMPLES}
+    for name, unknown in agent_prose.scan(texts, desc, names, literals,
+                                          topics).items():
         problems.append(f"{name} names what nothing registers: "
                         f"{', '.join(unknown)}")
+    # Every docs/ path a text cites is one help() serves, its anchor a
+    # heading there (docs/scripting/mcp.md#served-documents).
+    for name, text in texts.items():
+        bad = agent_prose.unserved_paths(name, text, m)
+        if bad:
+            problems.append(f"{name} cites what help() does not serve: "
+                            f"{', '.join(bad)}")
+    # Planted, built from pieces so the [docs] convention test does not read
+    # them as this file's own citations.
+    missing = "docs/" + "nowhere.md"
+    no_heading = "docs/inspect/review-checklist.md#" + "no-such-heading"
+    if agent_prose.unserved_paths(
+            "WORKFLOW", f"see {missing} and {no_heading}", m) != sorted(
+                [no_heading, missing]):
+        problems.append("the served-document check does not see a planted "
+                        "path and anchor")
+    clash = topics & ({r["name"] for r in desc["methods"]} | names)
+    if clash:
+        problems.append(f"a help() topic is also a method or a tool: {clash}")
     # One of each kind of text, with a planted call, a planted word and a
     # planted key of a real method: each must come back.
     plant = (" Call rpc('make_it_so') on the frobnicated_widget, then "
@@ -152,7 +173,8 @@ def prose_problems(m, desc, tools):
         kinds.setdefault(name.split(":", 1)[0], name)
     for name in kinds.values():
         planted = {name: texts[name] + plant}
-        got = agent_prose.scan(planted, desc, names, literals).get(name, [])
+        got = agent_prose.scan(planted, desc, names, literals,
+                               topics).get(name, [])
         missing = [w for w in want if w not in got]
         if missing:
             problems.append(f"the prose scan is blind in {name}: a planted "

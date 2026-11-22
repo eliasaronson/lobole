@@ -21,7 +21,8 @@ In the repo nothing is installed: `shell.nix` and ctest put `python/` on
 without touching `sys.path`; a script in `tools/` that runs outside the
 shell puts `python/` on its own path. Elsewhere it installs as a wheel
 (`uv tool install <repo>`; [packaging](../packaging/README.md#the-agent-surface)),
-and `packaging_smoke` builds that wheel and imports every module from it.
+and `packaging_smoke` builds that wheel, imports every module from it and
+checks it carries the documents `help()` serves.
 
 Pages:
 
@@ -29,7 +30,8 @@ Pages:
   a response and a refusal must carry, `batch` and `$ref`, typed inspection
   contracts.
 - [mcp.md](mcp.md) — the MCP server: setup, finding the instance, autostart,
-  the tool surface, `execute_script`.
+  the tool surface, a failed call, `execute_script`, the prompt and the
+  checks on every text, the documents and worked examples `help()` serves.
 - [sdk.md](sdk.md) — the Python SDK: the generated RPC surface, geometry
   references, validation stages, generator-owned components.
 - [benchmark.md](benchmark.md) — the agent benchmark in `benchmarks/`.
@@ -142,7 +144,8 @@ process started, so the instance is serving old code.
   returns that method's row alone; an unknown name is refused with close
   matches. `help(method)` (also `call("help", method=...)`, answered in the
   client) is `method_help`, the lookup the SDK and the MCP server's `help`
-  share: the method's doc, params (and `param_types` for a typed one) and
+  share for a method (the server's also serves documents and worked
+  examples, [mcp.md](mcp.md#served-documents)): the method's doc, params (and `param_types` for a typed one) and
   returns from its `describe` row. Also
   a CLI, `python3 -m lobole.client <port> <method> ['<params-json>']`
   (`lobole-remote` once installed).
@@ -262,11 +265,15 @@ Headless, on the default `ctest -LE gui` path:
 - `sdk_smoke`, `replay_smoke`, `fanout_smoke`,
   `component_update_smoke`, `inspection_contracts_smoke`,
   `inspection_contracts_generated`, `inspection_typing_gate`.
-- `mcp_formats_gate`, `mcp_autostart_smoke`, `workflow_claims_smoke` — the
-  MCP server and the claims its workflow prompt makes ([mcp.md](mcp.md)).
+- `mcp_formats_gate`, `mcp_autostart_smoke`, `workflow_claims_smoke`,
+  `agent_examples_smoke` — the MCP server, the claims its workflow prompt
+  makes and the worked examples it hands out ([mcp.md](mcp.md)).
+- `client_transport_smoke` — a timeout, a loss mid-call and a stale socket
+  say what is safe, and nothing is sent twice ([sdk.md](sdk.md#errors)).
 - `python_package_compiles` — every module of the package compiles;
-  `packaging_smoke` — the wheel builds, carries every module and `py.typed`,
-  and each module imports from it alone.
+  `packaging_smoke` — the wheel builds, carries every module, `py.typed`
+  and every document `help()` serves (no plan), and each module imports
+  from it alone.
 - `offscreen_smoke` — the offscreen renderer over RPC (skips without a
   Vulkan device).
 - `port_claims_smoke` — an instance with its own `XDG_STATE_HOME` claims

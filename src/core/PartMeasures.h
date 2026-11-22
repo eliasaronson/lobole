@@ -60,4 +60,14 @@ struct SectionReading {
 SectionReading SectionAreaMeasure(const Document& doc,
                                   const nlohmann::json& measure);
 
+// How many bodies a part has, reference bodies (a Derived ghost) not
+// counted: what a body_count requirement and a batch's `expect` read.
+size_t BodyCount(const Document& doc);
+
+// The size along x, y and z of the part's measured box -- the tight box the
+// digest reports per body (BodyBounds), over every body that is not a
+// reference -- what a bbox requirement and a batch's `expect` read. Throws
+// when the part has no such body.
+glm::dvec3 BoxSize(const Document& doc);
+
 } // namespace partmeasure

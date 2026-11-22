@@ -1,0 +1,21 @@
+{
+  "format": "designer-document",
+  "version": 235,
+  "requirements": [
+    {"id": 1, "name": "one solid", "source": "the bracket prints as one piece",
+     "revision": 1,
+     "measure": {"kind": "body_count", "document": 7},
+     "bound": {"kind": "within", "min": 1, "max": 1},
+     "evidence": {"pass": true, "value": 1.0, "unit": "bodies",
+                  "input_hash": "0x0123456789abcdef", "revision": 1,
+                  "limit_min": 1.0, "limit_max": 1.0,
+                  "checked_at": "2026-11-22T12:00:00Z"}},
+    {"id": 2, "name": "fits a 256 mm bed", "revision": 1,
+     "measure": {"kind": "bbox", "document": 7, "axis": "x"},
+     "bound": {"kind": "at_most", "value": 256}}
+  ],
+  "features": [
+    {"type": "Box", "name": "Plate", "id": 1, "position": [0, 0, 0],
+     "width": 80, "depth": 40, "height": 5}
+  ]
+}

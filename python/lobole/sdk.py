@@ -466,8 +466,9 @@ class App(_RpcSurface):
     def help(self, method="") -> dict[str, Any]:
         """What `method` does, takes and returns — the one lookup every
         client shares (lobole.client.method_help), so the SDK, the plain
-        client and the MCP server's help() give the same answer. With no
-        method, the index."""
+        client and the MCP server's help() give the same answer about a
+        method. With no method, the index. (The documents and worked
+        examples the MCP server's help() also serves are lobole.mcp's.)"""
         from lobole.client import method_help
         return method_help(self._remote.call, method)
 
@@ -520,16 +521,17 @@ class App(_RpcSurface):
         creates, `create=False` opens an existing one, `reuse=True` either."""
         return _open_tab(self, name, "assembly", create, reuse)
 
-    def transaction(self, stop_on_error=True) -> Batch:
+    def transaction(self, stop_on_error=True, expect=None) -> Batch:
         """A `Batch` over several calls: one transaction, one regeneration,
-        one undo step, and a rollback if any of them fails.
+        one undo step, and a rollback if any of them fails; `expect` what it
+        should produce (Batch).
 
         Named `transaction` and not `batch` because `batch` is a generated
         RPC and `App.__getattr__` would hand you that instead — which fails
         with "missing required parameter 'calls'" and reads like a bug in the
         caller. `Part.batch()` is the same object for one part.
         """
-        return Batch(self, stop_on_error)
+        return Batch(self, stop_on_error, expect)
 
     def new(self) -> App:
         self.call("new_project")
@@ -2787,11 +2789,14 @@ class Part(_Tab):
         return self
 
     # --- transactions ------------------------------------------------------
-    def batch(self) -> Batch:
+    def batch(self, expect=None) -> Batch:
         """One transaction: `with part.batch() as b:` collects calls and
         sends them as one `batch` RPC — one regeneration, one undo step, and
-        a rollback if any of them fails."""
-        return Batch(self.app)
+        a rollback if any of them fails. `expect` what it should produce,
+        judged on this part (Batch)."""
+        if expect is not None and "part" not in expect:
+            expect = dict(expect, part=self.id)
+        return Batch(self.app, expect=expect)
 
     def _body_from(self, r, feature=None):
         """A feature response, as the Body it created (looked up after the
@@ -3613,10 +3618,16 @@ class Batch:
 
     An id returned inside the block is a `$ref`, so a sketch and the extrude
     that names it go in the same transaction.
+
+    `expect` states what the batch should produce, {volume_mm3?, mass_g?,
+    body_count?, bbox_mm?, tolerance_pct, part?}: judged after its last
+    regeneration, a miss raises ExpectationFailed with the batch applied
+    (docs/scripting/rpc.md#expect).
     """
 
-    def __init__(self, app, stop_on_error=True):
+    def __init__(self, app, stop_on_error=True, expect=None):
         self.app, self.calls, self.stop_on_error = app, [], stop_on_error
+        self.expect = expect
         self.results, self.response = [], None
 
     def __enter__(self):
@@ -3634,8 +3645,10 @@ class Batch:
         return queue
 
     def send(self) -> dict[str, Any]:
+        extra = {} if self.expect is None else {"expect": self.expect}
         self.response = self.app.batch(calls=self.calls,
-                                       stop_on_error=self.stop_on_error)
+                                       stop_on_error=self.stop_on_error,
+                                       **extra)
         self.results = [r.get("result") for r in self.response["results"]]
         return self.response
 
