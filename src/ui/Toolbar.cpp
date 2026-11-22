@@ -25,6 +25,7 @@
 #include "ui/Placement.h"
 #include "ui/PreviewFeature.h"
 #include "ui/RendererSync.h"
+#include "ui/ScanCompareTool.h" // ScanCompareRefusal
 #include "ui/SketchInteraction.h"
 #include "ui/SketchToolbar.h" // BeginSketchExtrude/Revolve (U8a)
 #include "ui/ViewActions.h"
@@ -734,6 +735,17 @@ void DrawModelToolbar(AppState& state) {
   CommandButton(state, "###tb_measure", "view.measure",
                 "Measure (pick 1-2 faces/edges; Esc to exit)",
                 state.measure.active);
+  // How far the model is from a scan, beside Measure: a map on the scan and
+  // the places past the tolerance. Disabled, it says why.
+  {
+    const std::string why = ScanCompareRefusal(state);
+    const std::string tip =
+        why.empty() ? "Compare to scan (how far a body is from a scan, as a "
+                      "map on the scan)"
+                    : "Compare to scan: " + why;
+    CommandButton(state, "###tb_compare_scan", "part.compare_scan", tip.c_str(),
+                  state.scanCompareTool.open);
+  }
 
   Divider();
 

@@ -12,8 +12,13 @@ job and answers when it lands, as one undo step. The box is its own turn
 four ways, so the reply's `note` says another attitude fits as well, and
 whichever it chose, the scan's bounding box is the box's. A datum is then
 fitted on the laid scan's top, and the placement and the datum read the
-same after save and reopen. `cancel_align`: a cancelled fit answers with a
-refusal and leaves the import where it stood.
+same after save and reopen. The laid scan is compared with the box
+(`compare_scan`, docs/inspect/README.md#how-far-a-body-is-from-a-scan, a
+`deviation` job): nearly all of it within its noise, no feature past the
+tolerance, and the same numbers after save and reopen; its map is shown
+and cleared (`set_scan_deviation`). `cancel_align`: a cancelled fit answers
+with a refusal and leaves the import where it stood; a cancelled compare
+answers with a refusal too.
 
 Usage: scan_align_smoke.py <path-to-designer-binary>
 """
@@ -147,6 +152,52 @@ def cancel_align(d, port, import_id, box_id):
     other.close()
 
 
+def cancel_compare(d, port, import_id, box_id):
+    """A compare is a `deviation` job with a cancel; cancelled, the waiting
+    call is refused, saying so."""
+    other = Client.wait_for(port)
+    out = {}
+
+    def go():
+        try:
+            out["answer"] = d.call("compare_scan", scan=import_id, body=box_id)
+        except RuntimeError as e:
+            out["error"] = str(e)
+
+    worker = threading.Thread(target=go)
+    worker.start()
+    job, deadline = None, time.time() + 30
+    while job is None:
+        job = next((j for j in other.call("background_jobs")["jobs"]
+                    if j["kind"] == "deviation"), None)
+        if job is None:
+            expect(worker.is_alive() and time.time() < deadline,
+                   f"no deviation job while the call waited: {out}")
+            time.sleep(0.02)
+    expect(job["cancellable"] is True, f"a compare can be cancelled: {job}")
+    other.call("cancel_background_job", kind="deviation")
+    worker.join(60)
+    expect(not worker.is_alive(), "the cancelled compare never answered")
+    expect("cancelled" in out.get("error", ""),
+           f"a cancelled compare is refused, saying so: {out}")
+    other.close()
+
+
+def compared(d, import_id, box_id):
+    r = d.call("compare_scan", scan=import_id, body=box_id)
+    print(f"compare: { {k: v for k, v in r.items() if k != 'hotspots'} }")
+    expect(r["within"] > 0.95, f"the laid scan is within its noise: {r}")
+    expect(r["tolerance_from"] in ("scan_noise", "chord"), r)
+    expect(r["floor_mm"] > 0, f"a B-Rep body states its chord: {r}")
+    expect(r["no_scan"] < 0.05, f"the scan covers the box: {r}")
+    expect(r["feature_count"] == 0,
+           f"nothing of the box is past the tolerance: {r['hotspots'][:3]}")
+    expect(r["receipt"]["standing"] == "verified", r["receipt"])
+    return {k: r[k] for k in ("within", "mean_mm", "rms_mm", "p95_mm",
+                              "min_mm", "max_mm", "no_scan", "tolerance_mm",
+                              "hotspot_count")}
+
+
 def main():
     binary = sys.argv[1]
     tmp = tempfile.mkdtemp(prefix="lobole_scan_align_")
@@ -158,6 +209,7 @@ def main():
     # Holds each fit before it computes (tests only), so the smoke sees the
     # job and cancels it while it runs.
     env["LOBOLE_TEST_ALIGN_MS"] = "1500"
+    env["LOBOLE_TEST_DEVIATION_MS"] = "1000"
     stl = os.path.join(tmp, "scan.stl")
     scan_of_box(stl, (23.0, -38.0, 61.0), (31.0, -12.0, 17.0))
     app = launch_app(binary, env=env)
@@ -211,6 +263,16 @@ def main():
 
         imp, dat = read()
         print(f"datum: {dat}")
+
+        # How far the box is from the laid scan, and its map.
+        cancel_compare(d, app.port, import_id, box_id)
+        numbers = compared(d, import_id, box_id)
+        shown = d.call("set_scan_deviation", scan=import_id, body=box_id)
+        expect(shown.get("shown") is True, f"the map is shown: {shown}")
+        expect(d.call("set_scan_deviation", clear=True)["cleared"] is True,
+               "clear removes the shown map")
+        expect(d.call("set_scan_deviation", clear=True)["cleared"] is False,
+               "a second clear has nothing to remove")
         expect("placement" in imp, f"get_state shows the placement: {imp}")
         proj = os.path.join(tmp, "laid.lob")
         d.call("save_project", path=proj)
@@ -221,6 +283,10 @@ def main():
                f"the placement reads back: {imp.get('placement')} vs "
                f"{imp2.get('placement')}")
         expect(dat2 == dat, f"the datum reads back: {dat} vs {dat2}")
+        again = compared(d, import_id, box_id)
+        expect(again == numbers,
+               f"the compare reads the same after reopen: {numbers} vs "
+               f"{again}")
         print("scan_align_smoke: OK")
     finally:
         app.terminate()

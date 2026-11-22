@@ -3274,7 +3274,11 @@ coloured through an analytic Turbo colormap. It shares the scene's clip
 planes, so a section cuts a stress plot like everything else. While a field
 is shown it stands in for the solved body (or every solved occurrence of an
 assembly study). It also draws [the mesh](#the-mesh-you-look-at)
-(`FieldStyle`: element edges, a plain lit body, the colour map reversed).
+(`FieldStyle`: element edges, a plain lit body, the colour map reversed),
+and, outside a study, a scan's deviation map on a diverging map
+(`FieldStyle::diverging`; [the map](../inspect/README.md#the-map)), whose
+legend is this one: its bar diverging about zero, the tolerance drawn
+across it, its gear the map's range and Clear.
 
 **Fields.** A field is one value per node, derived from what the result
 keeps and never stored (`fem::NodalField`, `src/core/fem/FemFields.{h,cpp}`):

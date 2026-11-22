@@ -541,6 +541,7 @@ set(core_sources
     src/core/MeshMeasure.cpp
     src/core/MeshOperand.cpp
     src/core/ImportAlign.cpp
+    src/core/ScanCompare.cpp
     src/core/MeshFit.cpp
     src/core/DatumFrame.cpp
     src/core/ImportPlacement.cpp
@@ -557,6 +558,7 @@ set(core_sources
     src/core/mesh/Slice.cpp
     src/core/mesh/Facing.cpp
     src/core/mesh/Register.cpp
+    src/core/mesh/Deviation.cpp
     src/core/io/RecognitionJson.cpp
     src/core/MotionStudy.cpp
     src/core/InputHash.cpp
@@ -1074,6 +1076,7 @@ set(app_sources
     src/ui/RendererSync.cpp
     src/ui/MeasureActions.cpp
     src/ui/AlignTool.cpp
+    src/ui/ScanCompareTool.cpp
     src/ui/FitTool.cpp
     src/ui/SectionToSketch.cpp
     src/ui/CreateActions.cpp
@@ -1153,6 +1156,7 @@ set(app_sources
     src/remote/RemoteSimulation.cpp
     src/remote/RemoteCam.cpp
     src/remote/RemoteInspection.cpp
+    src/remote/RemoteScanCompare.cpp
     src/remote/RemoteCatalog.cpp
     src/remote/RemoteModeling.cpp
     src/remote/RemoteDrawings.cpp

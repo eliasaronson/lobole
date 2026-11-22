@@ -918,6 +918,108 @@ bodies are not counted twice.
 
 `compare_smoke` and `test_measure.cpp` cover both modes.
 
+## How far a body is from a scan
+
+A model built on a scan is checked against it: `compare_scan {scan, body,
+tolerance_mm?}` colours nothing and changes nothing; `set_scan_deviation`
+shows the same answer as a map; the **Compare to scan** tool on the part
+toolbar does both, with the places past the tolerance listed. `scan` is
+the feature_id of an Import read as a mesh body, `body` that of any other
+body (`src/core/mesh/Deviation.{h,cpp}`, `src/core/ScanCompare.{h,cpp}`).
+
+- **Signed distance, scan to body.** Every vertex of the scan is measured
+  to the body's surface through `mesh::Bvh`, positive where the scan stands
+  OUTSIDE the body (the object has material the model lacks) and negative
+  inside it. The sign is the angle-weighted pseudonormal of the closest
+  feature -- a triangle's inside, an edge, a vertex -- which is exact on a
+  closed surface; a triangle's own normal speckles at every sharp edge.
+- **Facing.** A scan point is measured to the nearest surface whose normal
+  is within 72° of the scan's own there (`mesh::FacingSurface`, the best
+  fit's). On a thin wall the nearest surface past half the thickness is
+  the far side: a 1 mm plate scanned 0.6 mm into it reads -0.6 off its
+  top, where the nearest surface, its bottom, would say -0.4 of the wrong
+  side.
+- **The other direction.** The body's surface, sampled by area
+  (`mesh::SampleSurface`), is measured back to the scan where scan surface
+  faces the same way and lies under it (within five tolerances or two
+  point spacings). `no_scan` is the share of the body's area with none:
+  what the scan never saw, and what nothing checked -- the receipt says so
+  rather than calling it clean.
+- **The tolerance** is `tolerance_mm`, else the scan's own noise
+  (`mesh::ScanTolerance`: three times the median stand-off of a vertex from
+  its neighbour's plane), never under the body's tessellation chord
+  (`floor_mm`; `tolerance_from` is `asked`, `scan_noise` or `chord`). A
+  B-Rep is tessellated on a copy at a quarter of the tolerance, never
+  coarser than a thousandth of its size, so the floor rarely binds.
+- **Hotspots.** The vertices past the tolerance are grouped by distance --
+  three point spacings, one sign -- not by shared triangles, so a patch the
+  noise breaks up is still one. Each has `at_mm` (its peak), `depth_mm`
+  (signed peak), `area_mm2`, `vertices`, `box_mm`, and the body's `face`
+  and its `element` there. One under 4 mm² or under twice the tolerance
+  deep is `texture`, the rest `feature`. Worst |depth| first, at most 50;
+  `hotspot_count` and `feature_count` say how many there are.
+- **The reply.** `within` (the share of the scan's area inside the
+  tolerance), `mean_mm`, `rms_mm`, `p95_mm` (of |distance|), `min_mm`,
+  `max_mm`, `no_scan`, `unmatched` (the scan's area with no body within
+  `reach_mm`: a table under it, a fixture), the hotspots, and a `receipt`:
+  no feature past the tolerance (pass or fail), and the body the scan
+  covers (pass, or unverifiable naming the share it never saw).
+- **Off the frame.** Both run as a `deviation` job (`background_jobs`,
+  `cancel_background_job {kind: deviation}`) and answer when it lands; a
+  cancelled one is refused saying so. Everything is read and refused on the
+  frame before the job starts.
+
+### The map
+
+`set_scan_deviation {scan, body, tolerance_mm?}` draws the scan's vertices
+by their distance in place of its own render -- and of the body's, which
+lies on it and would show through wherever the two meet -- through the
+FieldRenderer
+that draws FEM fields (`src/render/FieldRenderer.h`, its `diverging` style):
+a diverging map centred on zero -- blue inside the body, a light grey on it,
+red outside -- grey where no body is within reach. The legend is the
+results legend (`DrawFieldLegend`): the bar leads, its ends ± a range of
+twice the tolerance or the 99th percentile of the distances when that is
+more, rounded up to a 1-2-5 step, the tolerance drawn as two lines across
+it; under it the share within; the gear folds the range and Clear. The map
+is display only -- never saved -- and goes with any edit of the part, a tab
+switch, `{clear: true}` (`{cleared}` says whether one was shown), or the
+tool's Clear.
+
+### Compare to scan
+
+The part toolbar's **Compare to scan** (beside Measure; disabled, saying
+why, without a mesh body and another body) opens on a selected scan and
+body, else the newest scan and the newest other body (a B-Rep before
+another scan), the tolerance the scan's noise, and runs at once as a
+`deviation` job under the one progress bar. The window reads the share
+within, where the tolerance came from, the mean and the range, and the
+hotspots: a swatch of each one's colour, its depth, area and face. A row
+frames the camera on its patch, looking along the scan's normal there.
+Done closes it and keeps the map; Clear and Escape take the map with it.
+
+How it is checked (`tests/test_mesh_deviation.cpp`, every fixture turned
+off the axes, every number against the generator's): a box whose model has
+its top raised 0.20 mm and its bottom sunk 0.15 mm gives exactly those two
+hotspots, -0.20 and +0.15 within the noise, each covering its face and
+named as it, and every other face inside the tolerance; a 1 mm plate
+scanned 0.6 mm into itself reads -0.6 on its top and +0.6 under it; a scan
+of half a bracket gives `no_scan` within 0.05 of the share it never saw; a
+scan against the body it was sampled from reads `within` over 0.99 with no
+feature; the tolerance's three sources; a cancel. The cost is `[slow]`: a
+505k-triangle scan against a 341k-triangle body measured 1.6 CPU s, the
+budget 4. `scan_align_smoke.py` imports a scan, lays it on a box, fits a
+datum, compares (and cancels one), shows and clears the map, and reads the
+same numbers after save and reopen; `refused_calls_smoke.py` covers each
+refusal changing nothing; the GUI tests
+`scan_compare/a_raised_face_and_a_sunk_one_are_the_hotspots` (the
+toolbar's defaults, the job, the map and its legend, a row framing its
+patch, Done keeping the map, Clear removing it) and
+`scan_compare/refuses_without_a_scan`. The recognised mesh's check
+([recognising a faceted mesh](../interchange/README.md#recognising-a-faceted-mesh))
+and the Cradle's pocket wall (`tests/test_mesh_cradle.cpp`) are stated on
+this distance.
+
 ## Tolerances and fits
 
 `check_fit`, `set_tolerance`, `list_tolerances`, `stack_up`, `check_fits`

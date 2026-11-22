@@ -183,6 +183,7 @@ add_executable(designer_tests
     test_mesh_cradle.cpp
     test_import_align.cpp
     test_mesh_register.cpp
+    test_mesh_deviation.cpp
     test_mesh_costs.cpp
     test_mesh_writers.cpp
     test_mesh_fit.cpp

@@ -524,6 +524,35 @@ def main():
                      "onto is best_fit's")]:
                 check(label, "align_import", dict(params, feature_id=imp),
                       needle=needle, tab=part["name"])
+            # How far a body is from a scan
+            # (docs/inspect/README.md#how-far-a-body-is-from-a-scan): refused
+            # before its job starts, the map left as it was.
+            for label, method, params, needle in [
+                    ("compare_scan a scan that is no mesh body",
+                     "compare_scan", {"scan": imp, "body": onto},
+                     "is not a mesh body"),
+                    ("compare_scan scan of no feature", "compare_scan",
+                     {"scan": 987654, "body": onto},
+                     "scan: no feature with id"),
+                    ("compare_scan body of no feature", "compare_scan",
+                     {"scan": imp, "body": 987654},
+                     "body: no feature with id"),
+                    ("compare_scan body is the scan", "compare_scan",
+                     {"scan": imp, "body": imp}, "is the scan itself"),
+                    ("compare_scan scan not an id", "compare_scan",
+                     {"scan": "scan", "body": onto}, "must be an integer"),
+                    ("compare_scan zero tolerance", "compare_scan",
+                     {"scan": imp, "body": onto, "tolerance_mm": 0},
+                     "must be a number > 0"),
+                    ("set_scan_deviation a scan that is no mesh body",
+                     "set_scan_deviation", {"scan": imp, "body": onto},
+                     "is not a mesh body"),
+                    ("set_scan_deviation clear false", "set_scan_deviation",
+                     {"clear": False}, "clear is true"),
+                    ("set_scan_deviation clear with a scan",
+                     "set_scan_deviation", {"clear": True, "scan": imp},
+                     "clear takes nothing else")]:
+                check(label, method, params, needle=needle, tab=part["name"])
             # A primitive fitted from a point, and the datums that keep it
             # (docs/modeling/README.md#datums-on-a-scan): refused on the
             # inputs and on the geometry, the datum before it is added.

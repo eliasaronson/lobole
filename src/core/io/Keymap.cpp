@@ -154,6 +154,8 @@ const Binding kDefaults[] = {
     // Ctrl+Shift+letter for the global tools, so a context's bare/Shift
     // bindings can never shadow them.
     {"view.measure", Context::Global, "Measure", "Tools", "Ctrl+Shift+M"},
+    {"part.compare_scan", Context::Part,
+     "Compare to scan (how far a body is from a scan)", "Tools", ""},
     {"view.section", Context::Global, "Section view", "Tools", "Ctrl+Shift+X"},
     {"view.render", Context::Global, "Render a still (quick or path traced)",
      "Tools", "Ctrl+Shift+R"},

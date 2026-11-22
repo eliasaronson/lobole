@@ -169,8 +169,9 @@ generator's numbers.
   `section_fit` reports the piece that no longer lies on the cut.
 - **Through the pipeline:** the traced, constrained profile is extruded and
   the body's deviation from the scan
-  ([scan-fit-and-deviation.md](scan-fit-and-deviation.md) §6, when it has
-  landed; until then the section's own deviation) is within the tolerance.
+  (`compare_scan`,
+  [how far a body is from a scan](../inspect/README.md#how-far-a-body-is-from-a-scan))
+  is within the tolerance.
 - **The readers.** Rounds of 0.5, 2 and 6 mm between faces at 90° and at
   60° read within their sigma; a sharp edge and a chamfer are named as
   such. A scanned M8 × 1.25 and a left-hand trapezoidal thread give their

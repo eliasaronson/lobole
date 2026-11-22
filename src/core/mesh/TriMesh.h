@@ -68,6 +68,10 @@ struct TriMesh {
 // another. A triangle whose corners weld together is dropped. Builds the
 // adjacency.
 TriMesh FromSoup(const std::vector<glm::dvec3>& soup, double quantum);
+// The same, and for each triangle kept, the soup triangle it came from: what
+// carries a B-Rep tessellation's face of each triangle through the weld.
+TriMesh FromSoup(const std::vector<glm::dvec3>& soup, double quantum,
+                 std::vector<uint32_t>& keptFrom);
 
 // Fills the neighbour tables and the edge counts above.
 void BuildAdjacency(TriMesh& m);

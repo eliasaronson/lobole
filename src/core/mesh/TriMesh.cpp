@@ -116,6 +116,13 @@ struct CellHash {
 } // namespace
 
 TriMesh FromSoup(const std::vector<glm::dvec3>& soup, double quantum) {
+  std::vector<uint32_t> unused;
+  return FromSoup(soup, quantum, unused);
+}
+
+TriMesh FromSoup(const std::vector<glm::dvec3>& soup, double quantum,
+                 std::vector<uint32_t>& keptFrom) {
+  keptFrom.clear();
   TriMesh m;
   m.quantum = quantum;
   // Exact first.
@@ -178,6 +185,7 @@ TriMesh FromSoup(const std::vector<glm::dvec3>& soup, double quantum) {
     if (a == b || b == c || a == c)
       continue;
     m.triangles.push_back({a, b, c});
+    keptFrom.push_back(static_cast<uint32_t>(i / 3));
   }
   BuildAdjacency(m);
   return m;

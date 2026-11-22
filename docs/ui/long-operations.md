@@ -13,7 +13,7 @@ registry, and the frame keeps drawing. The rule every job follows:
 | field | meaning |
 |---|---|
 | `id` | handed out by `StartBackgroundJob` from a session counter, never reused: the handle a study job is asked about and cancelled by |
-| `kind` | `"cam"`, `"cam-verify"`, `"cam-simulate"`, `"sync"`, `"topo"`, `"study"`, `"check"`, `"mesh"`, `"requirements"`, `"import"`, `"motion"`, `"motion-video"`, `"open"`, `"job-warm"`, `"drawing"`, `"contact"`, `"interference"`, `"insertion"`, `"assembly_sequence"`, `"design_sweep"`, `"feature"`, `"align"` |
+| `kind` | `"cam"`, `"cam-verify"`, `"cam-simulate"`, `"sync"`, `"topo"`, `"study"`, `"check"`, `"mesh"`, `"requirements"`, `"import"`, `"motion"`, `"motion-video"`, `"open"`, `"job-warm"`, `"drawing"`, `"contact"`, `"interference"`, `"insertion"`, `"assembly_sequence"`, `"design_sweep"`, `"feature"`, `"align"`, `"deviation"` |
 | `label` | shown as-is ("Clearing 'Pocket', pass 2 of 4") |
 | `fraction` | atomic; `< 0` is indeterminate (no bar) |
 | `cancel` | atomic request set by the main thread; a job may ignore it |
@@ -116,6 +116,7 @@ row here, a row with no outcome, or a test named below that does not exist.
 | `assembly_sequence` | nothing: the waiting `check_assembly_sequence` is refused | `assembly_sequence_smoke.py::cancel_assembly_sequence` |
 | `feature` | an edit's build: the edit, rolled back with no undo step; an RPC's trial of a direct edit: the call, refused, the document as it was; an existing feature's: the feature, marked not built (cancelled), until it is asked for ([heavy features](#heavy-features)) | `direct/cancelling_a_heavy_delete_undoes_it`, `direct/cancelling_a_rebuild_leaves_it_not_built`, `heavy_feature_smoke.py::main`, `A build stops on its cancel and keeps nothing` |
 | `align` | nothing: the import stays where it stood; the waiting `align_import` is refused, and the Align tool keeps the import unmoved with Accept disabled | `scan_align_smoke.py::cancel_align`, `align/a_best_fit_runs_off_the_frame` |
+| `deviation` | nothing: a comparison changes nothing; the waiting `compare_scan` or `set_scan_deviation` is refused saying so and no map is shown, and the Compare to scan tool says it was cancelled | `scan_align_smoke.py::cancel_compare` |
 
 ## Cancel, quit and close
 

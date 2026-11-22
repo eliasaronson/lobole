@@ -1273,6 +1273,11 @@ place (aligned the same way) and the datum moves onto it.
   scan it replaces (kept as a second import) or onto the model made from it
   ([laying a scan onto a body](../interchange/README.md#laying-a-scan-onto-a-body)),
   and its datums refit where they were.
+- The model built on the datums is checked against the scan it came from
+  by `compare_scan` and the Compare to scan tool: a signed distance from
+  every scan vertex, the share within the scan's noise, and the places past
+  it on the body's faces
+  ([how far a body is from a scan](../inspect/README.md#how-far-a-body-is-from-a-scan)).
 - A datum that cannot fit -- its body gone, the seed off the surface, a
   curved kind on a flat -- fails with the reason, and its output is the
   default, never the last good one ([the datum

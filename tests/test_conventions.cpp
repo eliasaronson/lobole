@@ -1516,6 +1516,10 @@ TEST_CASE("the model is double: no float type in a model header",
        "the simulation's keyframed height maps"},
       {"src/core/cam/CamThreadMill.h", "std::vector<float>",
        "a per-cell excuse grid over the height map"},
+      // A scan's deviation: one derived distance a vertex, bulk like the
+      // mesh it colours (docs/inspect/README.md#the-map).
+      {"src/core/mesh/Deviation.h", "std::vector<float> distanceMm;",
+       "a scan's per-vertex distance, which the map colours by"},
       {"src/core/cam/CamStockMesh.h", "glm::vec3 position;",
        "the simulated stock's mesh"},
       {"src/core/cam/CamStockMesh.h", "glm::vec3 normal;",

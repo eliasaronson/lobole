@@ -510,7 +510,10 @@ static constexpr remote::MethodDoc kServerMethods[] = {
      "made it when that is still the part's last, else leaves the feature "
      "not built (cancelled) until build_feature), `align` (an "
      "align_import best_fit, or the Align tool's: what the waiting call is "
-     "waiting for; cancelled, the import stays where it stood). Empty when "
+     "waiting for; cancelled, the import stays where it stood), `deviation` "
+     "(a compare_scan or set_scan_deviation, or the Compare to scan tool's: "
+     "what the waiting call is waiting for; cancelled, it is refused and "
+     "nothing is shown). Empty when "
      "nothing is running. Not the "
      "CAM "
      "job document -- that is list_job_parts.",

@@ -6,6 +6,7 @@
 #include "ui/AlignTool.h"
 #include "ui/FitTool.h"
 #include "ui/FloatingWindow.h"
+#include "ui/ScanCompareTool.h"
 #include "ui/SectionToSketch.h"
 #include "ui/SelectionPipeline.h"
 #include "ui/StudyPanel.h" // DrawSimulationToolWindow
@@ -54,6 +55,7 @@ uint64_t BeginPreviewFeature(AppState& state,
   LOG_INFO("tool: {} started", feature->TypeName());
   CancelAlignTool(state); // one session at a time
   CancelFitTool(state);
+  CloseScanCompareTool(state);
   state.document->AddFeature(std::move(feature));
   const size_t idx = state.document->FeatureCount() - 1;
   Feature* added = state.document->GetFeature(idx);
@@ -213,6 +215,7 @@ void CancelPendingFeature(AppState& state) {
   // is stashed, as a pending feature is removed.
   CancelAlignTool(state);
   CancelFitTool(state);
+  CloseScanCompareTool(state);
   size_t idx = 0;
   if (Feature* f = ResolvePendingFeature(state, &idx)) {
     LOG_INFO("tool: {} cancelled", f->TypeName());
@@ -652,6 +655,11 @@ void DrawToolWindow(AppState& state) {
     // The Fit tool picks a point on a body and adds a datum (ui/FitTool.h).
     if (state.fitTool.open) {
       DrawFitToolWindow(state);
+      return;
+    }
+    // Compare to scan changes nothing (ui/ScanCompareTool.h).
+    if (state.scanCompareTool.open) {
+      DrawScanCompareToolWindow(state);
       return;
     }
     // Committed-feature editor session (U7e): same window, live commits.

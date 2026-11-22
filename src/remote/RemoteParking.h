@@ -15,7 +15,8 @@
 // requirements check or design sweep on its job
 // (remote/RemoteRequirements.h), an import_step on the import job
 // (remote/RemoteProject.h), an align_import best_fit on its align job
-// (remote/RemoteModeling.h).
+// (remote/RemoteModeling.h), a compare_scan or set_scan_deviation on its
+// deviation job (remote/RemoteScanCompare.h).
 
 #include <nlohmann/json.hpp>
 

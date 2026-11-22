@@ -12,6 +12,7 @@
 #include "core/Measure.h"
 #include "core/Primitives.h"
 #include "core/PrintAllowance.h"
+#include "core/ScanCompare.h"
 #include "core/SheetMetal.h"
 #include "core/features/BooleanFeature.h"
 #include "core/features/CradleFeature.h"
@@ -31,7 +32,10 @@
 #include "core/io/ReadContext.h" // kMaxPartFeatures
 #include "core/io/Serialization.h"
 #include "core/sketch/SketchProfile.h"
+#include "render/Camera.h"
+#include "render/FieldRenderer.h"
 #include "ui/AlignTool.h"
+#include "ui/Commands.h"
 #include "ui/DocumentSlots.h"
 #include "ui/DrawingActions.h"
 #include "ui/FeatureBuildJob.h"
@@ -44,8 +48,10 @@
 #include "ui/PrimitiveTool.h"
 #include "ui/PrintProfileActions.h"
 #include "ui/ProjectActions.h" // ProjectDirty
+#include "ui/ScanCompareTool.h"
 #include "ui/SceneOverlays.h"
 #include "ui/SettingsWindow.h" // OpenPreferences
+#include "ui/SimulationView.h" // ShownField
 #include "ui/TemplateActions.h"
 #include "ui/VariableActions.h"
 #include "ui/ViewActions.h"
@@ -54,6 +60,7 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <random>
 
 #include <BRepAlgoAPI_Cut.hxx>
 #include <BRepBndLib.hxx>
@@ -279,6 +286,58 @@ void FilletShot(ImGuiTestContext* ctx, const char* name) {
       ImRect(vp->Pos, ImVec2(vp->Pos.x + vp->Size.x, vp->Pos.y + vp->Size.y));
   IM_CHECK(ctx->CaptureScreenshot(ImGuiCaptureFlags_IncludeOtherWindows |
                                   ImGuiCaptureFlags_IncludePopups));
+}
+
+// A box from `lo` to `lo + size` as a binary STL: each face a grid of
+// `steps` squares a side, each vertex inside a face moved along its normal by
+// a deterministic noise of at most `noise` (edges and corners stay, so the
+// faces still meet): a scan of it.
+void WriteNoisyBoxStl(const std::filesystem::path& path, const glm::vec3& size,
+                      int steps, float noise, const glm::vec3& lo = {}) {
+  std::mt19937 rng(7);
+  std::uniform_real_distribution<float> u(-noise, noise);
+  std::vector<std::array<glm::vec3, 3>> tris;
+  for (int axis = 0; axis < 3; axis++)
+    for (int side : {0, 1}) {
+      const int a1 = (axis + 1) % 3, a2 = (axis + 2) % 3;
+      std::vector<float> bump(size_t((steps + 1) * (steps + 1)), 0.0f);
+      for (int i = 1; i < steps; i++)
+        for (int j = 1; j < steps; j++)
+          bump[size_t(i * (steps + 1) + j)] = noise > 0.0f ? u(rng) : 0.0f;
+      const auto at = [&](int i, int j) {
+        glm::vec3 p = lo;
+        p[axis] += side ? size[axis] : 0.0f;
+        p[axis] += (side ? 1.0f : -1.0f) * bump[size_t(i * (steps + 1) + j)];
+        p[a1] += size[a1] * float(i) / float(steps);
+        p[a2] += size[a2] * float(j) / float(steps);
+        return p;
+      };
+      for (int i = 0; i < steps; i++)
+        for (int j = 0; j < steps; j++) {
+          const glm::vec3 a = at(i, j), b = at(i + 1, j), c = at(i + 1, j + 1),
+                          d = at(i, j + 1);
+          if (side) {
+            tris.push_back({a, b, c});
+            tris.push_back({a, c, d});
+          } else {
+            tris.push_back({a, c, b});
+            tris.push_back({a, d, c});
+          }
+        }
+    }
+  std::ofstream out(path, std::ios::binary);
+  const char header[80] = {};
+  out.write(header, 80);
+  const uint32_t count = uint32_t(tris.size());
+  out.write(reinterpret_cast<const char*>(&count), 4);
+  for (const auto& tri : tris) {
+    const float n[3] = {0, 0, 0};
+    out.write(reinterpret_cast<const char*>(n), 12);
+    for (const glm::vec3& p : tri)
+      out.write(reinterpret_cast<const char*>(&p), 12);
+    const char attr[2] = {};
+    out.write(attr, 2);
+  }
 }
 } // namespace
 
@@ -2735,6 +2794,109 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
     ctx->Yield(2);
     IM_CHECK(std::abs(scan()->placement.translateMm.x + 80.0) < 1e-9);
     std::filesystem::remove(stl);
+  };
+
+  // Compare to scan (docs/inspect/README.md#how-far-a-body-is-from-a-scan):
+  // a scan of a 40 x 30 x 20 box read as a mesh body, and the model, a B-Rep
+  // box whose top stands 0.20 proud of the scan's and whose bottom is 0.15
+  // short of it. The toolbar opens the tool on the scan and the model (the
+  // defaults are the document's), compares them on a `deviation` job, shows
+  // the map and lists exactly the two faces; a row frames the camera on its
+  // patch; Done keeps the map, and the tool's Clear takes it away.
+  t = IM_REGISTER_TEST(engine, "scan_compare",
+                       "a_raised_face_and_a_sunk_one_are_the_hotspots");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    const auto stl =
+        std::filesystem::temp_directory_path() /
+        ("lobole_gui_compare_" + std::to_string(proc::CurrentPid()) + ".stl");
+    WriteNoisyBoxStl(stl, glm::vec3(40.0f, 30.0f, 20.0f), 40, 0.02f);
+    Doc()->AddFeature(std::make_unique<BoxFeature>(
+        "model", glm::dvec3(0.0, 0.0, 0.15), 40.0, 30.0, 20.05));
+    auto imp = std::make_unique<ImportFeature>("scan", stl.string());
+    imp->upAxis = interchange::UpAxis::None;
+    imp->representation = mesh::Representation::Mesh;
+    imp->keepOrigin = true;
+    Doc()->AddFeature(std::move(imp));
+    Doc()->Regenerate();
+    ctx->Yield(2);
+    IM_CHECK_EQ(Doc()->GetBodies().size(), size_t{2});
+    const uint64_t modelId = Doc()->GetFeature(0)->GetId(),
+                   scanId = Doc()->GetFeature(1)->GetId();
+    const size_t depth = s_App->commands->UndoDepth();
+
+    ToolbarClick(ctx, "###tb_compare_scan");
+    ctx->Yield();
+    IM_CHECK(s_App->scanCompareTool.open);
+    IM_CHECK_EQ(s_App->scanCompareTool.scanId, scanId);
+    IM_CHECK_EQ(s_App->scanCompareTool.bodyId, modelId);
+    IM_CHECK(WaitForJobs(ctx, "deviation"));
+    ctx->Yield(3);
+    IM_CHECK(s_App->scanCompareTool.error.empty());
+    IM_CHECK(s_App->scanDeviation.outcome != nullptr);
+    const mesh::Deviation& d = s_App->scanDeviation.outcome->deviation;
+    IM_CHECK_EQ(d.hotspots.size(), size_t{2});
+    IM_CHECK(std::abs(d.hotspots[0].depthMm + 0.20) < 0.03);
+    IM_CHECK(std::abs(d.hotspots[1].depthMm - 0.15) < 0.03);
+    IM_CHECK(s_App->fieldRenderer != nullptr &&
+             s_App->fieldRenderer->HasMesh());
+    IM_CHECK(s_App->simulation.shown != nullptr &&
+             s_App->simulation.shown->diverging);
+    IM_CHECK_EQ(s_App->commands->UndoDepth(), depth); // it changed nothing
+    s_App->camera->StopAnimation();
+    s_App->camera->SetTarget(glm::vec3(20.0f, 15.0f, 10.0f));
+    s_App->camera->SetUp(conv::kWorldUpF);
+    s_App->camera->SetPosition(glm::vec3(85.0f, -60.0f, 70.0f));
+    ctx->Yield(3);
+    ctx->MouseMoveToPos(ImVec2(700.0f, 660.0f)); // off every tooltip
+    ctx->Yield(2);
+    FilletShot(ctx, "deviation_map");
+
+    // The bottom's row: the camera turns to look at it from below.
+    ctx->ItemClick("//###ToolWindow/**/###scan_cmp_hot1");
+    ctx->Yield(3);
+    IM_CHECK_EQ(s_App->scanCompareTool.selected, 1);
+    const glm::vec3 at = s_App->camera->GetTarget();
+    IM_CHECK(std::abs(at.z - 0.0f) < 2.0f);
+    IM_CHECK(s_App->camera->GetPosition().z < at.z);
+    ctx->MouseMoveToPos(ImVec2(700.0f, 660.0f)); // off every tooltip
+    ctx->Yield(2);
+    FilletShot(ctx, "compare_tool_hotspots");
+
+    ctx->ItemClick("//###ToolWindow/###tw_accept"); // Done: the map stays
+    ctx->Yield(2);
+    IM_CHECK(!s_App->scanCompareTool.open);
+    IM_CHECK(s_App->scanDeviation.outcome != nullptr);
+    IM_CHECK(s_App->fieldRenderer->HasMesh());
+
+    ToolbarClick(ctx, "###tb_compare_scan");
+    ctx->Yield();
+    IM_CHECK(WaitForJobs(ctx, "deviation"));
+    ctx->Yield(2);
+    ctx->ItemClick("//###ToolWindow/###tw_cancel"); // Clear: the map goes
+    ctx->Yield(3);
+    IM_CHECK(!s_App->scanCompareTool.open);
+    IM_CHECK(s_App->scanDeviation.outcome == nullptr);
+    IM_CHECK(!s_App->fieldRenderer->HasMesh());
+    std::filesystem::remove(stl);
+  };
+
+  // Without a scan the button is disabled and says why; nothing opens.
+  t = IM_REGISTER_TEST(engine, "scan_compare", "refuses_without_a_scan");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    AddFixtureBox(ctx);
+    ctx->Yield();
+    IM_CHECK(!ui::CommandEnabled(*s_App, "part.compare_scan"));
+    IM_CHECK(ui::ScanCompareRefusal(*s_App).find("No scan") !=
+             std::string::npos);
+    ToolbarClick(ctx, "###tb_compare_scan");
+    ctx->Yield();
+    IM_CHECK(!s_App->scanCompareTool.open);
   };
 
   // The Fit tool (docs/modeling/README.md#datums-on-a-scan): a 40 x 20 x 10

@@ -43,6 +43,9 @@ struct FieldStyle {
                           // already made on the CPU)
   bool reversed = false;  // the colour map runs the other way (a factor's
                           // LOW end is the hot one)
+  // A diverging map centred on 0.5 (a scan's deviation: blue under, red
+  // over), its values in [0, 1]; under 0 draws kUnder (no value there).
+  bool diverging = false;
   // The colours past the legend's ends, shared with the legend: kOver past
   // the hot end, kUnder past the other (a reversed map's hot end is low).
   static constexpr glm::vec3 kOver{1.0f, 0.35f, 0.9f};

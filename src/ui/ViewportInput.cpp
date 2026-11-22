@@ -7,6 +7,7 @@
 #include "ui/DrawingPanel.h"
 #include "ui/FitTool.h"
 #include "ui/ListSelection.h"
+#include "ui/ScanCompareTool.h"
 #include "ui/SimulationActions.h"
 #include "ui/StudyPanel.h"
 
@@ -326,6 +327,9 @@ void HandleViewportInput(AppState& state) {
     escUsed = true;
   } else if (state.fitTool.open && esc) {
     CancelFitTool(state);
+    escUsed = true;
+  } else if (state.scanCompareTool.open && esc) {
+    CancelScanCompareTool(state); // the map goes with it
     escUsed = true;
   } else if (state.editFeatureId != 0 && esc) {
     state.editFeatureId = 0; // Escape closes the editor session

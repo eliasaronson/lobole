@@ -151,6 +151,9 @@ TEST_CASE("every command ships bound, or is on the list", "[keymap]") {
       "part.align",
       // A scan's datums are fitted a few times, after it is aligned.
       "part.fit",
+      // A model is compared with its scan once it is built, from the
+      // toolbar.
+      "part.compare_scan",
       "view.reset_layout",
       "view.controls_help",
       // The sketch "more constraints" flyout: a constraint used once a month

@@ -44,6 +44,7 @@ constexpr std::array kIcons = std::to_array<CommandIconEntry>({
     {"part.cradle", ICON_FA_HAND_HOLDING},
     {"part.align", ICON_FA_ARROWS_TO_DOT},
     {"part.fit", ICON_FA_MAGNIFYING_GLASS_LOCATION},
+    {"part.compare_scan", ICON_FA_CODE_COMPARE},
     {"part.mirror", ICON_DS_MIRROR},
     {"part.pattern", ICON_FA_GRIP},
     {"part.fillet", ICON_DS_FILLET},

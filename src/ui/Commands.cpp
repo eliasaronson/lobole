@@ -31,6 +31,7 @@
 #include "ui/MeasureActions.h"
 #include "ui/PreviewFeature.h"
 #include "ui/ProjectActions.h"
+#include "ui/ScanCompareTool.h"
 #include "ui/SelectionPipeline.h" // ResolveFaceItem
 #include "ui/SimulationActions.h"
 #include "ui/SketchInteraction.h"
@@ -438,6 +439,11 @@ const std::vector<Command>& Table() {
                  (s.sim && !ViewportBodies(s).empty());
         },
         ToggleMeasure);
+    // How far a body is from a scan (ui/ScanCompareTool.h): changes nothing.
+    add(
+        "part.compare_scan",
+        [](AppState& s) { return Idle(s) && HasScanToCompare(s); },
+        [](AppState& s) { OpenScanCompareTool(s); });
     add("view.section", nullptr, ToggleSection);
     add(
         "view.render",
@@ -1033,6 +1039,8 @@ void DispatchShortcuts(AppState& state) {
     CancelFitTool(state);
     return;
   }
+  // Compare to scan has nothing to undo: the undo chord undoes the part,
+  // which drops the map with it, as any edit does.
 
   const keymap::Context ctx = ActiveContext(state);
 

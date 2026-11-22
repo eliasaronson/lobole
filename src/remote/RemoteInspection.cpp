@@ -46,6 +46,7 @@
 #include "core/tube/Rules.h"
 #include "remote/RemoteHelpers.h"
 #include "remote/RemoteRequirements.h"
+#include "remote/RemoteScanCompare.h"
 #include "render/ClipPlanes.h"
 #include "ui/AppState.h"
 
@@ -1865,6 +1866,65 @@ static constexpr MethodDoc InspectionMethods[] = {
      "Remove the compare_geometry materialize overlay, leaving the plain "
      "model. Harmless when there is none.",
      ""},
+    {"compare_scan",
+     "How far a body is from a scan "
+     "(docs/inspect/README.md#how-far-a-body-is-from-a-scan); changes "
+     "nothing. `scan` is the feature_id of an Import read as a mesh body, "
+     "`body` that of any other body (a B-Rep is tessellated on a copy at a "
+     "quarter of the tolerance). Every scan vertex is measured to the "
+     "nearest surface of the body whose normal is within 72 deg of the "
+     "scan's there -- so a thin wall reads its own side -- signed by the "
+     "body's angle-weighted pseudonormal: POSITIVE where the scan stands "
+     "outside the body (the object has material the model lacks), negative "
+     "inside. The body's surface, sampled by area, is measured back to the "
+     "scan facing the same way: `no_scan` is the share of its area no scan "
+     "lies under, which nothing checked (the receipt says so). "
+     "`tolerance_mm` (default the scan's own noise, three times the median "
+     "stand-off of a vertex from its neighbour's plane; never under the "
+     "body's facets, `floor_mm`; `tolerance_from` asked | scan_noise | "
+     "chord). Returns {scan, body, tolerance_mm, tolerance_from, noise_mm, "
+     "floor_mm, within (the share of the scan's area inside the tolerance), "
+     "mean_mm, rms_mm, p95_mm (of |distance|), min_mm, max_mm, no_scan, "
+     "unmatched (the scan's area with no body within reach_mm), opposed "
+     "(measured to a surface facing away, there being none its way), "
+     "hotspot_count, feature_count, hotspots (worst |depth| first, at most "
+     "50): the vertices past the tolerance grouped by distance (three point "
+     "spacings, one sign), each {at_mm, depth_mm (the signed peak), "
+     "area_mm2, kind: feature | texture (under 4 mm2 or under twice the "
+     "tolerance deep), vertices, box_mm, body_index, face?, element?}, "
+     "receipt}. Runs as a `deviation` job (background_jobs, "
+     "cancel_background_job {kind: deviation}) and answers when it lands; "
+     "cancelled, it is refused saying so.",
+     "scan:int, body:int, tolerance_mm?:number>0", remote::NeedsPart,
+     "scan:object, body:object, tolerance_mm:number, "
+     "tolerance_from:string, noise_mm:number, floor_mm:number, "
+     "within:number, mean_mm:number, rms_mm:number, p95_mm:number, "
+     "min_mm:number, max_mm:number, no_scan:number, unmatched:number, "
+     "opposed:number, reach_mm:number, hotspot_count:int, "
+     "feature_count:int, hotspots:object[], "
+     "receipt:{claims:object[], schema:string, standing:string, "
+     "summary:string}"},
+    {"set_scan_deviation",
+     "Show compare_scan's answer as a map on the scan "
+     "(docs/inspect/README.md#the-map): its vertices coloured by their "
+     "signed distance on a diverging map centred on zero (blue inside the "
+     "body, red outside, grey where no body is within reach) in place of "
+     "its own render, with the results legend (range +- twice the "
+     "tolerance or the 99th percentile, the tolerance drawn across the "
+     "bar). The same {scan, body, tolerance_mm?} and the same reply, with "
+     "shown: true, on the same `deviation` job. {clear: true} removes it "
+     "and answers {cleared} (whether one was shown). Display only: never "
+     "saved; any edit of the part or a tab switch drops it.",
+     "scan?:int, body?:int, tolerance_mm?:number>0, clear?:bool",
+     remote::NeedsPart,
+     "shown?:bool, cleared?:bool, scan?:object, body?:object, "
+     "tolerance_mm?:number, tolerance_from?:string, noise_mm?:number, "
+     "floor_mm?:number, within?:number, mean_mm?:number, rms_mm?:number, "
+     "p95_mm?:number, min_mm?:number, max_mm?:number, no_scan?:number, "
+     "unmatched?:number, opposed?:number, reach_mm?:number, "
+     "hotspot_count?:int, feature_count?:int, hotspots?:object[], "
+     "receipt?:{claims:object[], schema:string, standing:string, "
+     "summary:string}"},
     {"section",
      "Cross-section area (`area_mm2`) where a plane cuts the bodies; on an "
      "assembly tab, "
@@ -2816,6 +2876,8 @@ std::unique_ptr<Parking> ParkInspectionRequest(ui::AppState& state,
                                                const RpcParams& p) {
   if (m == "check_insertion" || m == "check_assembly_sequence")
     return ParkInsertionRequest(state, m, p);
+  if (m == "compare_scan" || m == "set_scan_deviation")
+    return ParkScanCompareRequest(state, m, p);
   if (m != "interference")
     return nullptr;
   try {
@@ -3891,6 +3953,9 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
                                         const std::string& m,
                                         const RpcParams& p) {
   Document* doc = docIn;
+  // How far a body is from a scan: remote/RemoteScanCompare.cpp.
+  if (auto scan = HandleScanCompareRpc(state, doc, m, p))
+    return scan;
   if (m == "set_section") {
     // The viewport section cut. params: {enabled, base_plane: "xy"|"xz"|"yz",
     // offset?, reverse?}. Disabled clears every section. This edits the SAME

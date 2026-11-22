@@ -212,7 +212,10 @@ TEST_CASE("Recognition lists the polygons it left flat, and min_sides "
     const mesh::Recognition& r = imp->RecognizedBodies().at(0).recognition;
     CHECK(r.fellBack.empty());
     CHECK(r.polygonal.size() == (minSides == 12 ? 3u : 1u));
-    CHECK(r.Count(mesh::Kind::Cone) == 1);
+    // The countersink's cone is put back as flats: no mesher tessellates
+    // the face it rebuilds as (test_mesh_rebuild.cpp).
+    CHECK(r.Count(mesh::Kind::Cone) == 0);
+    CHECK(r.demoted == 1);
   }
   std::filesystem::remove(stl);
 }

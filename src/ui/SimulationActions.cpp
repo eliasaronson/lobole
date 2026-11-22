@@ -24,6 +24,7 @@
 #include "ui/BackgroundJobs.h"
 #include "ui/DocumentSlots.h"
 #include "ui/MotionActions.h"
+#include "ui/ScanCompareTool.h"
 #include "ui/SimRunActions.h"
 #include "ui/SimulationView.h"
 #include "ui/SimulationViewInternal.h"
@@ -814,6 +815,32 @@ void SyncFieldRenderer(AppState& state) {
       state.gpu.fieldBuiltKey = key;
     }
     hideBodies(bodies, true);
+    return;
+  }
+
+  // --- A scan's deviation map (ui/ScanCompareTool.h): the scan's own
+  // triangles on a diverging map, in place of its render, while no study is
+  // shown.
+  if (!sim.IsActive() && state.scanDeviation.outcome != nullptr) {
+    removeIso();
+    std::vector<FieldVertex> verts;
+    std::vector<uint32_t> indices;
+    FieldStyle style;
+    auto shown = std::make_shared<ShownField>();
+    std::vector<int> hide;
+    if (!BuildScanDeviationOverlay(state, verts, indices, style, *shown,
+                                   hide)) {
+      clear();
+      return;
+    }
+    if (shown->key != state.gpu.fieldBuiltKey || sim.shown == nullptr ||
+        !sim.shown->diverging) {
+      state.fieldRenderer->SetMesh(std::move(verts), std::move(indices));
+      state.fieldRenderer->SetStyle(style);
+      state.gpu.fieldBuiltKey = shown->key;
+      sim.shown = std::move(shown);
+    }
+    hideBodies(hide);
     return;
   }
 

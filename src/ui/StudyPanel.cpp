@@ -33,6 +33,7 @@
 #include "ui/PanelLayout.h"   // LeftLabel / WrapRow (readable at dock width)
 #include "ui/PanelTitles.h"
 #include "ui/PreviewFeature.h"    // BeginToolWindowFrame
+#include "ui/ScanCompareTool.h"   // the deviation map's legend
 #include "ui/SelectionPipeline.h" // ResolveFaceItem (BC glyphs)
 #include "ui/SimGeometryPanel.h"
 #include "ui/SimRunActions.h"
@@ -3017,20 +3018,29 @@ std::string FieldLegendSummary(AppState& state) {
 void DrawFieldLegend(AppState& state) {
   SimulationState& sim = state.simulation;
   const StudyHost host = StudyHostOf(state);
-  if (!sim.IsActive() || !host)
+  // A scan's deviation map (ui/ScanCompareTool.h) shows on the part with no
+  // study: the same legend, its bar diverging about zero and its gear the
+  // map's own rows.
+  const bool scanMap = !sim.IsActive() && sim.shown != nullptr &&
+                       sim.shown->diverging &&
+                       state.scanDeviation.outcome != nullptr;
+  if (!scanMap && (!sim.IsActive() || !host))
     return;
   // What the overlay last built (ui::ShownField): the bar describes the
   // picture that is drawn, so a field the result does not hold, the grey
   // Shape iso-surface and the plain mesh have no colour bar.
   const ShownField* shown = sim.shown.get();
-  const fem::StudyRuntime* rt = host.Results(sim.activeStudyId);
-  const fem::Study* study = host.Find(sim.activeStudyId);
+  const fem::StudyRuntime* rt =
+      host && !scanMap ? host.Results(sim.activeStudyId) : nullptr;
+  const fem::Study* study =
+      host && !scanMap ? host.Find(sim.activeStudyId) : nullptr;
   const bool meshBar = shown != nullptr && !shown->plain && shown->mesh &&
                        sim.meshView != SimulationState::MeshView::Off;
-  bool bar = shown != nullptr && !shown->plain &&
-             (shown->mesh
-                  ? meshBar
-                  : sim.field != SimulationState::Field::None && rt != nullptr);
+  bool bar =
+      shown != nullptr && !shown->plain &&
+      (shown->mesh ? meshBar
+                   : scanMap || (sim.field != SimulationState::Field::None &&
+                                 rt != nullptr));
   // The controls are the result's, while there is one to show and the mesh
   // is not: a mesh view's legend is its bar alone (the mesh's Show combo
   // puts it away).
@@ -3062,7 +3072,9 @@ void DrawFieldLegend(AppState& state) {
   // analysis. A colour bar with a number and no subject was a picture a
   // reader had to trust, and two studies of one part draw alike.
   std::string studyLine;
-  if (study)
+  if (scanMap)
+    studyLine = shown->subject;
+  else if (study)
     studyLine = study->name + " \xc2\xb7 " +
                 (meshBar         ? "mesh"
                  : kind.buckling ? "buckling"
@@ -3096,7 +3108,9 @@ void DrawFieldLegend(AppState& state) {
                   at.y, at.z, body.empty() ? "" : " on ", body.c_str());
     captions.push_back(buf);
   };
-  if (bar && shown->mesh) {
+  if (scanMap) {
+    captions = shown->notes;
+  } else if (bar && shown->mesh) {
     if (shown->reversed) {
       std::snprintf(buf, sizeof(buf), "worst %.2f", shown->lo);
       captions.push_back(buf);
@@ -3137,7 +3151,7 @@ void DrawFieldLegend(AppState& state) {
                            : ImGui::CalcTextSize(title.c_str()).x;
   // (A picker's text starts at the face's edge, its frame padding left of it.)
   float faceW = titleW - (controls ? style.FramePadding.x : 0.0f) +
-                (more.Any() ? style.ItemSpacing.x + gearW : 0.0f);
+                (more.Any() || scanMap ? style.ItemSpacing.x + gearW : 0.0f);
   if (picks)
     faceW = std::max(faceW,
                      ImGui::CalcTextSize(pick.items[*pick.current].c_str()).x +
@@ -3220,6 +3234,41 @@ void DrawFieldLegend(AppState& state) {
     bar = bar && shown != nullptr &&
           (shown->mesh ? sim.meshView != SimulationState::MeshView::Off
                        : sim.field != SimulationState::Field::None);
+  } else if (scanMap) {
+    // The map's title, and its gear: the range and Clear.
+    ImGui::TextUnformatted(title.c_str());
+    ImGui::SameLine(x0 + faceW - gearW);
+    const bool isOpen = ImGui::IsPopupOpen(kLegendMorePopup);
+    ImGui::PushStyleColor(ImGuiCol_Button, isOpen ? IM_COL32(255, 255, 255, 40)
+                                                  : IM_COL32(0, 0, 0, 0));
+    ImGui::PushStyleColor(ImGuiCol_Text, isOpen ? IM_COL32_WHITE : dim);
+    const bool pressed = ImGui::Button(ICON_FA_GEAR "###scan_dev_more");
+    ImGui::PopStyleColor(2);
+    if (pressed)
+      ImGui::OpenPopup(kLegendMorePopup);
+    if (ImGui::IsItemHovered() && !isOpen)
+      ImGui::SetTooltip("Display settings");
+    const ImVec2 pos = ImGui::GetWindowPos();
+    const ImVec2 size = ImGui::GetWindowSize();
+    ImGui::SetNextWindowPos(ImVec2(pos.x + size.x + 6.0f, pos.y + size.y),
+                            ImGuiCond_Always, ImVec2(0.0f, 1.0f));
+    ImGui::PushStyleColor(ImGuiCol_PopupBg, IM_COL32(18, 20, 26, 240));
+    ImGui::PushStyleVar(ImGuiStyleVar_PopupRounding, 6.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(12.0f, 10.0f));
+    const bool popup = ImGui::BeginPopup(kLegendMorePopup);
+    ImGui::PopStyleVar(2);
+    ImGui::PopStyleColor();
+    if (popup) {
+      if (ImGui::IsKeyPressed(ImGuiKey_Escape, false))
+        ImGui::CloseCurrentPopup();
+      DrawScanDeviationLegendRows(state);
+      ImGui::EndPopup();
+    }
+    // A Clear in there took the map: nothing left to draw.
+    if (state.scanDeviation.outcome == nullptr) {
+      ImGui::End();
+      return;
+    }
   } else {
     ImGui::TextUnformatted(title.c_str());
   }
@@ -3239,7 +3288,8 @@ void DrawFieldLegend(AppState& state) {
     // A vertical Turbo colorbar, the high value at the top; a factor's runs
     // the other way, its low end the hot one.
     const auto colour = [&](float t) {
-      return Turbo(shown->reversed ? 1.0f - t : t);
+      return shown->diverging ? ImU32(DivergingColour(t))
+                              : Turbo(shown->reversed ? 1.0f - t : t);
     };
     const int segs = 48;
     for (int i = 0; i < segs; ++i) {
@@ -3250,6 +3300,20 @@ void DrawFieldLegend(AppState& state) {
     }
     const ImU32 frame = IM_COL32(255, 255, 255, 140);
     dl->AddRect(ImVec2(x, y0), ImVec2(x + barW, y1), frame);
+    // A diverging map's tolerance: two lines across the bar, what lies
+    // between them inside it.
+    if (shown->diverging && shown->bandHi > shown->bandLo &&
+        shown->barHi > shown->barLo) {
+      for (double v : {shown->bandLo, shown->bandHi}) {
+        const float f = float(std::clamp(
+            (v - shown->barLo) / (shown->barHi - shown->barLo), 0.0, 1.0));
+        const float yv = y1 - f * barH;
+        dl->AddLine(ImVec2(x - 3.0f, yv), ImVec2(x + barW + 3.0f, yv),
+                    IM_COL32(20, 22, 28, 255), 3.0f);
+        dl->AddLine(ImVec2(x - 3.0f, yv), ImVec2(x + barW + 3.0f, yv),
+                    IM_COL32_WHITE, 1.0f);
+      }
+    }
     // Past the ends: what lies over the range and under it, in the colours
     // the picture draws them in (FieldStyle::kOver / kUnder).
     const auto cap = [&](float top, const glm::vec3& c) {

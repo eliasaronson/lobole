@@ -17,6 +17,7 @@
 #include "core/io/MeshImportCost.h"
 #include "core/io/Serialization.h"
 
+#include "core/mesh/Deviation.h"
 #include "core/mesh/Field.h"
 #include "core/mesh/MeshBoolean.h"
 #include "core/mesh/MeshBvh.h"
@@ -126,6 +127,26 @@ TEST_CASE("Cradle pocket: a block cut by it stays closed, and the object "
     else
       CHECK(widest < std::sqrt((s.radius + c) * (s.radius + c) - 25.0) +
                          mesh::PocketDeviationMm(h));
+    // The pocket's wall from the object, on the distance a scan is
+    // compared with its model by (mesh/Deviation.h): below the equator
+    // every vertex of the sphere stands the clearance off the cradle,
+    // outside it (in the pocket), within the reported deviation.
+    {
+      const auto cradleMesh = std::make_shared<const mesh::TriMesh>(cradle);
+      mesh::DeviationOptions o;
+      o.toleranceMm = mesh::PocketDeviationMm(h);
+      const mesh::Deviation d = mesh::CompareToBody(
+          std::make_shared<const mesh::TriMesh>(s.mesh), cradleMesh, {}, o);
+      size_t below = 0;
+      for (size_t i = 0; i < s.mesh.positions.size(); i++) {
+        if (s.mesh.positions[i].z > 0.0)
+          continue;
+        below++;
+        CHECK(std::abs(d.distanceMm[i] - c) <=
+              mesh::PocketDeviationMm(h) + s.radiusTolerance);
+      }
+      CHECK(below > 100);
+    }
     // Lower the sphere in along -Z from above the block: the purpose.
     const auto cradleTree = std::make_shared<const mesh::TriMesh>(cradle);
     const mesh::Bvh tree(cradleTree);

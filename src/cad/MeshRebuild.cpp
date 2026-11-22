@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 #include "cad/MeshRebuild.h"
-#include "cad/Integrate.h"
 
+#include "core/mesh/Deviation.h"
 #include "core/mesh/MeshReaders.h"
 
 #include <BRepAdaptor_Surface.hxx>
@@ -1023,18 +1023,102 @@ Rebuilt Builder::Run() {
         " faces" + (first.empty() ? std::string() : ", first " + first) + ")";
     return out;
   }
-  // The volume the facets enclose against the solid's: no further apart
-  // than the facets stood off the surfaces fitted to them.
-  const double rebuilt = cad::VolumeOf(result);
-  const double meshed = m_mesh.Volume();
-  double allowed = m_mesh.SurfaceArea() * m_tol;
-  for (const mesh::Region& r : m_seg.regions)
-    allowed += r.area * r.sagitta;
-  if (!(std::abs(rebuilt - meshed) <= allowed)) {
-    out.failed = "the rebuilt volume, " + Num(rebuilt) +
-                 " mm³, is not within " + Num(allowed) + " mm³ of the mesh's " +
-                 Num(meshed) + " mm³";
-    return out;
+  // How far the facets stand from the solid, on the distance a scan is
+  // compared with its model by (mesh/Deviation.h,
+  // docs/inspect/README.md#how-far-a-body-is-from-a-scan): every vertex of
+  // the mesh within what its fits allow of the solid's surface, plus the
+  // chord that surface is tessellated at; the solid's surface everywhere
+  // over the mesh, facing its way -- no face where the mesh has none, none
+  // turned inside out.
+  {
+    double allowed = m_tol;
+    for (const mesh::Region& r : m_seg.regions)
+      allowed = std::max(allowed, r.fit.max);
+    glm::dvec3 lo, hi;
+    m_mesh.Bounds(lo, hi);
+    const double chord = std::max(4.0 * m_tol, 1e-3 * glm::length(hi - lo));
+    const CADShape::Mesh cm = CADShape(result).GenerateMeshDetached(chord);
+    // A face the mesher cannot tessellate is a hole in every picture of
+    // the part and in every check made on its triangles, whatever its
+    // volume says: its region goes back to flats.
+    {
+      std::vector<bool> meshed;
+      for (uint32_t f : cm.triangleFaces) {
+        if (f >= meshed.size())
+          meshed.resize(f + 1, false);
+        meshed[f] = true;
+      }
+      size_t bad = 0, index = 0;
+      std::string first;
+      for (TopExp_Explorer ex(result, TopAbs_FACE); ex.More();
+           ex.Next(), index++) {
+        if (index < meshed.size() && meshed[index])
+          continue;
+        bad++;
+        const uint32_t r = regionOf(ex.Current());
+        if (r == mesh::kNone)
+          continue;
+        if (first.empty())
+          first = "face " + std::to_string(r + 1) + ", a " +
+                  mesh::KindName(m_seg.regions[r].fit.kind);
+        Blame(r, out.badRegions);
+      }
+      if (bad > 0) {
+        out.failed = "the rebuilt solid has " + std::to_string(bad) +
+                     " face(s) no mesher tessellates" +
+                     (first.empty() ? std::string() : " (first " + first + ")");
+        return out;
+      }
+    }
+    std::vector<glm::dvec3> soup;
+    soup.reserve(cm.indices.size());
+    for (uint32_t i : cm.indices)
+      soup.emplace_back(cm.vertices[i].position);
+    auto solid = std::make_shared<const mesh::TriMesh>(
+        mesh::FromSoup(soup, mesh::Float32Quantum(soup)));
+    mesh::DeviationOptions o;
+    o.toleranceMm = allowed + chord;
+    o.chordMm = chord;
+    // The nearest surface, whichever way it faces: the solid is made from
+    // this very mesh, so the nearest is the one, and a sliver's own normal
+    // says nothing of which way the surface faces.
+    o.minFacingCos = -1.0;
+    const mesh::Deviation d = mesh::CompareToBody(
+        std::make_shared<const mesh::TriMesh>(m_mesh), solid, {}, o);
+    const double worst = std::max(std::abs(d.minMm), std::abs(d.maxMm));
+    if (d.unmatched > 0.0 || !(worst <= o.toleranceMm * (1.0 + 1e-9))) {
+      // The regions round every vertex past it.
+      size_t at = 0;
+      for (size_t i = 0; i < d.distanceMm.size(); i++)
+        if (!(std::abs(d.distanceMm[i]) <= std::abs(d.distanceMm[at])))
+          at = i;
+      for (uint32_t t = 0; t < m_mesh.triangles.size(); t++)
+        for (int c = 0; c < 3; c++) {
+          const float x = d.distanceMm[m_mesh.triangles[t][c]];
+          if (!(std::abs(x) <= o.toleranceMm)) {
+            if (RegionOf(t) != mesh::kNone)
+              Blame(RegionOf(t), out.badRegions);
+            break;
+          }
+        }
+      const glm::dvec3& p = m_mesh.positions[at];
+      out.failed = "the rebuilt solid stands up to " + Num(worst) +
+                   " mm off the mesh (at " + Num(p.x) + ", " + Num(p.y) + ", " +
+                   Num(p.z) + "), past the " + Num(o.toleranceMm) +
+                   " mm its fits allow";
+      return out;
+    }
+    if (d.noScan > 0.005) {
+      out.failed = Num(100.0 * d.noScan) +
+                   "% of the rebuilt solid's surface lies over no facet";
+      return out;
+    }
+    if (d.opposed > 0.01) {
+      out.failed = "the rebuilt solid faces the other way from the mesh "
+                   "over " +
+                   Num(100.0 * d.opposed) + "% of it";
+      return out;
+    }
   }
   out.shape = CADShape(result);
   return out;

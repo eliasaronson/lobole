@@ -5,6 +5,7 @@
 #include "ui/AlignTool.h"
 #include "ui/AssemblyActions.h"
 #include "ui/FitTool.h"
+#include "ui/ScanCompareTool.h"
 #include "ui/SimRunActions.h"
 #include "ui/SimTree.h" // the simulation rows' selection ids
 #include "ui/StudyPanel.h"
@@ -1091,6 +1092,7 @@ void OpenFeatureEditor(AppState& state, uint64_t featureId) {
     return;
   CancelAlignTool(state); // one session at a time
   CancelFitTool(state);
+  CloseScanCompareTool(state);
   SelectFeature(state, featureId);
   state.editFeatureId = featureId; // the Tool window shows the editor session
 }

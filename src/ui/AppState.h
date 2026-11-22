@@ -62,6 +62,10 @@
 #include <utility>
 #include <vector>
 
+namespace scancompare {
+struct Input;
+struct Outcome;
+} // namespace scancompare
 namespace fem {
 class AnalysisPartCache;
 }
@@ -2073,6 +2077,32 @@ struct AppState {
     double radiusMin = 0.0, radiusMax = 0.0;
     double fittedRadius = 0.0; // the last fit's, 0 when it has none
   } fitTool;
+  // The deviation map (ui/ScanCompareTool.h,
+  // docs/inspect/README.md#the-map): what a compare answered, drawn on the
+  // scan by the field renderer while it matches the document it was made
+  // on. Display only: never saved; any edit drops it.
+  struct ScanDeviation {
+    std::shared_ptr<const scancompare::Input> input;
+    std::shared_ptr<const scancompare::Outcome> outcome;
+    const Document* document = nullptr;
+    uint64_t documentVersion = 0;
+    double rangeMm = 0.0; // the bar's half span; 0 derives it
+    uint64_t serial = 0;  // bumps on every change: the overlay's key
+  } scanDeviation;
+  // The Compare to scan tool (ui/ScanCompareTool.h): the pair, the
+  // tolerance, and the comparison running on a `deviation` job.
+  struct ScanCompareTool {
+    bool open = false;
+    const Document* document = nullptr; // ids are per document
+    uint64_t documentVersion = 0;       // where the running compare began
+    uint64_t scanId = 0, bodyId = 0;
+    bool ownTolerance = false;
+    double toleranceMm = 0.0;
+    uint64_t jobId = 0;
+    std::shared_ptr<struct ScanCompareRun> run;
+    std::string error;
+    int selected = -1; // the hotspot row the camera was framed on
+  } scanCompareTool;
   // Which row owns the viewport drag arrow (0 = the first section).
   uint64_t sectionActiveId = 0;
   // Section cap fills (I3 v2, C4): the planes at the last cap rebuild. A cap

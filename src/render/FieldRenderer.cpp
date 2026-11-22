@@ -266,7 +266,8 @@ void FieldRenderer::Render(VkCommandBuffer commandBuffer, uint32_t currentFrame,
   const Push push{m_deformScale,
                   (m_style.edges ? 1 : 0) | (m_style.plain ? 2 : 0) |
                       (m_style.lit ? 4 : 0) | (m_style.unclipped ? 8 : 0) |
-                      (m_style.reversed ? 16 : 0)};
+                      (m_style.reversed ? 16 : 0) |
+                      (m_style.diverging ? 32 : 0)};
   vkCmdPushConstants(commandBuffer, m_pipelineLayout,
                      VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
                      0, sizeof(Push), &push);

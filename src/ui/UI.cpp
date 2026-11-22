@@ -964,6 +964,7 @@ void DrawUI(AppState& state) {
       DrawSimulationLabels(state); // value + unit beside every BC glyph
     } else {
       DrawFeatureTreePanel(state);
+      DrawFieldLegend(state); // a scan's deviation map, when one is shown
     }
   } else if (state.assembly) {
     DrawOccurrencePanel(state); // occurrence list + editor in the Model panel

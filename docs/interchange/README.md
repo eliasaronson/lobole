@@ -772,9 +772,20 @@ code involved.
   region's lowest file triangle. The same file with the same options always
   gives the same face names.
 - **Three checks.** The result must be valid (`BRepCheck_Analyzer`), every
-  shell closed, and its volume within what the fits allow of the mesh's: Σ
-  over curved regions of area × sagitta, plus the surface area × the
-  tolerance.
+  shell closed, and it must stand where the mesh is, on the distance a scan
+  is compared with its model by
+  ([how far a body is from a scan](../inspect/README.md#how-far-a-body-is-from-a-scan),
+  `mesh::CompareToBody`): every vertex of the mesh within what its fits
+  allow (the largest of the tolerance and each region's `fit.max`) plus the
+  chord the solid is tessellated at for it (four tolerances, or a
+  five-thousandth of the mesh's size), no more than 0.5% of the solid's
+  surface over no facet facing its way, and none of it turned against the
+  mesh (an inside-out solid has the distances and the wrong side). A face
+  no mesher tessellates is a hole in every picture of the part however
+  right its volume, and its region is demoted: the bracket fixture's
+  countersink rebuilds as a valid 90° cone that BRepMesh fails on at any
+  deflection, so it now comes back as flats (`demoted` 1), where the
+  volume check passed it.
   - Every face is checked on its own first, in one parallel `BRepCheck`
     of them all, before any shell is made. A curved face that will not
     build, that is faulted, or that leaves the shell open is demoted to its

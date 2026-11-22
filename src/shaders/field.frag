@@ -10,7 +10,8 @@ layout(location = 3) in vec3 fragViewPos;
 
 layout(push_constant) uniform Push {
     float deformScale;
-    int flags; // FieldStyle: 1 edges, 2 plain, 4 lit, 8 unclipped, 16 reversed
+    int flags; // FieldStyle: 1 edges, 2 plain, 4 lit, 8 unclipped, 16 reversed,
+               // 32 diverging
 } pc;
 
 layout(location = 0) out vec4 outColor;
@@ -32,6 +33,19 @@ vec3 turbo(float x) {
                 dot(v4, kBlueVec4)  + dot(v2, kBlueVec2));
 }
 
+// Moreland's cool-warm, a diverging map: blue at 0, a light grey at 0.5,
+// red at 1 (the legend's twin: ui/ScanCompareTool.cpp Diverging).
+vec3 diverging(float x) {
+    const vec3 s0 = vec3(0.230, 0.299, 0.754), s1 = vec3(0.552, 0.690, 0.996),
+               s2 = vec3(0.865, 0.865, 0.865), s3 = vec3(0.958, 0.604, 0.482),
+               s4 = vec3(0.706, 0.016, 0.150);
+    float t = clamp(x, 0.0, 1.0) * 4.0;
+    if (t < 1.0) return mix(s0, s1, t);
+    if (t < 2.0) return mix(s1, s2, t - 1.0);
+    if (t < 3.0) return mix(s2, s3, t - 2.0);
+    return mix(s3, s4, t - 3.0);
+}
+
 // The colours past the legend's ends (FieldStyle::kOver / kUnder).
 const vec3 kOver = vec3(1.0, 0.35, 0.9);
 const vec3 kUnder = vec3(0.42, 0.44, 0.48);
@@ -41,6 +55,10 @@ void main() {
     vec3 color;
     if ((pc.flags & 2) != 0) {
         color = vec3(0.74, 0.76, 0.80); // the mesh view's plain body
+    } else if ((pc.flags & 32) != 0) {
+        // A value is in [0, 1]; under it, a vertex with none (no body
+        // within reach) is near: the under grey.
+        color = fragScalar < -0.0005 ? kUnder : diverging(fragScalar);
     } else if (fragScalar > 1.0005) {
         // Past the hot end pink, past the other grey: a reversed map's hot
         // end is its low one.

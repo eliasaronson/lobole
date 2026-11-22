@@ -100,6 +100,13 @@ struct ShownField {
   bool topOpen = false;
   bool reversed = false;            // the low end is the hot one
   bool normalized = false;          // a mode shape, a density: no unit
+  // A scan's deviation map (ui/ScanCompareTool.h): a diverging bar centred
+  // on zero, the tolerance band drawn across it, what it is of under the
+  // title and its notes under the bar.
+  bool diverging = false;
+  double bandLo = 0.0, bandHi = 0.0;
+  std::string subject;
+  std::vector<std::string> notes;
 };
 
 // Why `field` cannot be shown on the active study's result; empty when it
