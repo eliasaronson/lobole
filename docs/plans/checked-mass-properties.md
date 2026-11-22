@@ -20,16 +20,21 @@ digits it is reported to, or say how far off it can be.
   and nine bars
   (docs/known-bugs.md#a-union-of-a-tube-and-nine-bars-through-its-wall-gains-volume)
   measures 4596.234 mm³ where the closed form is 4595.675, and one bar adds
-  44.609 where it should add 44.6277. A wrapped cut's ruled walls read
-  45 ppm loose, and tests/test_refold.cpp measures around them with its own
-  rule.
+  44.609 where it should add 44.6277. The rule runs across u in one piece
+  too, so a surface's own knot lines break it the same way: a closed
+  24-span spline extruded 12 mm reads 15826.450 for 15841.851, and a
+  slanted cylinder whose cut ellipse is a rational B-spline 3.3 mm³ light
+  in 6283. A wrapped cut's ruled walls read 45 ppm loose, and
+  tests/test_refold.cpp measures around them with its own rule.
 - **The one caller that asks for an error trusts the wrong one.**
   `fem::Mesh` asks the adaptive rule for 1e-5 and adds that rule's own error
-  estimate to its slack. On the faces of the M10 thread
-  (`06-threads/004`) the adaptive rule reads 7 % heavy while reporting that
-  it converged. It also puts a revolved Bezier profile 0.6 mm³ over and a
-  horn torus 0.02 mm³ over, and on the menger sponge's 400-face union it
-  runs past the case's 120 s.
+  estimate to its slack. It puts a revolved Bezier profile 0.64 mm³ over
+  while estimating its error at 1e-16, and a horn torus 0.02 mm³ over; on
+  the menger sponge's 400-face union it runs past the case's 120 s. (On the
+  whole M10 thread, `06-threads/004`, it agrees with the integrator to
+  3e-8; applied only to the faces of an elementary surface with a
+  non-conic edge it read the thread 7 % heavy while reporting that it had
+  converged.)
 - **Area uses the same rule.** `SurfaceProperties` integrates a face's
   edges the same way, and the cases grade `area_mm2`.
 - **Volume is integrated in many places.** Besides the two above,
@@ -48,32 +53,60 @@ digits it is reported to, or say how far off it can be.
 
 ### 1. One integrator, face by face
 
-`cad::Integrate(shape)` returns a body's volume, its first and second
-moments and its area, each with an uncertainty in its own unit. The moments
-are taken about the centre of the shape's box and then shifted to the
-centre of mass. Faces are summed in explorer order, so the same shape gives
-the same bits on every run and with any number of threads.
+`cad::Integrate(shape)` (src/cad/Integrate.h) returns a body's volume,
+centre, inertia about the centre and area, each with an uncertainty in its
+own unit, and each face's figures (fixed, second, used) on request
+(docs/inspect/README.md#the-face-by-face-integrator). The rule it follows,
+which stages B and C rely on:
 
-- **The fixed rule first.** Each face is integrated alone by BRepGProp,
-  about the same point. The faces' figures sum to the solid's.
-- **A face is suspect** when one of its pcurves is not a line or a conic.
-  A face that is not suspect keeps the fixed rule's figure, and a body with
-  no suspect face is measured exactly as today.
-- **A suspect face gets a second estimate.** This is the same
-  Green's-theorem integral, computed here: each pcurve is split at its own
-  knots and at the surface's knot lines it crosses, and Gauss-Legendre runs
-  on each piece. Then every piece is halved, until two successive estimates
-  agree to 1e-12 of the body's scale (the sum of the faces' magnitudes), at
-  most six times. Convergence is seen, not estimated.
-- **The two are compared.** If they agree to 1e-10 of the body's scale,
-  the fixed rule's figure stands, so nothing moves where it was already
-  right. Otherwise the subdivided figure is used, and its uncertainty is
-  the last halving's change.
-- The area of a suspect face is checked the same way.
+- Faces are integrated about the centre of the shape's box with the fixed
+  rule, and a face is **suspect** when a p-curve is not a line or a conic
+  or its surface has a knot line inside the face. A face that is not
+  suspect keeps the fixed figure bit for bit, with no uncertainty.
+- A suspect face's second estimate is the same Green's-theorem integral cut
+  at the knots, halved until two estimates agree to **1e-13** of the body's
+  scale, at most **six** times. The fixed figure stands when within
+  **1e-12** of the scale of it; otherwise the second estimate is used.
+- The scale is the sum of the faces' volume magnitudes (times the box's
+  half diagonal for a moment, its square for the inertia), and the sum of
+  their areas. A scale summed from the moments themselves reads rounding as
+  disagreement on a whole sphere, whose moments vanish about the box's
+  centre.
+
+The thresholds were set in tests/test_integrate.cpp on this machine: on
+faces where the fixed rule is exact (box, cylinder, cone, sphere, torus,
+half and horn torus, every face given a second estimate) the two sit at
+most 6e-14 of the scale apart; the smallest gap on a face where the fixed
+rule was wrong was 4.5e-12; a halving after the knot cuts moves a figure by
+2e-15 of the scale or less except on a rational p-curve and some thread
+faces, none needing more than three halvings. Measured against closed
+forms (CPU seconds; today = `ComputeMassProps`'s three passes):
+
+| body | true mm³ | today | integrator ± | today s | integrator s |
+|---|---|---|---|---|---|
+| tube + one bar | 4238.653886133 | -1.9e-2 | -3.8e-8 ± 7e-11 | 0.004 | 0.005 |
+| tube + nine bars | 4595.675434861 | +0.56 | -7.5e-7 ± 9e-11 | 0.011 | 0.021 |
+| slanted cylinder, ellipse as B-spline | 6283.185307180 | -3.29 | -1.7e-8 ± 3e-11 | 0.001 | 0.002 |
+| extruded 24-span spline | 15841.850645099 | -15.4 | -2e-11 ± 5e-11 | 0.002 | 0.004 |
+| M10 thread to a shoulder | 3639.157562673 | +3.7e-4 | +2.4e-4 ± 6e-9 | 0.28 | 0.37 |
+| revolved Bezier profile | 34131.160186501 | +1e-10 | +1e-10 ± 0 | 0.0007 | 0.0006 |
+| horn torus, 270° | 28932.176098892 | +1e-10 | +2e-10 ± 0 | 0.0010 | 0.0009 |
+| level-3 Menger sponge, 8280 faces | 1000000 | +5e-8 | -6e-8 ± 0 | 1.15 | 0.82 |
+
+The uncertainty covers the rule, not the model: the bars' intersection
+curves are B-spline approximations (the adaptive rule at 1e-10 agrees with
+the integrator on the nine bars to 1.2e-8, both 7.5e-7 under the closed
+form), the thread's groove is SMLib's sweep (the adaptive rule at 1e-5
+agrees to 3e-8), and the sponge is rounding over 8280 faces. Stage B's
+`[slow]` budgets start from the CPU column; the thread, 57 of 75 faces
+suspect, costs 1.3 times today.
 
 ### 2. Every measure goes through it
 
-- `CADShape::Volume` and `ComputeMassProps` call it. The volume cache keeps
+- `CADShape::Volume` and `ComputeMassProps` call it. `Volume` today is one
+  fixed pass; `Integrate` is a volume pass and an area pass, so a `Volume`
+  that only needs the volume takes the volume figures without the area's
+  second estimates. The volume cache keeps
   today's key but holds the whole result in the TShape's own frame, and a
   location moves the centre and turns the inertia. Mass properties of an
   unchanged body become a lookup. `MassProps` gains `volumeUncertainty` and
@@ -99,18 +132,14 @@ the same bits on every run and with any number of threads.
 
 ## Stages
 
-- **A.** The integrator (§1) beside today's rule, proved on the tube, the
-  thread, the revolved profile, the horn tori and the sponge before any
-  caller moves: that the faces' figures sum to the solid's, that the two
-  estimates agree where the fixed rule was right, and what it costs. The
-  agreement and convergence thresholds are set from these measurements.
 - **B.** `Volume`, `ComputeMassProps` and the cache (§2), then the direct
   callers and the convention test.
 - **C.** The uncertainty in the replies and the grader (§3).
 
 ## Files
 
-- new src/cad/Integrate.{h,cpp}
+- src/cad/Integrate.{h,cpp}: the cache's key and whatever `Volume` needs
+  to skip the area
 - src/cad/CADKernel.{h,cpp}: `Volume`, `ComputeMassProps`, `MassProps`, the
   volume cache
 - src/core/Measure.cpp, MeasureSeal.cpp, MeasureInsertion.cpp,
@@ -121,7 +150,7 @@ the same bits on every run and with any number of threads.
   their `describe` rows)
 - tools/kernel_cases.py, tests/reference_parts.py (`measure`),
   tests/kernel_cases/selftest.json, tests/kernel_cases/status.json
-- new tests/test_integrate.cpp; tests/test_cadkernel.cpp,
+- tests/test_integrate.cpp; tests/test_cadkernel.cpp,
   tests/test_refold.cpp (drops its own rule), tests/test_conventions.cpp,
   tests/test_fem_mesh_report.cpp
 - docs/inspect/README.md#mass-properties; docs/modeling/README.md (the
@@ -134,13 +163,11 @@ the same bits on every run and with any number of threads.
 
 Every fixture is placed off the origin and turned off the axes.
 
-- **The mechanism.** A cylinder cut by an oblique plane has an ellipse as
-  its edge. Built again with that edge's pcurve swapped for a B-spline
-  approximation of it, the fixed rule moves and the integrator does not:
-  volume, centre and inertia match the conic build to 1e-9.
-- **The cases that were wrong.** One bar through the tube's wall adds
-  44.6277 mm³ to 1e-9; nine bars give 4595.6754 with the centre on the axis
-  to 1e-9 mm. test_refold's plug holds through `CADShape::Volume`.
+- **The cases that were wrong**, through `CADShape::Volume` and
+  `ComputeMassProps` now: the bodies of tests/test_integrate.cpp (one bar
+  and nine through the tube's wall, the slanted cylinder with its ellipse
+  as a B-spline, the extruded spline) to their closed forms to 1e-9.
+  test_refold's plug holds through `CADShape::Volume`.
 - **Nothing moves where it was right.** On a body with no suspect face,
   each face's figure is bit for bit BRepGProp's. The analytic mass
   properties in test_cadkernel, the golden expectations and

@@ -240,6 +240,48 @@ The Properties dock shows the same numbers for the active part (cached by
 document version), and a centre-of-gravity marker can be drawn in the
 viewport.
 
+### The face-by-face integrator
+
+Every volume, centre, inertia and area above is still BRepGProp's fixed
+Gauss rule on the whole shape (`CADShape::Volume`, `ComputeMassProps`).
+`cad::Integrate` (`src/cad/Integrate.h`) is the measure that is to replace
+it ([the plan](../plans/checked-mass-properties.md)); nothing calls it yet
+outside its tests.
+
+It integrates each face alone, about the centre of the shape's box, and sums
+the faces in explorer order, so a shape gives the same bits every time. A
+face first gets the fixed rule's figure (`BRepGProp_Vinert` and
+`BRepGProp_Sinert` on that face). That rule runs one Gauss rule along each
+edge's p-curve and one across u from the face's lower u bound, which is
+exact only where the integrand is smooth along both. So a face is
+**suspect** when a p-curve is not a line or a conic, or when its surface
+has a knot line inside the face (a B-spline surface, or a revolution or
+extrusion of a B-spline curve). A suspect face gets a second estimate of the
+same Green's-theorem integral: each p-curve cut at its own knots and where
+it crosses a knot line of the surface, the span across u cut at the
+surface's u knots and into quarter turns where u is an angle, then every
+piece halved until two estimates agree to 1e-13 of the body's scale, at
+most six times. The scale is the sum of the faces' volume magnitudes (times
+the box's half diagonal for a moment, its square for the inertia) and the
+sum of their areas. The fixed figure stands when it is within 1e-12 of that
+scale of the second estimate; otherwise the second one is used. Each figure
+carries an uncertainty: the last halving's change, plus the gap to the
+fixed rule where that stood.
+
+Those two thresholds come from `tests/test_integrate.cpp`. On faces where
+the fixed rule is exact (boxes, cylinders, cones, spheres, tori, each given
+a second estimate as if suspect) the two estimates sit at most 6e-14 of the
+scale apart, rounding. The smallest gap on a face where the fixed rule was
+wrong was 4.5e-12. A halving after the knot cuts moves a figure by 2e-15 of
+the scale or less, except on rational p-curves and some thread faces, which
+settle within three halvings.
+
+The uncertainty is the integration's, not the model's. The closed form of
+a tube joined with nine bars is 7.5e-7 mm³ above both the integrator and
+the adaptive rule at 1e-10, which agree to 1.2e-8: the intersection curves
+are B-spline approximations. Rounding over the 8280 faces of a level-3
+Menger sponge is 6e-8 mm³ in 10⁶.
+
 ## Sections
 
 **The number.** `section {base_plane | origin+normal, offset?, part?,
@@ -959,6 +1001,13 @@ exact to rounding, not to the decimal a person would write.
 
 ## How it is tested
 
+`test_integrate.cpp` (`cad::Integrate` against closed forms: a bar through
+a tube's wall and nine of them, a cylinder cut on a slant with its ellipse
+as a conic and as a rational B-spline, an extruded 24-span spline loop, a
+revolved Bezier profile, a horn torus, a modelled M10 thread and a level-3
+Menger sponge; the faces' figures summing to the body's, the fixed rule's
+figures kept bit for bit on faces that are not suspect, the two estimates'
+agreement on exact faces, and its CPU time against today's three passes),
 `test_measure.cpp` (enclosed area: four wall bodies ring exactly the
 floor, a gap encloses nothing, a plate encloses its bore level and tilted;
 the exact distance over a 96-gon shaft in its bore, concentric and off
@@ -995,6 +1044,10 @@ GUI suite, and the measure parity phase in `remote_smoke`.
 
 ## What it does not do yet
 
+- Answer a volume or mass with `cad::Integrate`, or report an uncertainty
+  ([the plan](../plans/checked-mass-properties.md)). A face with no
+  boundary (natural restriction) keeps the fixed rule's figure even on a
+  B-spline surface.
 - Measure a face, edge or body against a datum, or a datum of an
   occurrence in world space (`frame` places one; `measure` does not yet).
 - Pick a raw vertex (corners cover the cases people ask for).

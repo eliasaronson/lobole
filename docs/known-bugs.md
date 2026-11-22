@@ -83,7 +83,10 @@ the heading if it is not here yet.
   `ComputeMassProps` use the fixed Gauss rule, which is exact on a face
   bounded by lines and conics and not on a cylinder trimmed by the bars'
   intersection B-splines (one bar, built from primitives, reads 44.609
-  added for 44.6277).
+  added for 44.6277). Nor is it on a face whose surface has knot lines
+  inside it: a closed 24-span cubic spline extruded 12 mm reads 15826.450
+  for 15841.851 (the side face alone 1.2 % heavy) with the centre of mass
+  0.2 mm off.
 - **Tried:** the adaptive rule everywhere fixes this case and five rows filed
   as [not kernel defects](modeling/README.md#known-rows-that-are-not-kernel-defects)
   (1207 twice, 926, 05-holes-and-taps/012, 3528), and breaks others: a revolved Bezier profile
@@ -93,9 +96,10 @@ the heading if it is not here yet.
   (06-threads/004) 7 % heavy, while reporting that it had converged.
 - **Where:** `CADShape::Volume` and `CADShape::ComputeMassProps`,
   `src/cad/CADKernel.cpp`.
-- **Likely fix:** a face rule that can be trusted case by case, e.g. the
-  adaptive rule cross-checked against a second estimate (the face's area,
-  or the fixed rule at a subdivided domain) and used only where they agree.
+- **Likely fix:** `cad::Integrate`
+  ([the face-by-face integrator](inspect/README.md#the-face-by-face-integrator))
+  measures every one of these within 2e-10 of the closed form; the
+  measures do not call it yet ([the plan](plans/checked-mass-properties.md)).
 - **Case:** `solidcraft/booleans/1107-join-hollow-hub-with-nine-blades`.
 
 ### A blend along a curved edge is off its rolling-ball volume
