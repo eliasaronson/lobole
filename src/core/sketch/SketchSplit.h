@@ -12,7 +12,12 @@
 
 #include <glm/glm.hpp>
 #include <optional>
+#include <string>
 #include <vector>
+
+namespace units {
+struct System;
+}
 
 namespace sketch {
 
@@ -75,5 +80,17 @@ glm::dvec2 TangentAt(const Entity& e, glm::dvec2 p);
 
 // The word a sketch file spells constraint kind `k` in ("point_on_line").
 const char* ConstraintWord(ConstraintKind k);
+
+// Constraint kind `k` as a person reads it ("point on curve", "horizontal
+// distance").
+const char* ConstraintPhrase(ConstraintKind k);
+
+// What a spline's cut drops, said the way a person sees it: a dimension by
+// its kind and value in `sys`, the rest by kind, and where it sat --
+// "distance 2.24 mm on the spline's 3rd pole", "tangent at the end of the
+// spline the cut removes", "the expression on the spline's 4th pole's x".
+// No ids: a script reads those off the CutDrop.
+std::string DescribeCutDrop(const SketchFeature::CutDrop& d,
+                            const units::System& sys);
 
 } // namespace sketch

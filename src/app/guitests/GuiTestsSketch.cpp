@@ -4,6 +4,7 @@
 #include "app/GuiTests.h" // GuiTestCaptureDir
 #include "app/guitests/GuiTestsCommon.h"
 #include "common/ChildProcess.h"
+#include "core/Units.h"
 #include "core/sketch/SketchOrientation.h"
 #include "core/sketch/SketchSpline.h" // CutSpline
 #include "core/sketch/SketchSplit.h"
@@ -1019,9 +1020,13 @@ void RegisterSketchGuiTests(ImGuiTestEngine* engine) {
     const auto& live =
         std::get<sketch::BSpline>(sk->entities[sk->IndexOfEntity(spline)]);
     const glm::dvec2 cutAt = sketch::BSplineEvalUV(live, u);
-    const std::string expected = "distance (constraint 0) on pole " +
-                                 std::to_string(replaced) + " of spline " +
-                                 std::to_string(spline);
+    // Said as the sketch shows it: the dimension by its kind and value (the
+    // pill's 2.24), where it sits by the pole counted from one -- never the
+    // spline's raw id.
+    const char* nth[] = {"1st", "2nd", "3rd", "4th", "5th", "6th"};
+    const std::string expected = "distance " + units::FormatNumber(d, 3) +
+                                 " mm on the spline's " + nth[replaced] +
+                                 " pole";
 
     ctx->KeyPress(ImGuiKey_K);
     ctx->Yield();
@@ -1035,7 +1040,11 @@ void RegisterSketchGuiTests(ImGuiTestEngine* engine) {
       IM_CHECK(e.hasSplitPreview);
       IM_CHECK_EQ(e.splitPreviewCurve, spline);
       IM_CHECK_EQ(e.splitPreviewDrops.size(), (size_t)1);
-      IM_CHECK_STR_EQ(e.splitPreviewDrops[0].c_str(), expected.c_str());
+      IM_CHECK_EQ(e.splitPreviewDrops[0].constraint, 0);
+      IM_CHECK_STR_EQ(
+          sketch::DescribeCutDrop(e.splitPreviewDrops[0], s_App->ActiveUnits())
+              .c_str(),
+          expected.c_str());
       IM_CHECK_EQ(sk->constraints.size(), (size_t)1); // nothing dropped yet
     }
     GuiShot(ctx, "split_hover_drops");

@@ -846,8 +846,14 @@ def main():
         qcons = d.call("get_state")["features"][0]["constraints"]
         expect(sum(c["kind"] == "smooth" for c in qcons) == 1,
                f"the two pieces are joined smooth: {qcons}")
+        # Each by its ids for a script, and in words for a person: the
+        # constraint's kind and the pole counted from one, never a raw id.
         expect(sq["dropped"] and all(
-            "on pole" in x and f"of spline {qs}" in x for x in sq["dropped"]),
+            x["spline"] == qs and x["kind"] == "fixed" and
+            x["poles"] == [x["constraint"]] and
+            x["text"].startswith("fixed on the spline's ") and
+            x["text"].endswith(" pole") and str(qs) not in x["text"]
+            for x in sq["dropped"]),
             f"each replaced pole's constraint is named: {sq['dropped']}")
         qents = {e["id"]: e for e in
                  d.call("get_state")["features"][0]["entities"]}

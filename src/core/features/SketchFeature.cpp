@@ -1198,8 +1198,8 @@ struct SplineCutPlan {
   // Where each original pole went: (piece, which), or nowhere (replaced).
   std::vector<std::optional<std::pair<size_t, uint8_t>>> where;
   std::vector<int> joinedAt, onPiece;
-  std::vector<std::string> dropOf; // per constraint: "" = it survives
-  std::vector<std::string> dropped;
+  std::vector<bool> dropOf; // per constraint: true = it is dropped
+  std::vector<SketchFeature::CutDrop> dropped;
 };
 
 SplineCutPlan PlanSplineCut(const SketchFeature& sk, uint32_t id, double u,
@@ -1217,7 +1217,6 @@ SplineCutPlan PlanSplineCut(const SketchFeature& sk, uint32_t id, double u,
   if (!plan.cut)
     return plan;
   const sketch::SplineCut& cut = *plan.cut;
-  const std::string name = "spline " + std::to_string(id);
   const size_t n = original.poles.size();
   const size_t lo = plan.lo = keep == 2 ? cut.before : 0;
   const size_t hi = plan.hi = keep == 1 ? cut.before : cut.pieces.size();
@@ -1296,7 +1295,8 @@ SplineCutPlan PlanSplineCut(const SketchFeature& sk, uint32_t id, double u,
   }
 
   // What the transfer cannot keep.
-  plan.dropOf.assign(constraints.size(), {});
+  using Drop = SketchFeature::CutDrop;
+  plan.dropOf.assign(constraints.size(), false);
   for (size_t k = 0; k < constraints.size(); k++) {
     const sketch::Constraint& con = constraints[k];
     const PointSlots slots = PointSlotsOf(con, isLineId(con.c.entity));
@@ -1311,42 +1311,51 @@ SplineCutPlan PlanSplineCut(const SketchFeature& sk, uint32_t id, double u,
       check(con.b);
     if (slots.c)
       check(con.c);
-    const std::string what = std::string(sketch::ConstraintWord(con.kind)) +
-                             " (constraint " + std::to_string(k) + ")";
-    std::string& drop = plan.dropOf[k];
+    Drop drop;
+    drop.constraint = static_cast<int>(k);
+    drop.kind = con.kind;
+    drop.driven = con.driven;
+    drop.value =
+        con.driven ? sketch::MeasureDimension(entities, con).value_or(con.value)
+                   : con.value;
+    drop.spline = id;
     if (!gone.empty()) {
       std::sort(gone.begin(), gone.end());
       gone.erase(std::unique(gone.begin(), gone.end()), gone.end());
-      std::string poles = gone.size() == 1 ? "pole " : "poles ";
-      for (size_t g = 0; g < gone.size(); g++)
-        poles += (g == 0                 ? ""
-                  : g + 1 == gone.size() ? " and "
-                                         : ", ") +
-                 std::to_string(gone[g]);
-      drop = what + " on " + poles + " of " + name;
+      drop.where = Drop::Where::Poles;
+      drop.poles = gone;
     } else if (joinedAt[k] >= 0) {
       const size_t w = static_cast<size_t>(joinedAt[k]);
-      if (w >= n || !where[w])
-        drop = what + " at the end of " + name + " the cut removed";
+      if (w < n && where[w])
+        continue;
+      drop.where = Drop::Where::RemovedEnd;
     } else if (onPiece[k] == -2) {
-      drop = what + " on the part of " + name + " the cut removed";
+      drop.where = Drop::Where::RemovedPart;
+    } else {
+      continue;
     }
-    if (!drop.empty())
-      plan.dropped.push_back(drop);
+    plan.dropOf[k] = true;
+    plan.dropped.push_back(std::move(drop));
   }
   // Pole expressions follow their poles; a replaced pole's is dropped.
   if (auto it = sk.entityExprs.find(id); it != sk.entityExprs.end())
     for (const auto& [field, expr] : it->second) {
       const auto pf = sketch::PoleField(field);
-      if (!pf || pf->first >= n || !where[pf->first])
-        plan.dropped.push_back("the expression on " + field + " of " + name);
+      if (!pf || pf->first >= n || !where[pf->first]) {
+        Drop drop;
+        drop.spline = id;
+        drop.field = field;
+        if (pf)
+          drop.poles = {pf->first};
+        plan.dropped.push_back(std::move(drop));
+      }
     }
   return plan;
 }
 } // namespace
 
-std::vector<std::string> SketchFeature::SplitDropsAt(uint32_t id,
-                                                     glm::dvec2 at) const {
+std::vector<SketchFeature::CutDrop>
+SketchFeature::SplitDropsAt(uint32_t id, glm::dvec2 at) const {
   const size_t idx = IndexOfEntity(id);
   if (idx == std::numeric_limits<size_t>::max())
     return {};
@@ -1420,7 +1429,7 @@ SketchFeature::SplitSplineAt(uint32_t id, double u, glm::dvec2 at,
   std::vector<sketch::Constraint> survivors;
   survivors.reserve(constraints.size());
   for (size_t k = 0; k < constraints.size(); k++) {
-    if (!plan.dropOf[k].empty())
+    if (plan.dropOf[k])
       continue;
     sketch::Constraint con = constraints[k];
     const PointSlots slots = PointSlotsOf(con, isLineId(con.c.entity));

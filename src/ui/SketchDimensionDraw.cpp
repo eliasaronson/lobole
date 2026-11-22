@@ -362,7 +362,18 @@ void DrawDimensions(AppState& state) {
   // The dimensions a driven one repeats, outlined while the status offers
   // to replace them (docs/sketching/README.md#gui).
   const SketchEditState::ReplaceOffer* offer = LiveReplaceOffer(state);
+  // Ringed in the warning amber: a dimension a fit offers to replace, and
+  // one the Split tool's cut under the cursor would drop
+  // (SketchEditState::splitPreviewDrops), so the eye finds which one the
+  // hover's list means.
+  const bool splitting = edit.tool == SketchTool::Split &&
+                         edit.hasSplitPreview &&
+                         !edit.splitPreviewDrops.empty();
   const auto offered = [&](int i) {
+    if (splitting)
+      for (const SketchFeature::CutDrop& d : edit.splitPreviewDrops)
+        if (d.constraint == i)
+          return true;
     return offer != nullptr &&
            std::find(offer->old.begin(), offer->old.end(),
                      static_cast<size_t>(i)) != offer->old.end();

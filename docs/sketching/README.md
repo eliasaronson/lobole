@@ -507,8 +507,13 @@ expressions (`p4x`), re-indexed onto its piece (each `SplinePiece` names the
 original pole of each of its poles); a constraint on an end follows the end
 to its piece, and a point on the spline goes to the piece it lies on. A
 constraint on a replaced pole is dropped, and the edit names each one, in
-the RPC's `dropped` and the prompt pill: "fixed (constraint 6) on pole 4 of
-spline 9", "the expression on p3x of spline 9".
+the prompt pill as the sketch shows it -- a dimension by its kind and value,
+the pole counted from one: "distance 2.24 mm on the spline's 3rd pole",
+"fixed on the spline's 5th pole", "the expression on the spline's 4th
+pole's x" (`sketch::DescribeCutDrop`, in the document's units) -- and in the
+RPC's `dropped` by its ids as well: `{spline, constraint, kind, where,
+poles, text}`, `constraint` its index before the cut and `poles` 0-based,
+`text` the same sentence in mm.
 
 So **a dimension stays on the thing it measured if that thing still
 exists**: one on an end, on a pole away from the cut, or on a point placed
@@ -1725,13 +1730,14 @@ cut is held; Escape drops the held cut and keeps the tool, a click on
 another curve says to click the held one again. A closed spline takes one,
 its seam being the other. The prompt pill alone says what to do; a
 refusal says only why, prefixed "Not split:", in `SplitEntity`'s words, and
-a spline's cut that dropped constraints says which, "Split; dropped fixed
-(constraint 6) on pole 4 of spline 9". Before the click, the hover says it
-too: beside the cut, in the warning amber, "A cut here drops" and each thing
-the cut at the cursor would drop (`SplitDropsAt`, the cut's own decision run
-dry; `SketchEditState::splitPreviewDrops`, drawn by `DrawSplitDrops`), so a
-cut a little further along can keep it
-(`split/spline_hover_names_what_it_drops`).
+a spline's cut that dropped constraints says which, "Split; dropped
+distance 2.24 mm on the spline's 3rd pole". Before the click, the hover
+says it too: beside the cut, in the warning amber, "A cut here drops" and
+each thing the cut at the cursor would drop (`SplitDropsAt`, the cut's own
+decision run dry; `SketchEditState::splitPreviewDrops`, drawn by
+`DrawSplitDrops`), and each dimension among them is ringed in the same
+amber on the canvas, so the eye finds which one; a cut a little further
+along can keep it (`split/spline_hover_names_what_it_drops`).
 
 Splitting a line where a circle crosses it, twice, and making the piece
 inside construction (Q) is the use it was built for: the sketch stays
@@ -1829,8 +1835,8 @@ In `src/remote/RemoteModeling.cpp` (`describe` lists `sketch_entity_types`,
 | `add_constraint` | `sketch_id, kind, refs, value \| value_deg \| expr \| driven` | `refs` = `[[entity_id, which], …]` (a, b, c); `value` is mm (an `arc_length` too), or **radians** for an angle (`value_deg` instead, never both; more than a full turn is refused as degrees); `expr` is in base units, angles in degrees. A constraint that constrains nothing is refused ([Refusals](#refusals)). `driven: true` on a dimension kind, with none of `value`/`value_deg`/`expr`, adds a [driven dimension](#constraints) and answers `measured` (mm; radians for an angle). Every answer carries the sketch's `dof` after the add. One solve, one undo step. The geometry is taken literally: nothing is [rescaled](#the-first-dimension). A new variable driving a dimension is a `batch` of `set_variable` (`scope: "part"` keeps it one undo step; a project variable is undone on its own) and `add_constraint` with `expr` naming it |
 | `add_constraints` | `sketch_id, constraints[]` | many at once, each spec as `add_constraint`'s: one judgement, solve, regen, undo step; a refused spec adds nothing and is named by index; `measured` lists each spec's measure (null for a driving one) when any is driven |
 | `delete_entity` | `sketch_id, entity_id` | with the constraint cleanup above |
-| `split` | `sketch_id, entity_id, at, crossing?` | a line, an arc, an elliptical arc or a spline at `at` = [u, v] in sketch mm, a circle or an ellipse at two, `[[u, v], [u, v]]`; `crossing` = an entity id (or one per cut, null for none) cuts at that curve's crossing nearest each `at` and holds the joint on it; without it `at` moves to the nearest point of the curve (refused past a hundredth of its length). Returns `entity_ids` in order along the curve, the first keeping the id (of a spline's pieces, the longest), `dropped` (each constraint on a spline pole the cut replaced, by name; [A spline cut exactly](#a-spline-cut-exactly)), and `dof`, `regen`, `digest`; a refusal names why ([Operations](#operations-on-the-entity-list), SplitEntity) and changes nothing |
-| `fillet` | `sketch_id, entity1, entity2, radius, near?` | lines, arcs, elliptical arcs and open splines sharing an end; `radius` in mm, `near` = [u, v] in sketch mm picks the corner where they share two ends; returns `arc_id`, `replaced` (`[{spline, pieces}]`, each spline cut at its tangent point and its pieces in order) and `dropped`; a refusal names why ([Operations](#operations-on-the-entity-list), FilletCorner) and changes nothing |
+| `split` | `sketch_id, entity_id, at, crossing?` | a line, an arc, an elliptical arc or a spline at `at` = [u, v] in sketch mm, a circle or an ellipse at two, `[[u, v], [u, v]]`; `crossing` = an entity id (or one per cut, null for none) cuts at that curve's crossing nearest each `at` and holds the joint on it; without it `at` moves to the nearest point of the curve (refused past a hundredth of its length). Returns `entity_ids` in order along the curve, the first keeping the id (of a spline's pieces, the longest), `dropped` (each constraint on a spline pole the cut replaced, `{spline, constraint, kind, where, poles, text}`; [A spline cut exactly](#a-spline-cut-exactly)), and `dof`, `regen`, `digest`; a refusal names why ([Operations](#operations-on-the-entity-list), SplitEntity) and changes nothing |
+| `fillet` | `sketch_id, entity1, entity2, radius, near?` | lines, arcs, elliptical arcs and open splines sharing an end; `radius` in mm, `near` = [u, v] in sketch mm picks the corner where they share two ends; returns `arc_id`, `replaced` (`[{spline, pieces}]`, each spline cut at its tangent point and its pieces in order) and `dropped` (as `split`'s); a refusal names why ([Operations](#operations-on-the-entity-list), FilletCorner) and changes nothing |
 | `offset` | `sketch_id, chain, distance, join_arc?` | sign of `distance` picks the side |
 | `mirror` | `sketch_id, sources, axis, link?` | `axis` may be a datum axis id |
 | `pattern` | `sketch_id, sources, count, link?` and `step` or `circular, center, angle \| angle_deg` | circular angle is **per step** |

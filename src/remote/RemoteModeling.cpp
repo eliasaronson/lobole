@@ -18,6 +18,7 @@
 #include "core/Literals.h"
 #include "core/Primitives.h"
 #include "core/PrintSplit.h"
+#include "core/Units.h"
 #include "core/features/BooleanFeature.h"
 #include "core/features/CamProfileFeature.h"
 #include "core/features/CradleFeature.h"
@@ -40,6 +41,7 @@
 #include "core/sketch/SketchOrientation.h"
 #include "core/sketch/SketchSection.h"
 #include "core/sketch/SketchSolver.h"
+#include "core/sketch/SketchSplit.h"
 #include "remote/InspectionContracts.h" // ContractError
 #include "remote/RemoteHelpers.h"
 #include "remote/RemoteInspection.h" // PrintedThreadJson
@@ -386,6 +388,32 @@ json ReduceToFit(Document& doc, Feature& f, std::optional<size_t> at) {
           {"asked_mm", asked},
           {"built_mm", size.value},
           {"basis", basis}};
+}
+
+// What a spline's cut dropped (SketchFeature::CutReport::dropped), for a
+// script: the ids it can match -- the spline, the constraint's index before
+// the cut, the 0-based poles -- and the sentence a person reads, in mm
+// (sketch::DescribeCutDrop).
+json CutDropsJson(const std::vector<SketchFeature::CutDrop>& drops) {
+  using Where = SketchFeature::CutDrop::Where;
+  json out = json::array();
+  for (const SketchFeature::CutDrop& d : drops) {
+    json j = {{"spline", d.spline},
+              {"text", sketch::DescribeCutDrop(d, units::System{})}};
+    if (d.constraint >= 0) {
+      j["constraint"] = d.constraint;
+      j["kind"] = sketch::ConstraintWord(d.kind);
+      j["where"] = d.where == Where::Poles        ? "poles"
+                   : d.where == Where::RemovedEnd ? "removed_end"
+                                                  : "removed_part";
+    } else {
+      j["expression"] = d.field;
+    }
+    if (!d.poles.empty())
+      j["poles"] = d.poles;
+    out.push_back(std::move(j));
+  }
+  return out;
 }
 
 // What a feature says about the bodies it would act on (Feature::WhyRefusedOn):
@@ -1074,8 +1102,11 @@ static constexpr MethodDoc ModelingMethods[] = {
      "two share two "
      "ends (refused without it). A radius too large is refused naming the "
      "largest that fits. Returns arc_id, `replaced` ([{spline, pieces}]: "
-     "each cut spline and its pieces in order) and `dropped` (each "
-     "constraint on a pole the cut replaced, by name).",
+     "each cut spline and its pieces in order) and `dropped` (what each cut "
+     "could not keep: [{spline, constraint (its index before the cut), "
+     "kind, where, poles (0-based), text}], or {spline, expression, poles, "
+     "text} for a pole's expression; `text` says it as the sketch shows "
+     "it).",
      "entity1, entity2, near, radius, sketch_id", remote::NeedsPart},
     {"split",
      "Sketch split: cut a line, an arc, a circle, an ellipse, an elliptical "
@@ -1093,7 +1124,10 @@ static constexpr MethodDoc ModelingMethods[] = {
      "curve was there; a closed spline takes one cut, its seam is the "
      "other), and a "
      "constraint on a pole the cut replaced is dropped and named in "
-     "`dropped`. A generated entity, a circle-shaped ellipse, a cut at an "
+     "`dropped` ([{spline, constraint (its index before the cut), kind, "
+     "where, poles (0-based), text}]; `text` says it as the sketch shows "
+     "it: \"distance 2.24 mm on the spline's 3rd pole\"). A generated entity, "
+     "a circle-shaped ellipse, a cut at an "
      "end, an equal length on the line and an arc_length on the arc are "
      "refused by name. Returns entity_ids in order along the curve (the "
      "first keeps the id; of a spline's pieces the longest does), dropped, "
@@ -3543,7 +3577,7 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
     state.commands->Execute(
         std::make_unique<ModifyFeatureCommand>(index, before, after), *doc);
     return json{{"entity_ids", ids},
-                {"dropped", report.dropped},
+                {"dropped", CutDropsJson(report.dropped)},
                 {"dof", solved.dof},
                 {"regen", RegenSummaryJson(*doc)},
                 {"digest", DigestJson(preDigest, *doc)}};
@@ -3672,7 +3706,7 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
       for (const SketchFeature::CutReport::Replaced& r : report.replaced)
         replaced.push_back({{"spline", r.spline}, {"pieces", r.pieces}});
       result["replaced"] = replaced;
-      result["dropped"] = report.dropped;
+      result["dropped"] = CutDropsJson(report.dropped);
     }
     sketch::Solver solver;
     solver.Load(*sk);

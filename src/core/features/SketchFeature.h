@@ -1181,17 +1181,35 @@ public:
     uint32_t crossing = 0;
   };
 
+  // One thing a cut of a spline cannot keep: a constraint on a pole the cut
+  // replaces, joined at an end it removes or on the part it removes, or a
+  // pole's expression. Said to a person by sketch::DescribeCutDrop
+  // (SketchSplit.h) -- "distance 2.24 mm on the spline's 3rd pole" -- and
+  // named to a script by its ids.
+  struct CutDrop {
+    enum class Where { Poles, RemovedEnd, RemovedPart };
+    int constraint = -1; // its index in `constraints` before the cut; -1 for
+                         // a pole's expression
+    sketch::ConstraintKind kind = sketch::ConstraintKind::Coincident;
+    double value = 0.0; // a dimension's, as shown (a driven one measured):
+                        // mm, an angle in radians
+    bool driven = false;
+    uint32_t spline = 0;
+    Where where = Where::Poles;
+    std::vector<size_t> poles; // the replaced poles it is on, 0-based
+    std::string field;         // a pole's expression: its field ("p3x")
+  };
+
   // What a cut of a spline left behind (SplitEntity, FilletCorner): each cut
   // spline and its pieces in order along it, and each constraint (or pole
-  // expression) on a pole the cut replaced, which is dropped -- "distance
-  // (constraint 6) on pole 4 of spline 9".
+  // expression) the cut could not keep, which is dropped.
   struct CutReport {
     struct Replaced {
       uint32_t spline = 0;
       std::vector<uint32_t> pieces;
     };
     std::vector<Replaced> replaced;
-    std::vector<std::string> dropped;
+    std::vector<CutDrop> dropped;
   };
 
   // Splits the curve `id` into pieces that stay one curve
@@ -1243,7 +1261,7 @@ public:
   // -- the same transfer SplitEntity runs, as a dry run: CutReport::dropped,
   // nothing changed. Empty for any other curve, or a cut that is refused.
   // For the Split tool's hover.
-  std::vector<std::string> SplitDropsAt(uint32_t id, glm::dvec2 at) const;
+  std::vector<CutDrop> SplitDropsAt(uint32_t id, glm::dvec2 at) const;
 
   // Trims the line `id` at `clickUV`: removes the sub-segment the click falls
   // in, bounded by the line's intersections with other lines (Trim's own

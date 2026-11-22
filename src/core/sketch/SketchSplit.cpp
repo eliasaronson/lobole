@@ -3,6 +3,8 @@
 
 #include "core/sketch/SketchSplit.h"
 
+#include "core/Angles.h"
+#include "core/Units.h"
 #include "core/sketch/SketchSpline.h"
 
 #include <algorithm>
@@ -645,6 +647,86 @@ const char* ConstraintWord(ConstraintKind k) {
     return "smooth";
   }
   return "constraint";
+}
+
+const char* ConstraintPhrase(ConstraintKind k) {
+  using K = ConstraintKind;
+  switch (k) {
+  case K::PointOnLine:
+    return "point on curve";
+  case K::DistanceX:
+    return "horizontal distance";
+  case K::DistanceY:
+    return "vertical distance";
+  case K::DistancePL:
+    return "distance";
+  case K::ArcLength:
+    return "arc length";
+  default:
+    return ConstraintWord(k);
+  }
+}
+
+namespace {
+
+// 1st, 2nd, 3rd, 4th, ..., 11th, 12th, 13th, 21st.
+std::string Ordinal(size_t n) {
+  const size_t tens = n % 100;
+  const char* suffix = "th";
+  if (tens < 11 || tens > 13) {
+    if (n % 10 == 1)
+      suffix = "st";
+    else if (n % 10 == 2)
+      suffix = "nd";
+    else if (n % 10 == 3)
+      suffix = "rd";
+  }
+  return std::to_string(n) + suffix;
+}
+
+} // namespace
+
+std::string DescribeCutDrop(const SketchFeature::CutDrop& d,
+                            const units::System& sys) {
+  using Where = SketchFeature::CutDrop::Where;
+  // The poles a person counts from one: "the spline's 3rd pole", "the
+  // spline's 2nd and 3rd poles".
+  std::string poles;
+  for (size_t i = 0; i < d.poles.size(); i++)
+    poles += (i == 0                    ? ""
+              : i + 1 == d.poles.size() ? " and "
+                                        : ", ") +
+             Ordinal(d.poles[i] + 1);
+  poles = "the spline's " + poles + (d.poles.size() == 1 ? " pole" : " poles");
+  if (d.constraint < 0) {
+    const auto pf = PoleField(d.field);
+    if (!pf)
+      return "the expression on the spline's " + d.field;
+    return "the expression on " + poles + "'s " + (pf->second ? "x" : "y");
+  }
+  std::string what = ConstraintPhrase(d.kind);
+  if (IsDimension(d.kind)) {
+    const std::string value =
+        d.kind != ConstraintKind::Angle ? std::string()
+        : sys.angle == units::Angle::Radian
+            ? units::FormatNumber(d.value, 3) + " rad"
+            : units::FormatNumber(angles::ToDegrees(d.value), 3) + "\xc2\xb0";
+    const std::string shown =
+        !value.empty()
+            ? value
+            : units::FormatNumber(d.value / units::MmPerLength(sys.length), 3) +
+                  " " + units::ToString(sys.length);
+    what += " " + (d.driven ? "(" + shown + ")" : shown);
+  }
+  switch (d.where) {
+  case Where::Poles:
+    return what + " on " + poles;
+  case Where::RemovedEnd:
+    return what + " at the end of the spline the cut removes";
+  case Where::RemovedPart:
+    return what + " on the part of the spline the cut removes";
+  }
+  return what;
 }
 
 } // namespace sketch

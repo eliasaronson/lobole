@@ -9,6 +9,7 @@
 
 #include "core/Command.h"
 #include "core/Document.h"
+#include "core/Units.h"
 #include "core/features/ExtrudeFeature.h"
 #include "core/features/SketchFeature.h"
 #include "core/io/Serialization.h"
@@ -27,6 +28,14 @@ using Catch::Matchers::WithinAbs;
 using FK = sketch::ConstraintKind;
 
 namespace {
+
+// What a cut dropped, as the person reads it (mm, degrees).
+std::vector<std::string> Said(const std::vector<SketchFeature::CutDrop>& d) {
+  std::vector<std::string> out;
+  for (const SketchFeature::CutDrop& x : d)
+    out.push_back(sketch::DescribeCutDrop(x, units::System{}));
+  return out;
+}
 
 sketch::SolveResult Solved(SketchFeature& sk) {
   sketch::Solver s;
@@ -260,15 +269,33 @@ TEST_CASE("A spline's cut keeps the constraints on the poles it leaves and "
       CHECK(somewhere);
     }
   CHECK(fixedLeft == static_cast<int>(kept.size()));
+  // Said as a person counts poles, from one; named to a script by its ids.
+  const auto nth = [](int k) {
+    const char* suffix[] = {"st", "nd", "rd"};
+    return std::to_string(k + 1) + (k < 3 ? suffix[k] : "th");
+  };
   std::vector<std::string> expected;
+  std::vector<int> constraints;
   for (int k = 0; k < static_cast<int>(wave.poles.size()); k++)
-    if (!kept.count(k))
-      expected.push_back("fixed (constraint " + std::to_string(k) +
-                         ") on pole " + std::to_string(k) + " of spline " +
-                         std::to_string(sp));
-  if (!kept.count(3))
-    expected.push_back("the expression on p3x of spline " + std::to_string(sp));
-  CHECK(report.dropped == expected);
+    if (!kept.count(k)) {
+      expected.push_back("fixed on the spline's " + nth(k) + " pole");
+      constraints.push_back(k);
+    }
+  if (!kept.count(3)) {
+    expected.push_back("the expression on the spline's 4th pole's x");
+    constraints.push_back(-1);
+  }
+  CHECK(Said(report.dropped) == expected);
+  REQUIRE(report.dropped.size() == constraints.size());
+  for (size_t i = 0; i < constraints.size(); i++) {
+    const SketchFeature::CutDrop& d = report.dropped[i];
+    CHECK(d.constraint == constraints[i]);
+    CHECK(d.spline == sp);
+    if (d.constraint >= 0)
+      CHECK(d.poles == std::vector<size_t>{static_cast<size_t>(d.constraint)});
+    else
+      CHECK(d.field == "p3x");
+  }
   REQUIRE(kept.count(0));
   CHECK(sk.entityExprs[ids.front()].at("p0y") == "0");
 }
@@ -326,12 +353,22 @@ TEST_CASE("A dimension survives a spline's cut wherever what it measured "
   // The dry run: what the cut would drop, nothing changed.
   const glm::dvec2 at = sketch::BSplineEvalUV(wave, u);
   const nlohmann::json before = DocumentIO::FeatureToJson(sk);
-  const std::vector<std::string> dry = sk.SplitDropsAt(sp, at);
+  const std::vector<SketchFeature::CutDrop> dry = sk.SplitDropsAt(sp, at);
   CHECK(DocumentIO::FeatureToJson(sk) == before);
   REQUIRE(dry.size() == 1);
-  CHECK(dry[0] == "distance (constraint " + std::to_string(dims[3].index) +
-                      ") on pole " + std::to_string(replaced) + " of spline " +
-                      std::to_string(sp));
+  // By its kind and value, and the pole counted from one; the ids for a
+  // script.
+  CHECK(Said(dry)[0] == "distance " + units::FormatNumber(dims[3].value, 3) +
+                            " mm on the spline's " +
+                            std::to_string(replaced + 1) +
+                            (replaced + 1 == 2   ? "nd"
+                             : replaced + 1 == 3 ? "rd"
+                                                 : "th") +
+                            " pole");
+  CHECK(dry[0].constraint == static_cast<int>(dims[3].index));
+  CHECK(dry[0].spline == sp);
+  CHECK(dry[0].poles == std::vector<size_t>{static_cast<size_t>(replaced)});
+  CHECK(dry[0].kind == FK::Distance);
   CHECK(sk.SplitDropsAt(sk.AddEntity(sketch::Line{{0, -9}, {1, -9}}), at)
             .empty()); // a line's cut drops nothing of this kind
 
@@ -341,7 +378,9 @@ TEST_CASE("A dimension survives a spline's cut wherever what it measured "
   const auto ids = sk.SplitEntity(sp, {{at, 0}}, &why, &report);
   INFO(why);
   REQUIRE(ids.size() == 2);
-  CHECK(report.dropped == dry);
+  CHECK(Said(report.dropped) == Said(dry));
+  REQUIRE(report.dropped.size() == 1);
+  CHECK(report.dropped[0].constraint == dry[0].constraint);
   Solved(sk);
   int distances = 0;
   for (const auto& c : sk.constraints) {

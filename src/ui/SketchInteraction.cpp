@@ -833,9 +833,10 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
           // A spline's cut names what it could not keep; the pill's DOF
           // says how many its extra poles added.
           edit.actionMsg.clear();
-          for (const std::string& d : report.dropped)
+          for (const SketchFeature::CutDrop& d : report.dropped)
             edit.actionMsg +=
-                (edit.actionMsg.empty() ? "Split; dropped " : "; ") + d;
+                (edit.actionMsg.empty() ? "Split; dropped " : "; ") +
+                sketch::DescribeCutDrop(d, state.ActiveUnits());
           commitMutation(before);
           return true; // `sketch` may be stale past the commit
         }
@@ -1131,9 +1132,10 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
                                  target.nearUV, &why, &largest, &report)) {
           edit.filletFirst = 0;
           edit.actionMsg.clear();
-          for (const std::string& d : report.dropped)
+          for (const SketchFeature::CutDrop& d : report.dropped)
             edit.actionMsg +=
-                (edit.actionMsg.empty() ? "Filleted; dropped " : "; ") + d;
+                (edit.actionMsg.empty() ? "Filleted; dropped " : "; ") +
+                sketch::DescribeCutDrop(d, units);
           commitMutation(before);
           return true; // `sketch` may be stale past the commit
         }

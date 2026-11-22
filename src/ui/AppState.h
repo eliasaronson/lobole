@@ -267,8 +267,8 @@ struct SketchEditState {
   uint32_t splitPreviewCurve = 0;
   // What the cut under the cursor would drop (a spline's constraints and
   // pole expressions on the poles it replaces: SketchFeature::SplitDropsAt),
-  // drawn beside the cut.
-  std::vector<std::string> splitPreviewDrops;
+  // drawn beside the cut, and the dimensions among them ringed.
+  std::vector<SketchFeature::CutDrop> splitPreviewDrops;
   bool splitPreviewClosed = false; // the curve takes two cuts (a circle,
                                    // an ellipse)
 

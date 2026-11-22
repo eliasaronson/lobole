@@ -16,6 +16,7 @@
 #include "core/sketch/SketchProfile.h"
 #include "core/sketch/SketchSelection.h"
 #include "core/sketch/SketchSolver.h"
+#include "core/sketch/SketchSplit.h"
 #include "core/sketch/SketchText.h"
 #include "render/Camera.h"
 #include "render/MeshRenderer.h" // LineVertex3D
@@ -389,12 +390,16 @@ void DrawSplitDrops(AppState& state) {
   const ImU32 head = IM_COL32(255, 205, 120, 255);
   const ImU32 body = IM_COL32(226, 232, 240, 255);
   const float line = ImGui::GetTextLineHeight();
+  // Said as the sketch shows it: a dimension by its kind and value, where
+  // it sits by the spline's pole counted from one (sketch::DescribeCutDrop).
+  std::vector<std::string> said;
+  for (const SketchFeature::CutDrop& d : edit.splitPreviewDrops)
+    said.push_back(sketch::DescribeCutDrop(d, state.ActiveUnits()));
   float w = ImGui::CalcTextSize(kHead).x;
-  for (const std::string& d : edit.splitPreviewDrops)
+  for (const std::string& d : said)
     w = std::max(w, ImGui::CalcTextSize(d.c_str()).x);
   const float padX = 8.0f, padY = 5.0f, gap = 2.0f;
-  const float h = line * (1.0f + edit.splitPreviewDrops.size()) +
-                  gap * edit.splitPreviewDrops.size();
+  const float h = line * (1.0f + said.size()) + gap * said.size();
   // Below right of the cut, kept inside the viewport.
   float x = p.x + 16.0f, y = p.y + 16.0f;
   const float right = state.viewportPos.x + state.viewportSize.x - 4.0f;
@@ -409,7 +414,7 @@ void DrawSplitDrops(AppState& state) {
                     IM_COL32(60, 44, 24, 235), 5.0f);
   float ty = y + padY;
   dl->AddText(ImVec2(x + padX, ty), head, kHead);
-  for (const std::string& d : edit.splitPreviewDrops) {
+  for (const std::string& d : said) {
     ty += line + gap;
     dl->AddText(ImVec2(x + padX, ty), body, d.c_str());
   }
