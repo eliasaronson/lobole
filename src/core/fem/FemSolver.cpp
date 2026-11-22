@@ -1941,7 +1941,7 @@ SolveModal(const FemMesh&, const std::vector<Material>&,
 }
 std::optional<std::vector<FemResults::ModeShape>>
 SolveModal(const FemMesh&, const std::vector<Material>&, const Supports&, int,
-           std::string* error) {
+           std::string* error, bool, double*) {
   if (error)
     *error = "built without modal support (Spectra not found)";
   return std::nullopt;
