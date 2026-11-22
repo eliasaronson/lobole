@@ -396,7 +396,7 @@ that made no body. The fit is `importalign::BestFit`
   place. Cancelled, it is refused and changes nothing; an import moved,
   removed or closed while it ran is refused the same way.
 - **It costs** about 3 CPU s for a 30k-triangle scan onto a 340k-triangle
-  body, most of it the screen, and 1.2 CPU s for a 500k-triangle scan
+  body, most of it the screen, and 1.2 to 1.6 CPU s for a 500k-triangle scan
   onto the same body (fewer passes: the denser scan settles sooner); the
   `[slow]` budget is 4 CPU s.
 
