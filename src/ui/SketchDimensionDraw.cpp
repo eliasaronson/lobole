@@ -11,6 +11,7 @@
 #include "core/features/DatumPlaneFeature.h"
 #include "core/features/SketchFeature.h"
 #include "core/io/Serialization.h"
+#include "core/sketch/SketchFillet.h" // EndsOf
 #include "core/sketch/SketchInference.h"
 #include "core/sketch/SketchOrientation.h"
 #include "core/sketch/SketchProfile.h"
@@ -1079,6 +1080,7 @@ void DrawDimensionOnCreate(AppState& state) {
 void DrawConstraintGlyphs(AppState& state) {
   SketchEditState& edit = state.sketchEdit;
   edit.glyphHot = -1; // refreshed below; the canvas reads it next frame
+  edit.glyphsDrawn.clear();
   if (!edit.IsEditing() || !edit.showConstraintGlyphs)
     return;
   size_t index = 0;
@@ -1091,29 +1093,70 @@ void DrawConstraintGlyphs(AppState& state) {
   const ImU32 colSel = IM_COL32(255, 220, 130, 255);
   using K = sketch::ConstraintKind;
 
-  // Collect the badges per entity first, then lay each entity's stack out
-  // with real text widths (the old fixed 13 px advance overlapped wide
-  // glyphs). Entities with more than two badges collapse to one "xN"
-  // summary that fans out on hover — the mess in dense sketches was
-  // every constraint of a vertex stamped on top of its neighbors.
+  // Collect the badges per stack first, then lay each stack out with real
+  // text widths (the old fixed 13 px advance overlapped wide glyphs).
+  // Stacks with more than two badges collapse to one "xN" summary that fans
+  // out on hover — the mess in dense sketches was every constraint of a
+  // vertex stamped on top of its neighbors.
+  //
+  // A stack is anchored at a POINT, keyed entity << 8 | which. A constraint
+  // on a whole curve sits at the curve's point 0, as it always has; one that
+  // acts at a point -- a coincident, a smooth joint, a fix, a horizontal or
+  // vertical between two points, a tangent or curvature joined at shared
+  // ends -- sits at that point, so the badge of a joint is at the joint and
+  // not at the far end of the curve (a spline's first pole). A badge on a
+  // curve's point 0 joins that curve's stack.
   struct BadgeItem {
     int ci;
     const char* text;
   };
-  std::map<uint32_t, std::vector<BadgeItem>> byEntity;
+  const auto keyOf = [](const sketch::PointRef& r) -> uint64_t {
+    return (static_cast<uint64_t>(r.entity) << 8) | r.which;
+  };
+  std::map<uint64_t, std::vector<BadgeItem>> byStack;
   auto badge = [&](int ci, uint32_t entity, const char* text) {
-    byEntity[entity].push_back({ci, text});
+    byStack[keyOf({entity, 0})].push_back({ci, text});
+  };
+  auto badgeAt = [&](int ci, const sketch::PointRef& at, const char* text) {
+    byStack[keyOf(at)].push_back({ci, text});
+  };
+  // The end of `a` a coincident joins to an end of `b` (as the solver reads
+  // a tangent joint), if any.
+  const auto jointOf = [&](uint32_t a,
+                           uint32_t b) -> std::optional<sketch::PointRef> {
+    const size_t ai = sketch->IndexOfEntity(a), bi = sketch->IndexOfEntity(b);
+    if (ai == SIZE_MAX || bi == SIZE_MAX)
+      return std::nullopt;
+    const std::vector<uint8_t> ea = sketch::EndsOf(sketch->entities[ai]);
+    const std::vector<uint8_t> eb = sketch::EndsOf(sketch->entities[bi]);
+    const auto has = [](const std::vector<uint8_t>& es, uint8_t w) {
+      return std::find(es.begin(), es.end(), w) != es.end();
+    };
+    for (const sketch::Constraint& c : sketch->constraints) {
+      if (c.kind != K::Coincident)
+        continue;
+      if (c.a.entity == a && c.b.entity == b && has(ea, c.a.which) &&
+          has(eb, c.b.which))
+        return c.a;
+      if (c.b.entity == a && c.a.entity == b && has(ea, c.b.which) &&
+          has(eb, c.a.which))
+        return c.b;
+    }
+    return std::nullopt;
   };
 
   for (int i = 0; i < (int)sketch->constraints.size(); i++) {
     const auto& c = sketch->constraints[i];
     switch (c.kind) {
     case K::Horizontal:
-      badge(i, c.a.entity, "H");
+    case K::Vertical: {
+      const char* text = c.kind == K::Horizontal ? "H" : "V";
+      if (c.b.entity != 0)
+        badgeAt(i, c.a, text); // between two points
+      else
+        badge(i, c.a.entity, text); // a line
       break;
-    case K::Vertical:
-      badge(i, c.a.entity, "V");
-      break;
+    }
     case K::Parallel:
       badge(i, c.a.entity, "//");
       badge(i, c.b.entity, "//");
@@ -1126,24 +1169,27 @@ void DrawConstraintGlyphs(AppState& state) {
       badge(i, c.b.entity, "=");
       break;
     case K::Coincident:
-      badge(i, c.a.entity, "co");
+      badgeAt(i, c.a, "co");
       break;
     case K::PointOnLine:
       badge(i, c.b.entity, "on");
       break;
     case K::Tangent:
-      badge(i, c.a.entity, "T");
+    case K::Curvature: {
+      const char* text = c.kind == K::Tangent ? "T" : "G2";
+      if (const auto at = jointOf(c.a.entity, c.b.entity))
+        badgeAt(i, *at, text);
+      else
+        badge(i, c.a.entity, text);
       break;
-    case K::Curvature:
-      badge(i, c.a.entity, "G2");
-      break;
+    }
     case K::SplineJoint: {
       // C2 from degree 3; a quadratic's joint holds the first derivative.
       const size_t si = sketch->IndexOfEntity(c.a.entity);
       const auto* sp = si < sketch->entities.size()
                            ? std::get_if<sketch::BSpline>(&sketch->entities[si])
                            : nullptr;
-      badge(i, c.a.entity, sp && sketch::BSplineDegree(*sp) == 2 ? "C1" : "C2");
+      badgeAt(i, c.a, sp && sketch::BSplineDegree(*sp) == 2 ? "C1" : "C2");
       break;
     }
     case K::Symmetric:
@@ -1153,7 +1199,7 @@ void DrawConstraintGlyphs(AppState& state) {
       badge(i, c.b.entity, "mid");
       break;
     case K::Fixed:
-      badge(i, c.a.entity, "fix");
+      badgeAt(i, c.a, "fix");
       break;
     case K::Concentric:
       badge(i, c.a.entity, "con");
@@ -1169,7 +1215,7 @@ void DrawConstraintGlyphs(AppState& state) {
 
   // Draw one entity's stack. Returns the union rect of what it drew (for
   // the hover-keeps-expanded test).
-  uint32_t stillExpanded = 0;
+  uint64_t stillExpanded = 0;
   const auto drawOne = [&](const ImVec2& p, const char* text, int ci,
                            bool summary) -> ImVec2 {
     const ImVec2 sz = ImGui::CalcTextSize(text);
@@ -1191,13 +1237,17 @@ void DrawConstraintGlyphs(AppState& state) {
     return rmax;
   };
 
-  for (const auto& [entity, items] : byEntity) {
-    auto uv = RefUV(*sketch, {entity, 0});
+  for (const auto& [key, items] : byStack) {
+    const sketch::PointRef at{static_cast<uint32_t>(key >> 8),
+                              static_cast<uint8_t>(key & 0xff)};
+    auto uv = RefUV(*sketch, at);
     if (!uv)
       continue;
+    for (const BadgeItem& it : items)
+      edit.glyphsDrawn.push_back({it.ci, *uv});
     const glm::dvec2 s = SketchUVToScreen(state, sketch->plane, *uv);
     const ImVec2 base(s.x + 10.0, s.y - 16.0);
-    const bool expanded = edit.glyphExpandedEntity == entity;
+    const bool expanded = edit.glyphExpandedStack == key;
     // A selected constraint keeps its entity's stack expanded too, so the
     // accent doesn't hide inside a summary badge.
     bool holdsSelection = false;
@@ -1219,7 +1269,7 @@ void DrawConstraintGlyphs(AppState& state) {
       if (expanded && io.MousePos.x >= unionMin.x &&
           io.MousePos.x <= unionMax.x && io.MousePos.y >= unionMin.y &&
           io.MousePos.y <= unionMax.y) {
-        stillExpanded = entity;
+        stillExpanded = key;
       }
     } else {
       char text[16];
@@ -1227,11 +1277,11 @@ void DrawConstraintGlyphs(AppState& state) {
       const ImVec2 rmax = drawOne(base, text, -1, /*summary=*/true);
       if (io.MousePos.x >= base.x - 4 && io.MousePos.x <= rmax.x + 4 &&
           io.MousePos.y >= base.y - 4 && io.MousePos.y <= rmax.y + 4) {
-        stillExpanded = entity; // hover the summary: expand next frame
+        stillExpanded = key; // hover the summary: expand next frame
       }
     }
   }
-  edit.glyphExpandedEntity = stillExpanded;
+  edit.glyphExpandedStack = stillExpanded;
 }
 
 } // namespace ui

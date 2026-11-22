@@ -1343,6 +1343,18 @@ size of its own: dimension its ends, a pole, or a point placed on it" (it
 used to draw a ghost from the last pole and then fail at the solver;
 `dimension/spline_body_refused`).
 
+**Constraint badges** (`DrawConstraintGlyphs`) stack per point. One on a
+whole curve -- parallel, equal, perpendicular, concentric, a line's
+horizontal -- sits at the curve's point 0; one that acts AT a point sits at
+that point: a coincident, a [smooth](#smooth) joint, a fix, a horizontal or
+vertical between two points, and a tangent or curvature joined at two
+curves' coincident ends. So the `co` and `C2` of a cut spline are drawn at
+the joint, not at the first pole of piece 1, the far end of the curve
+(`split/spline_crossed_by_line_construction`). Point-on-curve (`on`),
+midpoint (`mid`) and symmetric (`sym`) stay on the curve they hold the point
+on. More than two badges at one point collapse to an "xN" that fans out on
+hover.
+
 ### The toolbar
 
 The sketch toolbar (`DrawSketchModeToolbar`, `src/ui/Toolbar.cpp`) is one

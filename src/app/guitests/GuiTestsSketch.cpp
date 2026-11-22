@@ -891,6 +891,37 @@ void RegisterSketchGuiTests(ImGuiTestEngine* engine) {
         smooth += c.kind == sketch::ConstraintKind::SplineJoint ? 1 : 0;
       IM_CHECK_EQ(smooth, 1); // the C2 badge at the joint
     }
+    // The joint's badges -- the coincident and the smooth, both between the
+    // pieces' ends -- are drawn at the joint, not at piece 1's first pole,
+    // the far end of the curve.
+    ctx->Yield(2);
+    {
+      const auto& o = std::get<sketch::BSpline>(original);
+      int atJoint = 0;
+      for (size_t k = 0; k < sk->constraints.size(); k++) {
+        const sketch::Constraint& c = sk->constraints[k];
+        const bool joint = c.kind == sketch::ConstraintKind::SplineJoint ||
+                           (c.kind == sketch::ConstraintKind::Coincident &&
+                            std::find(pieces.begin(), pieces.end(),
+                                      c.a.entity) != pieces.end() &&
+                            std::find(pieces.begin(), pieces.end(),
+                                      c.b.entity) != pieces.end());
+        if (!joint)
+          continue;
+        bool drawn = false;
+        for (const ui::SketchEditState::DrawnGlyph& g :
+             s_App->sketchEdit.glyphsDrawn)
+          if (g.constraint == static_cast<int>(k)) {
+            drawn = true;
+            IM_CHECK_LT(glm::length(g.at - xs[0]), 1e-6);
+            IM_CHECK_GT(glm::length(g.at - o.poles.front()), 1.0);
+          }
+        IM_CHECK(drawn);
+        atJoint++;
+      }
+      IM_CHECK_EQ(atJoint, 2);
+    }
+    GuiShot(ctx, "split_spline_joint_badges");
     for (uint32_t p : pieces)
       for (const glm::dvec2& q : sketch::BSplineSampleUV(
                std::get<sketch::BSpline>(sk->entities[sk->IndexOfEntity(p)])))
@@ -2302,12 +2333,13 @@ void RegisterSketchGuiTests(ImGuiTestEngine* engine) {
     sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
     IM_CHECK_EQ(sk->constraints.size(), (size_t)2);
 
-    // The coincident's GLYPH ("co", anchored at l0's first point + a small
-    // offset): clicking inside its rect selects the constraint — the glyph
-    // wins over the endpoint underneath. Backspace removes it.
+    // The coincident's GLYPH ("co", anchored at the point it joins, l0's
+    // end, + a small offset): clicking inside its rect selects the
+    // constraint — the glyph wins over the endpoint underneath. Backspace
+    // removes it.
     {
       glm::vec2 s =
-          ui::SketchUVToScreen(*s_App, sk->plane, glm::vec2(-1.5f, -0.5f));
+          ui::SketchUVToScreen(*s_App, sk->plane, glm::vec2(1.5f, -0.5f));
       // Badge rect starts at (s.x + 10, s.y - 16); aim mid-glyph.
       ctx->MouseMoveToPos(ImVec2(s.x + 17.0f, s.y - 10.0f));
       ctx->Yield(2); // glyphHot latches for the canvas gate

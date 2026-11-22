@@ -372,11 +372,18 @@ struct SketchEditState {
   // box, tap/Enter commits) and — mirror only — the axis (one click).
   bool opPickSources = false;
   bool opPickAxis = false;
-  // Entity whose collapsed constraint-badge stack is hover-expanded this
-  // frame (0 = none). Entities with >2 badges draw one "xN" summary; hovering
-  // it fans the individual badges out (they stay while the cursor is over
-  // the fan).
-  uint32_t glyphExpandedEntity = 0;
+  // The constraint-badge stack hover-expanded this frame (0 = none), as
+  // DrawConstraintGlyphs keys a stack: the point it is drawn at, entity << 8
+  // | which. Stacks with >2 badges draw one "xN" summary; hovering it fans
+  // the individual badges out (they stay while the cursor is over the fan).
+  uint64_t glyphExpandedStack = 0;
+  // Every badge drawn this frame, its constraint and where its stack is
+  // anchored (plane UV): what a test reads to see where a badge went.
+  struct DrawnGlyph {
+    int constraint = -1;
+    glm::dvec2 at{0.0};
+  };
+  std::vector<DrawnGlyph> glyphsDrawn;
   uint32_t calibImageId = 0;
   glm::dvec2 calibP1{0.0, 0.0};
   glm::dvec2 calibP2{0.0, 0.0};
