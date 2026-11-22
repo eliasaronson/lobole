@@ -110,7 +110,11 @@ sharded run is not evidence of independence.
 
 ### Replaying a failed shard
 
-A failed shard is archived under `~/.local/state/lobole/gui-failures/`:
+A failed shard is archived under `~/.local/state/lobole/gui-failures/`
+(`$XDG_STATE_HOME/lobole/gui-failures/`) from the main checkout, and under
+`<worktree>/build/gui-failures/` from a linked git worktree, so a worktree's
+failures are deleted with it rather than left in the user's state dir; the
+runner prints the path either way. Each archive holds
 its log, its filter, `sequence` (the tests in the order they ran, read from
 the log) and `reproduce.sh`, which runs that sequence with
 `--gui-test-sequence cat/name,...` — exactly those tests, in that order, an

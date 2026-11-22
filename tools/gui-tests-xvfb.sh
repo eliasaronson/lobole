@@ -329,7 +329,16 @@ fi
 # directory that no later run touches, alongside the one thing that makes it
 # reproducible — the exact filter, in order, and the seed.
 rm -f /tmp/designer-gui-shard*.log
+# A linked git worktree keeps its own, under its build dir, so the archive
+# dies with the worktree instead of piling up in the user's state dir; the
+# main checkout keeps the state dir (docs/ui/testing.md#replaying-a-failed-shard).
 FAILDIR="${XDG_STATE_HOME:-$HOME/.local/state}/lobole/gui-failures"
+GITDIR="$(git -C "$ROOT" rev-parse --absolute-git-dir 2>/dev/null || true)"
+GITCOMMON="$(cd "$ROOT" && git rev-parse --git-common-dir 2>/dev/null || true)"
+if [ -n "$GITDIR" ] && [ -n "$GITCOMMON" ] &&
+   [ "$GITDIR" != "$(cd "$ROOT" && cd "$GITCOMMON" && pwd -P)" ]; then
+  FAILDIR="$ROOT/build/gui-failures"
+fi
 STAMP="$(date +%Y%m%d-%H%M%S)"
 # Keep the last 20 archived failures; past that the oldest are noise.
 if [ -d "$FAILDIR" ]; then

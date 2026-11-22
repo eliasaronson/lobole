@@ -247,5 +247,6 @@ the heading if it is not here yet.
   `src/app/guitests/GuiTestsAssembly.cpp`; the per-test reset
   (`ResetAppForTest`).
 - **Likely fix:** replay an archived failing order
-  (`$XDG_STATE_HOME/lobole/gui-failures/<run>/reproduce.sh`) and bisect
+  (`$XDG_STATE_HOME/lobole/gui-failures/<run>/reproduce.sh`, or a worktree's
+  `build/gui-failures/<run>/`) and bisect
   it; the test that precedes the failure is the suspect.

@@ -827,8 +827,8 @@ not abort:
   `dev-watch.sh` do not, because their instances are meant to outlive them.
 - The GUI runner shards, shuffles by default and prints the seed that
   replays the run; a failing shard is archived under
-  `$XDG_STATE_HOME/lobole/gui-failures/` with its exact filter and a
-  `reproduce.sh`.
+  `$XDG_STATE_HOME/lobole/gui-failures/` (a worktree's under its own
+  `build/gui-failures/`) with its exact filter and a `reproduce.sh`.
 - `tests/test_actions.cpp` pins UI logic headlessly (read its header before
   adding to it); `tests/test_conventions.cpp` holds the source-scanning rules
   listed in [conventions.md](conventions.md#rules-the-source-is-scanned-for).
