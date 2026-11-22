@@ -10,6 +10,7 @@
 #include "common/Logger.h"
 
 #include <BRepAdaptor_Curve.hxx>
+#include <BRepAdaptor_Surface.hxx>
 #include <BRepAlgoAPI_BooleanOperation.hxx>
 #include <BRepAlgoAPI_Common.hxx>
 #include <BRepAlgoAPI_Cut.hxx>
@@ -22,21 +23,30 @@
 #include <BRep_Tool.hxx>
 #include <GCPnts_AbscissaPoint.hxx>
 #include <Precision.hxx>
+#include <ShapeUpgrade_UnifySameDomain.hxx>
+#include <Standard_Failure.hxx>
 #include <TopExp.hxx>
+#include <TopExp_Explorer.hxx>
 #include <TopTools_IndexedDataMapOfShapeListOfShape.hxx>
 #include <TopTools_IndexedMapOfShape.hxx>
 #include <TopTools_ListOfShape.hxx>
+#include <TopTools_MapOfShape.hxx>
 #include <TopoDS.hxx>
 #include <TopoDS_Compound.hxx>
+#include <TopoDS_Vertex.hxx>
+#include <gp_Lin.hxx>
+#include <gp_Pnt2d.hxx>
 
 #include <algorithm>
 #include <array>
 #include <cfloat>
 #include <cmath>
 #include <cstdio>
+#include <functional>
 #include <iterator>
 #include <map>
 #include <memory>
+#include <numbers>
 #include <optional>
 #include <set>
 #include <string>
@@ -742,8 +752,13 @@ std::vector<std::string> FaceNamesIn(const TopoDS_Shape& part,
 namespace {
 
 // Shared tail of both blend makers: build, verify, propagate, fall back.
+// `built` is what the maker ran on; `named` the shape `bodyMap` indexes,
+// and `before` the history from it to `built` (null when they are one:
+// MergeBesideBlend merged nothing).
 template <typename Maker>
-CADShape RunEdgeBlend(Maker& mk, const TopoDS_Shape& shape,
+CADShape RunEdgeBlend(Maker& mk, const TopoDS_Shape& built,
+                      const TopoDS_Shape& named,
+                      const Handle(BRepTools_History) & before,
                       const ElementMap& bodyMap, uint64_t featureTag,
                       ElementMap& out, std::string* error) {
   // In an OCC signal scope (cad/OccSignals.h): the builder segfaults on a set
@@ -766,10 +781,17 @@ CADShape RunEdgeBlend(Maker& mk, const TopoDS_Shape& shape,
   }
 
   TopTools_ListOfShape args;
-  AppendSubshapeArgs(shape, args);
-  const BRepTools_History hist(args, mk);
+  AppendSubshapeArgs(built, args);
+  BRepTools_History hist(args, mk);
+  if (!before.IsNull()) {
+    // The merge and the blend as one step, so a merged face is named once:
+    // its first piece's name with this blend's ";M".
+    BRepTools_History composed = *before;
+    composed.Merge(hist);
+    hist = std::move(composed);
+  }
   static const TopTools_ListOfShape kNoSeams;
-  out = PropagateNames({{shape, bodyMap}}, hist, kNoSeams, result, featureTag);
+  out = PropagateNames({{named, bodyMap}}, hist, kNoSeams, result, featureTag);
   FinishNames(result, out);
   return CADShape(result);
 }
@@ -807,25 +829,28 @@ std::string FaultyContourPlaces(BRepFilletAPI_MakeFillet& mk) {
 // signal scope too, not only the build. False with `error` set when the walk
 // failed, or when an edge started no contour: its faces tangent, or a face
 // on one side only, and on no other edge's tangent chain -- OCC left it out
-// and built the rest, saying nothing.
+// and built the rest, saying nothing. `edges` indexes the builder's input;
+// `nameOf` names an edge of it by that index; one edge picked twice is added
+// once.
 template <typename Maker>
 bool AddBlendEdges(Maker& mk, const TopTools_IndexedMapOfShape& edges,
                    const std::vector<int>& edgeIndices, double radiusOrDistance,
-                   const ElementMap& bodyMap, std::string* error) {
+                   const std::function<std::string(int)>& nameOf,
+                   std::string* error) {
   const auto why = occsig::RunCatchingOccSignals([&] {
-    for (int idx : edgeIndices)
-      mk.Add(radiusOrDistance, TopoDS::Edge(edges(idx + 1)));
+    for (size_t k = 0; k < edgeIndices.size(); k++)
+      if (std::find(edgeIndices.begin(), edgeIndices.begin() + k,
+                    edgeIndices[k]) == edgeIndices.begin() + k)
+        mk.Add(radiusOrDistance, TopoDS::Edge(edges(edgeIndices[k] + 1)));
   });
   if (!why) {
     for (int idx : edgeIndices) {
       if (mk.Contour(TopoDS::Edge(edges(idx + 1))) != 0)
         continue;
-      if (error) {
-        const std::string* n = bodyMap.EdgeNameOf(idx);
-        *error = "edge '" + (n != nullptr ? *n : std::to_string(idx)) +
+      if (error)
+        *error = "edge '" + nameOf(idx) +
                  "' starts no blend (its two faces meet tangentially, "
                  "or it has a face on one side only): leave it out";
-      }
       return false;
     }
     return true;
@@ -841,6 +866,33 @@ bool AddBlendEdges(Maker& mk, const TopTools_IndexedMapOfShape& edges,
                *why + ")";
   }
   return false;
+}
+
+// Names an edge of the builder's input by its index there: through the
+// merge's history back to the body's edge (`copy` indexes `bodyMap`).
+std::function<std::string(int)>
+EdgeNamer(const TopoDS_Shape& built, const TopoDS_Shape& copy,
+          const Handle(BRepTools_History) & history,
+          const ElementMap& bodyMap) {
+  auto builtEdges = std::make_shared<TopTools_IndexedMapOfShape>();
+  auto copyEdges = std::make_shared<TopTools_IndexedMapOfShape>();
+  TopExp::MapShapes(built, TopAbs_EDGE, *builtEdges);
+  TopExp::MapShapes(copy, TopAbs_EDGE, *copyEdges);
+  return [=, &bodyMap](int idx) -> std::string {
+    int at = -1;
+    if (idx >= 0 && idx < builtEdges->Extent()) {
+      const TopoDS_Shape& e = (*builtEdges)(idx + 1);
+      at = copyEdges->FindIndex(e) - 1;
+      if (at < 0 && !history.IsNull())
+        for (int i = 1; i <= copyEdges->Extent() && at < 0; i++)
+          for (const TopoDS_Shape& m : history->Modified((*copyEdges)(i)))
+            if (m.IsSame(e))
+              at = i - 1;
+    }
+    if (const std::string* n = at >= 0 ? bodyMap.EdgeNameOf(at) : nullptr)
+      return *n;
+    return std::to_string(idx);
+  };
 }
 
 } // namespace
@@ -859,12 +911,13 @@ std::string EdgeBlendRefusal(const CADShape& body, const ElementMap& bodyMap,
       if (idx < 0 || idx + 1 > edges.Extent())
         return "edge index out of range";
     std::string error;
+    const auto nameOf = EdgeNamer(shape, shape, nullptr, bodyMap);
     if (op == EdgeBlendOp::Chamfer) {
       BRepFilletAPI_MakeChamfer mk(shape);
-      AddBlendEdges(mk, edges, edgeIndices, radiusOrDistance, bodyMap, &error);
+      AddBlendEdges(mk, edges, edgeIndices, radiusOrDistance, nameOf, &error);
     } else {
       BRepFilletAPI_MakeFillet mk(shape);
-      AddBlendEdges(mk, edges, edgeIndices, radiusOrDistance, bodyMap, &error);
+      AddBlendEdges(mk, edges, edgeIndices, radiusOrDistance, nameOf, &error);
     }
     return error;
   } catch (const Standard_Failure& e) {
@@ -928,24 +981,253 @@ std::vector<BlendContour> EdgeBlendContours(const CADShape& body,
   return out;
 }
 
+namespace {
+
+// Whether two faces may lie on one surface, for the cost of a look at their
+// analytic geometry: coplanar planes, coaxial cylinders and cones of one
+// size, concentric spheres and tori of one size. A necessary condition, at
+// a hundred times the kernel's tolerances: the unifier decides.
+bool MayShareSurface(const TopoDS_Face& a, const TopoDS_Face& b) {
+  const BRepAdaptor_Surface sa(a, false), sb(b, false);
+  if (sa.GetType() != sb.GetType())
+    return false;
+  const double lin = 100.0 * Precision::Confusion();
+  const double ang = 100.0 * Precision::Angular();
+  const auto parallel = [&](const gp_Dir& u, const gp_Dir& v) {
+    return u.IsParallel(v, ang);
+  };
+  const auto onAxis = [&](const gp_Ax1& axis, const gp_Pnt& p) {
+    return gp_Lin(axis).Distance(p) <= lin;
+  };
+  switch (sa.GetType()) {
+  case GeomAbs_Plane: {
+    const gp_Pln pa = sa.Plane(), pb = sb.Plane();
+    return parallel(pa.Axis().Direction(), pb.Axis().Direction()) &&
+           pa.Distance(pb.Location()) <= lin;
+  }
+  case GeomAbs_Cylinder: {
+    const gp_Cylinder ca = sa.Cylinder(), cb = sb.Cylinder();
+    return std::abs(ca.Radius() - cb.Radius()) <= lin &&
+           parallel(ca.Axis().Direction(), cb.Axis().Direction()) &&
+           onAxis(ca.Axis(), cb.Location());
+  }
+  case GeomAbs_Cone: {
+    const gp_Cone ca = sa.Cone(), cb = sb.Cone();
+    return std::abs(ca.SemiAngle() - cb.SemiAngle()) <= ang &&
+           ca.Apex().Distance(cb.Apex()) <= lin &&
+           parallel(ca.Axis().Direction(), cb.Axis().Direction());
+  }
+  case GeomAbs_Sphere: {
+    const gp_Sphere ca = sa.Sphere(), cb = sb.Sphere();
+    return std::abs(ca.Radius() - cb.Radius()) <= lin &&
+           ca.Location().Distance(cb.Location()) <= lin;
+  }
+  case GeomAbs_Torus: {
+    const gp_Torus ca = sa.Torus(), cb = sb.Torus();
+    return std::abs(ca.MajorRadius() - cb.MajorRadius()) <= lin &&
+           std::abs(ca.MinorRadius() - cb.MinorRadius()) <= lin &&
+           ca.Location().Distance(cb.Location()) <= lin &&
+           parallel(ca.Axis().Direction(), cb.Axis().Direction());
+  }
+  default:
+    return false;
+  }
+}
+
+} // namespace
+
+MergedForBlend MergeBesideBlend(const TopoDS_Shape& shape,
+                                const std::vector<int>& edgeIndices,
+                                EdgeBlendOp op) {
+  MergedForBlend out{shape, edgeIndices, nullptr};
+  TopTools_IndexedMapOfShape edges;
+  TopExp::MapShapes(shape, TopAbs_EDGE, edges);
+  for (int idx : edgeIndices)
+    if (idx < 0 || idx + 1 > edges.Extent())
+      return out;
+  TopTools_IndexedDataMapOfShapeListOfShape edgeFaces;
+  TopExp::MapShapesAndAncestors(shape, TopAbs_EDGE, TopAbs_FACE, edgeFaces);
+  // The splits: an edge between two faces that may share a surface.
+  std::vector<int> splits;
+  for (int i = 1; i <= edges.Extent(); i++) {
+    const TopoDS_Edge& e = TopoDS::Edge(edges(i));
+    if (BRep_Tool::Degenerated(e) ||
+        std::find(edgeIndices.begin(), edgeIndices.end(), i - 1) !=
+            edgeIndices.end())
+      continue;
+    const int at = edgeFaces.FindIndex(e);
+    if (at == 0)
+      continue;
+    TopoDS_Face f1, f2;
+    bool more = false;
+    for (const TopoDS_Shape& f : edgeFaces(at)) {
+      if (f1.IsNull())
+        f1 = TopoDS::Face(f);
+      else if (!f.IsSame(f1)) {
+        if (f2.IsNull())
+          f2 = TopoDS::Face(f);
+        else if (!f.IsSame(f2))
+          more = true;
+      }
+    }
+    if (!f2.IsNull() && !more && MayShareSurface(f1, f2))
+      splits.push_back(i - 1);
+  }
+  if (splits.empty())
+    return out;
+  // The vertices of the blend's edges: the picked ones and the tangent
+  // chains the builder brings in. A split meets the blend at one of them.
+  TopTools_MapOfShape blendVertices;
+  const auto addVertices = [&](int idx) {
+    TopExp_Explorer v(edges(idx + 1), TopAbs_VERTEX);
+    for (; v.More(); v.Next())
+      blendVertices.Add(v.Current());
+  };
+  for (int idx : edgeIndices)
+    addVertices(idx);
+  for (const BlendContour& c :
+       EdgeBlendContours(CADShape(shape), edgeIndices, op))
+    for (int idx : c.edges)
+      addVertices(idx);
+  // A split meets the blend where it shares a vertex with one of the
+  // blend's edges, or, between two planes, where one of them is a face the
+  // blend touches: an end face the blend's section lands on (the end of a
+  // round on an L's two-piece end face reaches the edge between the pieces
+  // at its setback, away from the blend's own vertex).
+  TopTools_IndexedDataMapOfShapeListOfShape vertexFaces;
+  TopExp::MapShapesAndAncestors(shape, TopAbs_VERTEX, TopAbs_FACE, vertexFaces);
+  TopTools_MapOfShape touched;
+  for (TopTools_MapOfShape::Iterator it(blendVertices); it.More(); it.Next())
+    if (const int at = vertexFaces.FindIndex(it.Value()); at != 0)
+      for (const TopoDS_Shape& f : vertexFaces(at))
+        touched.Add(f);
+  std::vector<int> meet;
+  for (int idx : splits) {
+    const TopoDS_Shape& split = edges(idx + 1);
+    bool meets = false;
+    for (TopExp_Explorer v(split, TopAbs_VERTEX); v.More() && !meets; v.Next())
+      meets = blendVertices.Contains(v.Current());
+    const TopTools_ListOfShape& faces = edgeFaces.FindFromKey(split);
+    if (!meets &&
+        BRepAdaptor_Surface(TopoDS::Face(faces.First()), false).GetType() ==
+            GeomAbs_Plane)
+      for (const TopoDS_Shape& f : faces)
+        meets = meets || touched.Contains(f);
+    if (meets)
+      meet.push_back(idx);
+  }
+  if (meet.empty())
+    return out;
+  // Every other edge kept, so no other faces merge, and every vertex but
+  // the merged splits' ends, so no other edges join.
+  TopTools_MapOfShape keep, freed;
+  for (int idx : meet) {
+    TopExp_Explorer v(edges(idx + 1), TopAbs_VERTEX);
+    for (; v.More(); v.Next())
+      freed.Add(v.Current());
+  }
+  for (int i = 1; i <= edges.Extent(); i++)
+    if (std::find(meet.begin(), meet.end(), i - 1) == meet.end())
+      keep.Add(edges(i));
+  TopTools_IndexedMapOfShape vertices;
+  TopExp::MapShapes(shape, TopAbs_VERTEX, vertices);
+  for (int i = 1; i <= vertices.Extent(); i++)
+    if (!freed.Contains(vertices(i)))
+      keep.Add(vertices(i));
+  try {
+    ShapeUpgrade_UnifySameDomain unify(shape, /*UnifyEdges=*/true,
+                                       /*UnifyFaces=*/true,
+                                       /*ConcatBSplines=*/false);
+    unify.KeepShapes(keep);
+    unify.Build();
+    const TopoDS_Shape merged = unify.Shape();
+    const Handle(BRepTools_History) history = unify.History();
+    if (merged.IsNull() || history.IsNull())
+      return out;
+    TopTools_IndexedMapOfShape before, after;
+    TopExp::MapShapes(shape, TopAbs_FACE, before);
+    TopExp::MapShapes(merged, TopAbs_FACE, after);
+    if (after.Extent() >= before.Extent())
+      return out; // nothing merged: the faces only looked alike
+    TopTools_IndexedMapOfShape mergedEdges;
+    TopExp::MapShapes(merged, TopAbs_EDGE, mergedEdges);
+    std::vector<int> now;
+    for (int idx : edgeIndices) {
+      const TopoDS_Shape& e = edges(idx + 1);
+      const TopTools_ListOfShape& mods = history->Modified(e);
+      const int at =
+          mods.IsEmpty()
+              ? (history->IsRemoved(e) ? 0 : mergedEdges.FindIndex(e))
+              : mergedEdges.FindIndex(mods.First());
+      if (at == 0)
+        return out; // a picked edge the merge took: build as it is
+      now.push_back(at - 1);
+    }
+    out.merged = merged;
+    out.edges = std::move(now);
+    out.history = history;
+  } catch (const Standard_Failure& e) {
+    LOG_WARN("MergeBesideBlend: {}", e.GetMessageString());
+  }
+  return out;
+}
+
+Body BlendBody(const Body& body, const std::vector<int>& edgeIndices,
+               EdgeBlendOp op, std::vector<int>& edges) {
+  edges = edgeIndices;
+  if (!body.shape.IsValid() || edgeIndices.empty())
+    return body;
+  const TopoDS_Shape copy =
+      BRepBuilderAPI_Copy(body.shape.GetShape(), false, false).Shape();
+  MergedForBlend m = MergeBesideBlend(copy, edgeIndices, op);
+  if (m.history.IsNull())
+    return body;
+  Body out = body;
+  out.shape = CADShape(m.merged);
+  // Named as the input's: a merged face by its first piece, without the
+  // ";M" a feature would add, so a bound's sentence names a face the
+  // caller can find.
+  constexpr uint64_t kNoTag = 0;
+  out.elementMap = NamesThroughHistory(CADShape(copy), body.elementMap,
+                                       *m.history, out.shape, kNoTag,
+                                       /*keepWholeFaces=*/true);
+  const std::string mark = ";M" + std::to_string(kNoTag);
+  for (auto* names : {&out.elementMap.names, &out.elementMap.edgeNames})
+    for (auto& [idx, name] : *names)
+      if (name.size() > mark.size() &&
+          name.compare(name.size() - mark.size(), mark.size(), mark) == 0)
+        name.resize(name.size() - mark.size());
+  edges = std::move(m.edges);
+  return out;
+}
+
 CADShape EdgeBlendUnnamed(const CADShape& body,
                           const std::vector<int>& edgeIndices, EdgeBlendOp op,
-                          double radiusOrDistance) {
+                          double radiusOrDistance, bool merge) {
   if (!body.IsValid() || edgeIndices.empty())
     return CADShape();
   try {
     // On a copy, as EdgeBlendNamed: the builder writes onto its input.
-    const TopoDS_Shape shape =
+    const TopoDS_Shape copy =
         BRepBuilderAPI_Copy(body.GetShape(), false, false).Shape();
+    {
+      TopTools_IndexedMapOfShape all;
+      TopExp::MapShapes(copy, TopAbs_EDGE, all);
+      for (int idx : edgeIndices)
+        if (idx < 0 || idx + 1 > all.Extent())
+          return CADShape();
+    }
+    const MergedForBlend m = merge ? MergeBesideBlend(copy, edgeIndices, op)
+                                   : MergedForBlend{copy, edgeIndices, nullptr};
+    const TopoDS_Shape& shape = m.merged;
     TopTools_IndexedMapOfShape edges;
     TopExp::MapShapes(shape, TopAbs_EDGE, edges);
-    for (int idx : edgeIndices)
-      if (idx < 0 || idx + 1 > edges.Extent())
-        return CADShape();
     const auto build = [&](auto& mk) -> CADShape {
       const auto why = occsig::RunCatchingOccSignals([&] {
-        for (int idx : edgeIndices)
-          mk.Add(radiusOrDistance, TopoDS::Edge(edges(idx + 1)));
+        for (size_t k = 0; k < m.edges.size(); k++)
+          if (std::find(m.edges.begin(), m.edges.begin() + k, m.edges[k]) ==
+              m.edges.begin() + k)
+            mk.Add(radiusOrDistance, TopoDS::Edge(edges(m.edges[k] + 1)));
         mk.Build();
       });
       if (why || !mk.IsDone() || mk.Shape().IsNull())
@@ -967,7 +1249,7 @@ CADShape EdgeBlendNamed(const CADShape& body, const ElementMap& bodyMap,
                         const std::vector<int>& edgeIndices, EdgeBlendOp op,
                         double radiusOrDistance, uint64_t featureTag,
                         ElementMap& out, std::string* error,
-                        EdgeBlendFailure* failure) {
+                        EdgeBlendFailure* failure, bool merge) {
   out = {};
   bool building = false;
   if (!body.IsValid() || edgeIndices.empty()) {
@@ -982,21 +1264,30 @@ CADShape EdgeBlendNamed(const CADShape& body, const ElementMap& bodyMap,
     // pieces after a fillet had been tried on it (random design 33), and a
     // build that faulted part-way left it half-written for undo to serve. A
     // copy keeps the explorer order, and with it every index-keyed name.
-    const TopoDS_Shape shape =
+    const TopoDS_Shape copy =
         BRepBuilderAPI_Copy(body.GetShape(), false, false).Shape();
-    TopTools_IndexedMapOfShape edges;
-    TopExp::MapShapes(shape, TopAbs_EDGE, edges);
-    for (int idx : edgeIndices) {
-      if (idx < 0 || idx + 1 > edges.Extent()) {
-        if (error) {
-          *error = "edge index out of range";
+    {
+      TopTools_IndexedMapOfShape all;
+      TopExp::MapShapes(copy, TopAbs_EDGE, all);
+      for (int idx : edgeIndices) {
+        if (idx < 0 || idx + 1 > all.Extent()) {
+          if (error) {
+            *error = "edge index out of range";
+          }
+          return CADShape();
         }
-        return CADShape();
       }
     }
+    // The splits the blend meets, merged on the copy
+    // (docs/modeling/README.md#a-blend-beside-a-split).
+    const MergedForBlend m = merge ? MergeBesideBlend(copy, edgeIndices, op)
+                                   : MergedForBlend{copy, edgeIndices, nullptr};
+    const TopoDS_Shape& shape = m.merged;
+    TopTools_IndexedMapOfShape edges;
+    TopExp::MapShapes(shape, TopAbs_EDGE, edges);
+    const auto nameOf = EdgeNamer(shape, copy, m.history, bodyMap);
     const auto addAll = [&](auto& mk) {
-      return AddBlendEdges(mk, edges, edgeIndices, radiusOrDistance, bodyMap,
-                           error);
+      return AddBlendEdges(mk, edges, m.edges, radiusOrDistance, nameOf, error);
     };
 
     if (op == EdgeBlendOp::Chamfer) {
@@ -1004,8 +1295,8 @@ CADShape EdgeBlendNamed(const CADShape& body, const ElementMap& bodyMap,
       if (!addAll(mk))
         return CADShape();
       building = true;
-      CADShape result =
-          RunEdgeBlend(mk, shape, bodyMap, featureTag, out, error);
+      CADShape result = RunEdgeBlend(mk, shape, copy, m.history, bodyMap,
+                                     featureTag, out, error);
       if (!result.IsValid() && failure)
         failure->atBuild = true;
       return result;
@@ -1014,7 +1305,8 @@ CADShape EdgeBlendNamed(const CADShape& body, const ElementMap& bodyMap,
     if (!addAll(mk))
       return CADShape();
     building = true;
-    CADShape result = RunEdgeBlend(mk, shape, bodyMap, featureTag, out, error);
+    CADShape result = RunEdgeBlend(mk, shape, copy, m.history, bodyMap,
+                                   featureTag, out, error);
     if (!result.IsValid()) {
       const std::string places = FaultyContourPlaces(mk);
       if (failure) {

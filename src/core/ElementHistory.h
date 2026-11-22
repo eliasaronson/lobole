@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <BRepTools_History.hxx>
 #include <Message_ProgressRange.hxx>
 #include <TopTools_ListOfShape.hxx>
 
@@ -136,7 +137,9 @@ std::string EdgeBlendRefusal(const CADShape& body, const ElementMap& bodyMap,
 // invalid CADShape and, when OCC reports faulty contours, a diagnostic in
 // *error (may be null), and in *failure (may be null) whether it was the
 // build that failed -- a size that may not fit -- rather than the edges, and
-// where the faulty contours are (" — near (x, y, z)", or empty).
+// where the faulty contours are (" — near (x, y, z)", or empty). It builds
+// on the body with the splits it meets merged (MergeBesideBlend), or, with
+// `merge` false, on the body as it is.
 struct EdgeBlendFailure {
   bool atBuild = false;
   std::string places;
@@ -145,13 +148,38 @@ CADShape EdgeBlendNamed(const CADShape& body, const ElementMap& bodyMap,
                         const std::vector<int>& edgeIndices, EdgeBlendOp op,
                         double radiusOrDistance, uint64_t featureTag,
                         ElementMap& out, std::string* error,
-                        EdgeBlendFailure* failure = nullptr);
+                        EdgeBlendFailure* failure = nullptr, bool merge = true);
 
 // The same blend built and not named: what the size search (core/BlendFit.h)
-// tries. Invalid when the builder failed.
+// tries. Invalid when the builder failed. `merge` false: the body is one
+// BlendBody already gave, its splits merged.
 CADShape EdgeBlendUnnamed(const CADShape& body,
                           const std::vector<int>& edgeIndices, EdgeBlendOp op,
-                          double radiusOrDistance);
+                          double radiusOrDistance, bool merge = true);
+
+// What a blend builds on (docs/modeling/README.md#a-blend-beside-a-split):
+// `shape` with every split the blend meets merged -- an edge between two
+// faces on one surface (what an `add` leaves until a Refine) that shares a
+// vertex with an edge of the blend, picked or brought in by its tangent
+// chain, or lies between two planes one of which the blend touches -- and
+// nothing else. `edges` are the picked edges' indices on the
+// merged shape; `history` runs from `shape` to it, null when nothing was
+// merged (then `merged` is `shape` itself and `edges` the input's).
+struct MergedForBlend {
+  TopoDS_Shape merged;
+  std::vector<int> edges;
+  Handle(BRepTools_History) history;
+};
+MergedForBlend MergeBesideBlend(const TopoDS_Shape& shape,
+                                const std::vector<int>& edgeIndices,
+                                EdgeBlendOp op);
+
+// The body the size that fits measures (core/BlendFit.h): `body` merged as
+// MergeBesideBlend merges it, its faces named as the input's (a merged face
+// by its first piece), and the picked edges' indices on it in `edges`.
+// `body` itself, unchanged, when nothing is merged.
+Body BlendBody(const Body& body, const std::vector<int>& edgeIndices,
+               EdgeBlendOp op, std::vector<int>& edges);
 
 // Fixed names for a primitive's output (box/sphere/cylinder/import): every
 // face "<prefix>/face<i>" in index order — stable because a primitive's

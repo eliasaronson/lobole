@@ -16,6 +16,7 @@
 #include "core/Measure.h"
 #include "core/features/ExtrudeFeature.h"
 #include "core/features/FilletFeature.h"
+#include "core/features/RefineFeature.h"
 #include "core/features/SketchFeature.h"
 
 #include <cmath>
@@ -432,4 +433,158 @@ TEST_CASE("A failed fillet on a plate of 100 holes answers within ten builds",
   // bound, 1.3 times the round that fits, where building 30 first cost
   // twenty times it (3.4 s against 0.17 s). A planted 1 s spin fails it.
   CHECK(far < 3.0 * one);
+}
+
+namespace {
+
+// A block over [lo, hi], a rectangle on the plane z = lo.z extruded to hi.z.
+void Block(Document& doc, glm::dvec3 lo, glm::dvec3 hi, ExtrudeMode mode) {
+  auto s = std::make_unique<SketchFeature>(
+      "S", SketchPlane(PlaneType::XY, {0.0, 0.0, lo.z}));
+  s->AddRectangle({lo.x, lo.y}, {hi.x, hi.y});
+  doc.AddFeature(std::move(s));
+  doc.AddFeature(std::make_unique<ExtrudeFeature>(
+      "E", doc.GetFeature(doc.FeatureCount() - 1)->GetId(), hi.z - lo.z, mode));
+}
+
+// The faces of the first body on the plane `axis` = `at` (0 x, 1 y, 2 z),
+// by name.
+std::vector<std::string> FacesOnPlane(const Document& doc, int axis,
+                                      double at) {
+  const Body& body = doc.GetBodies().at(0);
+  std::vector<std::string> out;
+  for (int i = 0; i < body.shape.FaceCount(); i++) {
+    glm::dvec3 c, n, u;
+    if (!body.shape.FacePlane(i, c, n, u) || std::abs(c[axis] - at) > 1e-6 ||
+        std::abs(std::abs(n[axis]) - 1.0) > 1e-9)
+      continue;
+    const std::string* name = body.elementMap.NameOf(i);
+    REQUIRE(name != nullptr);
+    out.push_back(*name);
+  }
+  return out;
+}
+
+// The kernel case corpus's L (solidcore/fillets/12342): a 4 mm wall
+// (x 16..20, y -20..20, z -40..2) on a 7 mm base (x 16..23, z -50..-40),
+// joined from two blocks (`add`, so its back face y = 20 and its side x = 16
+// are each two coplanar faces) or extruded from one L profile.
+void TwoBlockL(Document& doc) {
+  Block(doc, {16, -20, -50}, {23, 20, -40}, ExtrudeMode::NewBody);
+  Block(doc, {16, -20, -40}, {20, 20, 2}, ExtrudeMode::Add);
+  REQUIRE(doc.Regenerate());
+}
+
+std::vector<ElementRef> WallEdge(const Document& doc) {
+  return EdgesWhere(doc, [](const auto& p) {
+    return All(p, [](const glm::vec3& q) {
+      return Near(q.x, 20.0f) && Near(q.y, 20.0f) && q.z > -40.001f;
+    });
+  });
+}
+
+} // namespace
+
+TEST_CASE("A round beside a plane an add left in two pieces builds as on one "
+          "face",
+          "[fillet][fit]") {
+  // docs/modeling/README.md#a-blend-beside-a-split: the wall's edge ends on
+  // the edge between the back face's two pieces, where the builder failed
+  // at every size ("no radius builds ... down to 0.00257 mm").
+  Document doc;
+  TwoBlockL(doc);
+  REQUIRE(FacesOnPlane(doc, 1, 20.0).size() == 2);
+  const std::vector<std::string> back = FacesOnPlane(doc, 1, 20.0);
+  const std::vector<std::string> bottom = FacesOnPlane(doc, 2, -50.0);
+  const auto edge = WallEdge(doc);
+  REQUIRE(edge.size() == 1);
+  FilletFeature* f = AddBlend(doc, edge, 2.5);
+  REQUIRE(doc.Regenerate());
+  INFO(f->GetError());
+  CHECK(Measure::InvalidReasons(doc.GetBodies().at(0).shape).empty());
+  // The closed form, as the L extruded from one profile builds it: the
+  // spandrel (1 - pi/4) r^2 along the wall's 42 mm.
+  const double spandrel = (1.0 - std::numbers::pi / 4.0) * 2.5 * 2.5;
+  CHECK_THAT(doc.GetBodies().at(0).shape.Volume(),
+             WithinRel(9520.0 - spandrel * 42.0, 1e-9));
+
+  // The names: the back face is one face now, named after its first piece
+  // as the blend names a face it modifies; the other piece's name is gone;
+  // a face the blend does not touch keeps its name.
+  const std::vector<std::string> merged = FacesOnPlane(doc, 1, 20.0);
+  REQUIRE(merged.size() == 1);
+  const std::string mark = ";M" + std::to_string(f->GetId());
+  CHECK((merged[0] == back[0] + mark || merged[0] == back[1] + mark));
+  const std::string& gone = merged[0] == back[0] + mark ? back[1] : back[0];
+  CHECK_FALSE(doc.GetBodies().at(0).elementMap.Resolve(gone).has_value());
+  CHECK(FacesOnPlane(doc, 2, -50.0) == bottom);
+}
+
+TEST_CASE("Past the wall, the round beside the split says its wall's width",
+          "[fillet][fit]") {
+  // The width is measured to the face's own boundary, not to the edge
+  // between its pieces: R5 past the 4 mm wall fits 3.99.
+  Document doc;
+  TwoBlockL(doc);
+  FilletFeature* f = AddBlend(doc, WallEdge(doc), 5.0);
+  const FitHint hint = Refused(doc, f, 5.0);
+  CHECK(*hint.fitsMm == 3.99);
+  CHECK(f->GetError().find("runs 4 mm from edge") != std::string::npos);
+  const double v = BuildsAtAndNotAbove(doc, f, 3.99);
+  const double spandrel = (1.0 - std::numbers::pi / 4.0) * 3.99 * 3.99;
+  CHECK_THAT(v, WithinRel(9520.0 - spandrel * 42.0, 1e-9));
+}
+
+TEST_CASE("A rim chamfer beside a bar flush with its bottom builds",
+          "[fillet][fit]") {
+  // A cylinder r 22.5 joined with a bar (x 0..110, |y| <= 9) flush with its
+  // bottom: the bottom is two faces, and the rim's chamfer ran into the
+  // edge between them ("the largest distance that fits is 0.121 mm").
+  // Built against the same part refined, its bottom one face.
+  const auto build = [](Document& doc, bool refine) {
+    auto s = std::make_unique<SketchFeature>("S", SketchPlane(PlaneType::XY));
+    s->AddEntity(sketch::Circle{{0.0, 0.0}, 22.5});
+    doc.AddFeature(std::move(s));
+    doc.AddFeature(std::make_unique<ExtrudeFeature>(
+        "E", doc.GetFeature(0)->GetId(), 30.0, ExtrudeMode::NewBody));
+    Block(doc, {0, -9, 0}, {110, 9, 7.5}, ExtrudeMode::Add);
+    if (refine)
+      doc.AddFeature(
+          std::make_unique<RefineFeature>("R", doc.GetFeature(1)->GetId()));
+    REQUIRE(doc.Regenerate());
+  };
+  const auto rim = [](const Document& doc) {
+    return EdgesWhere(doc, [](const auto& p) {
+      return All(p, [](const glm::vec3& q) {
+        // The rim outside the bar: inside it the circle is the edge
+        // between the bottom's pieces.
+        return Near(q.z, 0.0f) &&
+               std::abs(std::hypot(q.x, q.y) - 22.5f) < 1e-3f &&
+               (q.x < 1e-3f || std::abs(q.y) > 9.0f - 1e-3f);
+      });
+    });
+  };
+  Document split;
+  build(split, false);
+  REQUIRE(FacesOnPlane(split, 2, 0.0).size() > 1);
+  FilletFeature* f = AddBlend(split, rim(split), 5.0, EdgeBlendOp::Chamfer);
+  const bool built = split.Regenerate();
+  INFO(f->GetError());
+  REQUIRE(built);
+  CHECK(Measure::InvalidReasons(split.GetBodies().at(0).shape).empty());
+
+  Document whole;
+  build(whole, true);
+  REQUIRE(FacesOnPlane(whole, 2, 0.0).size() == 1);
+  AddBlend(whole, rim(whole), 5.0, EdgeBlendOp::Chamfer);
+  REQUIRE(whole.Regenerate());
+  CHECK_THAT(split.GetBodies().at(0).shape.Volume(),
+             WithinRel(whole.GetBodies().at(0).shape.Volume(), 1e-9));
+
+  // And the size that fits is found on one bottom face: at 30 it is near
+  // the bar's 7.5 mm height, where the chamfer's top reaches the bar's top
+  // (the split bottom named 0.121).
+  const FitHint hint = Refused(split, f, 30.0);
+  CHECK(*hint.fitsMm > 7.0);
+  BuildsAtAndNotAbove(split, f, *hint.fitsMm);
 }

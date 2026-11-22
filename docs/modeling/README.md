@@ -1535,7 +1535,8 @@ on how busy the machine is. Every candidate is rounded down to three
 significant digits, so the number reported is a number that was built. A
 candidate builds when `topo::EdgeBlendUnnamed` returns a solid that
 `InvalidReasons` passes: the two things `Execute` requires, without naming
-the result. `BRepFilletAPI_MakeFillet::Build` ignores its progress range in
+the result. The candidates build on the body with the
+splits the blend meets merged ([a blend beside a split](#a-blend-beside-a-split)), as the feature does. `BRepFilletAPI_MakeFillet::Build` ignores its progress range in
 OpenCASCADE 7.9, so the search is bounded by its count; it asks
 `heavy::Cancelled()` before each candidate, and a stopped search reports
 the bracket it has.
@@ -1732,6 +1733,51 @@ it by what it is for: the stored radius is the size built, the body is the
 closed-form round of it, a save and reopen gives the same body, and r5
 answers no `reduced`; `refused_calls_smoke` that each refusal changes
 nothing.
+
+### A blend beside a split
+
+An `add` keeps the faces its two solids share a surface on apart, with an
+edge between them, until a Refine: an L joined from two blocks has a back
+face in two pieces. OpenCASCADE's blend builder fails, or builds a patch
+more, where a blend's end or its run meets that edge, and at every size, so
+the search read the builder's failure as the size's ("no radius builds ...
+down to 0.00257 mm" where the L from one profile rounds R2.5).
+
+So a Fillet or Chamfer the builder fails on as the body is, or whose
+result is invalid, is built again on a copy with the splits it meets merged
+(`topo::MergeBesideBlend`, `src/core/ElementHistory.cpp`), and nothing
+else. A **split** is an edge between two faces on one surface (a cheap test
+of the analytic geometry -- coplanar planes, coaxial cylinders and cones of
+one size, concentric spheres and tori -- then `ShapeUpgrade_UnifySameDomain`
+decides). It is merged where it shares a vertex with an edge of the blend
+(a picked one, or one its tangent chain brings in,
+`topo::EdgeBlendContours`), or, between two planes, where one of them is a
+face the blend touches: the end of a round on an L's two-piece end face
+reaches the edge between the pieces at its setback, away from the round's
+own vertex. Every other edge and vertex is kept (`KeepShapes`), so no other
+face merges and no other edges join. A split between curved faces is not
+merged for being on a face the blend touches: two halves of an earlier
+round's torus merged under a later round's chain built an invalid solid.
+
+That result is named from the input through the merge and the blend as
+one step (`BRepTools_History::Merge`, as `BooleanNamed` composes a
+clean-up): a merged face takes its first piece's name with the blend's
+`;M<id>`, what that piece is called after any blend that modifies it, and
+the other piece's name ends there, as a face a blend consumes does
+([toponaming](toponaming.md#how-each-operation-names-its-output)). The
+body as it is comes first because merging renames: a revolve's two
+coplanar caps rounded together, merged, left a recorded session's next
+feature on the other cap's name with nothing to find
+(`tests/fuzz/cases/boolean_failed-779.jsonl`). So a blend that builds as
+the body is builds what it always built, names and all, and only one that
+did not build moves a name: no golden, and no name the action matrix keys
+on, changed. The size that fits measures on the merged body
+(`topo::BlendBody`, its faces named as the input's, a merged one by its
+first piece), and a candidate builds when either does: a width runs to the
+face's own boundary, so R5 on the L's 4 mm wall fits 3.99, where it
+measured to the edge between the pieces. A blend that does build as the
+body is but builds a patch more where it meets a split keeps it
+([known bug](../known-bugs.md#a-blend-that-builds-beside-a-split-builds-a-patch-more)).
 
 ## Kernel calls build on a copy of the cached body
 
@@ -2320,7 +2366,9 @@ can be shown:
   (`06-threads/004`) is one: its groove is SMLib's screw sweep, 6.7e-8 of
   the volume over the ideal one along the threaded length, which lifts the
   centre of mass 6.5e-7 mm, past the last digit the case states; the
-  measured centre is the one that volume implies to 2e-9 mm.
+  measured centre is the one that volume implies to 2e-9 mm. The top edge
+  of a concave R21 wall that runs out tangent, rounded R9.5 (`851`), is
+  1.7e-5 mm3 under the case's 9065.809611, 2e-9 of it.
 - **The case's formula is approximate.** A rectangle extruded with a taper
   is a prismatoid, V = h (A0 + 4 Am + A1) / 6; two cases state the
   pyramid's h (A0 + A1 + sqrt(A0 A1)) / 3, which is 7e-5 and 7e-4 off, and
@@ -2340,6 +2388,12 @@ can be shown:
   are `known: accepted` for the same reason: under equal setbacks the
   wall's chamfer and the window's stay apart (by 0.002 and 0.007 mm), so
   the pair builds where solidcore's offsets overlap and refuse.
+- **The case counts pieces of one surface apart.** Two chamfers ending on
+  a cylinder's wall (`15505`) state the operand's faces as 14 and 12 where
+  the grader, counting a whole surface once, finds 12 and 10 on ours: the
+  wall's two pieces at a line, and the revolve's inner face with the
+  cylinder it continues, lie on one cylinder. The chamfer adds its one face
+  to that, 13 and 11.
 - **A face thinner than the confusion.** Two rounded boxes 1e-4 mm apart
   leave a sliver whose ends, where both outlines run tangent into the same
   side, are 1e-4 long and under 1e-9 thick: the case counts each a face,
@@ -2641,8 +2695,7 @@ reference case.
     two equal tubes touch, a mixed-convexity corner whose concave round
     has to roll over the convex one's end, a joint round whose joint a
     tube's seam vertex cuts 0.37 mm short of a chamfer's crease (with the
-    seam elsewhere it builds), and a chamfer ending where two faces of one
-    cylinder meet (OpenCASCADE builds it invalid);
+    seam elsewhere it builds);
   - a Shell whose wall is thicker than a round inside it, that opens the
     side of a thin rib, or whose floor falls away to a drain, and a Shell
     with no open face (a sealed void);

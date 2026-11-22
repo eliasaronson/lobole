@@ -18,7 +18,7 @@ command or parameter Loböle has no counterpart for.
 |---|---|---|---|---|
 | ladder | 170 | 101 | 14 | 55 |
 | booleans | 142 | 74 | 10 | 58 |
-| fillets | 321 | 117 | 91 | 113 |
+| fillets | 321 | 126 | 81 | 114 |
 | shell | 43 | 11 | 11 | 21 |
 | sweeps | 98 | 37 | 13 | 48 |
 | solids | 11 | 3 | 0 | 8 |
@@ -26,7 +26,7 @@ command or parameter Loböle has no counterpart for.
 | import | 35 | 21 | 5 | 9 |
 | tessellation | 14 | 11 | 1 | 2 |
 | crashes | 12 | 3 | 0 | 9 |
-| **all** | 877 | 392 | 162 | 323 |
+| **all** | 877 | 401 | 152 | 324 |
 
 ## Known failures
 
@@ -39,12 +39,10 @@ command or parameter Loböle has no counterpart for.
 | solidcore/booleans/3012-filleted-boxes-1e-4-apart-cut-reversed | topology | [docs/modeling/README.md#known-rows-that-are-not-kernel-defects](README.md#known-rows-that-are-not-kernel-defects) |
 | solidcore/fillets/10876-fillet-ledge-convex-and-concave-edges-at-bore-r0-5 | refused | [docs/modeling/README.md#not-built](README.md#not-built) |
 | solidcore/fillets/11991-chamfer-cylinder-edge-ending-on-a-round-tangent-line | volume | [docs/modeling/README.md#known-rows-that-are-not-kernel-defects](README.md#known-rows-that-are-not-kernel-defects) |
-| solidcore/fillets/12342-round-wall-and-ledge-edges-r2-5 | refused | [docs/known-bugs.md#a-blend-beside-a-plane-an-add-left-in-two-pieces-is-refused-at-every-size](../known-bugs.md#a-blend-beside-a-plane-an-add-left-in-two-pieces-is-refused-at-every-size) |
-| solidcore/fillets/12342-round-wall-edge-r5-past-the-wall-refused | refused | [docs/known-bugs.md#a-blend-beside-a-plane-an-add-left-in-two-pieces-is-refused-at-every-size](../known-bugs.md#a-blend-beside-a-plane-an-add-left-in-two-pieces-is-refused-at-every-size) |
-| solidcore/fillets/14755-round-between-cone-and-plane-chamfers | refused | [docs/known-bugs.md#a-blend-beside-a-plane-an-add-left-in-two-pieces-is-refused-at-every-size](../known-bugs.md#a-blend-beside-a-plane-an-add-left-in-two-pieces-is-refused-at-every-size) |
+| solidcore/fillets/12342-round-wall-edge-r5-past-the-wall-refused | refused | [docs/modeling/README.md#not-built](README.md#not-built) |
 | solidcore/fillets/15437-fillet-round-ends-at-crease-beside-drafted-side | volume | [docs/known-bugs.md#a-round-runs-on-across-a-crease-of-a-few-degrees](../known-bugs.md#a-round-runs-on-across-a-crease-of-a-few-degrees) |
-| solidcore/fillets/15505-chamfer-end-cap-between-two-faces-of-one-cylinder | refused | [docs/modeling/README.md#not-built](README.md#not-built) |
-| solidcore/fillets/15505-chamfer-end-cap-on-one-cylinder-face | refused | [docs/modeling/README.md#not-built](README.md#not-built) |
+| solidcore/fillets/15505-chamfer-end-cap-between-two-faces-of-one-cylinder | topology | [docs/modeling/README.md#known-rows-that-are-not-kernel-defects](README.md#known-rows-that-are-not-kernel-defects) |
+| solidcore/fillets/15505-chamfer-end-cap-on-one-cylinder-face | topology | [docs/modeling/README.md#known-rows-that-are-not-kernel-defects](README.md#known-rows-that-are-not-kernel-defects) |
 | solidcore/fillets/16654-fillet-drum-rim-beside-a-boss-flush-with-its-top-r0-5 | refused | [docs/modeling/README.md#not-built](README.md#not-built) |
 | solidcore/fillets/16654-fillet-equal-tube-tee-pinched-at-the-sides-r2 | refused | [docs/known-bugs.md#a-blend-the-validity-check-passes-can-be-far-off-in-volume](../known-bugs.md#a-blend-the-validity-check-passes-can-be-far-off-in-volume) |
 | solidcore/fillets/16654-fillet-tube-joint-across-a-chamfer-crease-r1 | refused | [docs/modeling/README.md#not-built](README.md#not-built) |
@@ -104,19 +102,13 @@ command or parameter Loböle has no counterpart for.
 | solidcraft/fillets/5158-fillet-adjacent-plate-edges-as-thick-as-plate | refused | [docs/modeling/README.md#not-built](README.md#not-built) |
 | solidcraft/fillets/5158-fillet-round-just-past-a-10mm-face | refused | [docs/modeling/README.md#not-built](README.md#not-built) |
 | solidcraft/fillets/5300-fillet-tube-rim-as-wide-as-its-wall | refused | [docs/modeling/README.md#not-built](README.md#not-built) |
-| solidcraft/fillets/556-fillet-edge-ending-on-curved-boss | refused | [docs/known-bugs.md#a-blend-beside-a-plane-an-add-left-in-two-pieces-is-refused-at-every-size](../known-bugs.md#a-blend-beside-a-plane-an-add-left-in-two-pieces-is-refused-at-every-size) |
 | solidcraft/fillets/5835-chamfer-sloped-basin-1-mm-rim-0-5-4-edges | refused | [docs/modeling/README.md#not-built](README.md#not-built) |
 | solidcraft/fillets/5835-chamfer-sloped-basin-1-mm-rim-2-two-edges | refused | [docs/modeling/README.md#not-built](README.md#not-built) |
 | solidcraft/fillets/5835-chamfer-sloped-basin-4-mm-rim-2-2-edges | refused | [docs/modeling/README.md#not-built](README.md#not-built) |
-| solidcraft/fillets/851-chamfer-arc-and-top-front-2 | refused | [docs/known-bugs.md#a-blend-beside-a-plane-an-add-left-in-two-pieces-is-refused-at-every-size](../known-bugs.md#a-blend-beside-a-plane-an-add-left-in-two-pieces-is-refused-at-every-size) |
-| solidcraft/fillets/851-chamfer-arc-top-edge-9-5 | refused | [docs/known-bugs.md#a-blend-beside-a-plane-an-add-left-in-two-pieces-is-refused-at-every-size](../known-bugs.md#a-blend-beside-a-plane-an-add-left-in-two-pieces-is-refused-at-every-size) |
 | solidcraft/fillets/851-chamfer-knife-edge-tip-2-box-less-cylinder | refused | [docs/modeling/README.md#not-built](README.md#not-built) |
 | solidcraft/fillets/851-chamfer-knife-edge-tip-5 | refused | [docs/modeling/README.md#not-built](README.md#not-built) |
-| solidcraft/fillets/851-fillet-arc-top-edge-9-5 | refused | [docs/modeling/README.md#not-built](README.md#not-built) |
+| solidcraft/fillets/851-fillet-arc-top-edge-9-5 | volume | [docs/modeling/README.md#known-rows-that-are-not-kernel-defects](README.md#known-rows-that-are-not-kernel-defects) |
 | solidcraft/fillets/851-fillet-arc-top-edge-full-wall-height | refused | [docs/modeling/README.md#not-built](README.md#not-built) |
-| solidcraft/fillets/851-fillet-top-front-and-front-left-upright | refused | [docs/known-bugs.md#a-blend-beside-a-plane-an-add-left-in-two-pieces-is-refused-at-every-size](../known-bugs.md#a-blend-beside-a-plane-an-add-left-in-two-pieces-is-refused-at-every-size) |
-| solidcraft/fillets/851-fillet-top-front-then-front-left-upright | refused | [docs/known-bugs.md#a-blend-beside-a-plane-an-add-left-in-two-pieces-is-refused-at-every-size](../known-bugs.md#a-blend-beside-a-plane-an-add-left-in-two-pieces-is-refused-at-every-size) |
-| solidcraft/fillets/851-fillet-top-front-then-upright | refused | [docs/known-bugs.md#a-blend-beside-a-plane-an-add-left-in-two-pieces-is-refused-at-every-size](../known-bugs.md#a-blend-beside-a-plane-an-add-left-in-two-pieces-is-refused-at-every-size) |
 | solidcraft/fillets/854-fillet-revolved-disc-both-rims-full-round | refused | [docs/modeling/README.md#not-built](README.md#not-built) |
 | solidcraft/fillets/cov-fillet-exact-cylinders-touching-at-a-point-r1 | volume | [docs/modeling/README.md#known-rows-that-are-not-kernel-defects](README.md#known-rows-that-are-not-kernel-defects) |
 | solidcraft/fillets/cov-fillet-exact-oblique-plane-cone-rim-r1-5 | volume | [docs/known-bugs.md#a-blend-along-a-curved-edge-is-off-its-rolling-ball-volume](../known-bugs.md#a-blend-along-a-curved-edge-is-off-its-rolling-ball-volume) |
@@ -129,10 +121,8 @@ command or parameter Loböle has no counterpart for.
 | solidcraft/fillets/every-hole-top-rim-chamfer-10-full-depth | refused | [docs/modeling/README.md#not-built](README.md#not-built) |
 | solidcraft/fillets/every-hole-top-rim-r10-as-deep-as-plate | refused | [docs/modeling/README.md#not-built](README.md#not-built) |
 | solidcraft/fillets/every-hole-top-rim-r12-past-plate-bottom | refused | [docs/modeling/README.md#not-built](README.md#not-built) |
-| solidcraft/fillets/every-l-bracket-both-bends-r3-r8-concentric | refused | [docs/known-bugs.md#a-blend-beside-a-plane-an-add-left-in-two-pieces-is-refused-at-every-size](../known-bugs.md#a-blend-beside-a-plane-an-add-left-in-two-pieces-is-refused-at-every-size) |
-| solidcraft/fillets/every-l-bracket-front-inner-outline-after-bend-round-r1 | topology | [docs/known-bugs.md#a-blend-beside-a-plane-an-add-left-in-two-pieces-is-refused-at-every-size](../known-bugs.md#a-blend-beside-a-plane-an-add-left-in-two-pieces-is-refused-at-every-size) |
+| solidcraft/fillets/every-l-bracket-front-inner-outline-after-bend-round-r1 | topology | [docs/known-bugs.md#a-blend-that-builds-beside-a-split-builds-a-patch-more](../known-bugs.md#a-blend-that-builds-beside-a-split-builds-a-patch-more) |
 | solidcraft/fillets/every-l-bracket-inside-bend-r35-uses-both-faces | refused | [docs/modeling/README.md#not-built](README.md#not-built) |
-| solidcraft/fillets/every-l-bracket-outside-bend-r5 | refused | [docs/known-bugs.md#a-blend-beside-a-plane-an-add-left-in-two-pieces-is-refused-at-every-size](../known-bugs.md#a-blend-beside-a-plane-an-add-left-in-two-pieces-is-refused-at-every-size) |
 | solidcraft/fillets/every-pocket-rim-edges-r5-as-deep-as-pocket | refused | [docs/modeling/README.md#not-built](README.md#not-built) |
 | solidcraft/import/3352-vertex-off-its-edge-curve | refused | [docs/modeling/README.md#not-built](README.md#not-built) |
 | solidcraft/import/3806-iges-revolved-arc-spherical-cap-dome | refused | [docs/known-bugs.md#an-iges-box-whose-faces-miss-by-more-than-110000-of-its-size-comes-in-open](../known-bugs.md#an-iges-box-whose-faces-miss-by-more-than-110000-of-its-size-comes-in-open) |
@@ -203,8 +193,8 @@ command or parameter Loböle has no counterpart for.
 | `sketch.spline.fit_point` | 18 |
 | `solid.fillet` of type `curvature` | 15 |
 | `sheet.manage_rules` | 13 |
+| `solid.chamfer` with `distance2` | 11 |
 | `solid.extrude` with `face` | 11 |
-| `solid.chamfer` with `distance2` | 10 |
 | `solid.coil` | 10 |
 | `solid.fillet` with `corner` | 10 |
 | ambiguous pick: several edges at the point | 9 |

@@ -106,44 +106,22 @@ the heading if it is not here yet.
   `solidcraft/threads/3368-faceted-prism-with-bore-and-cross-hole` (8e-5,
   a faceted prism with a bore: no blend, kept here until it is looked at).
 
-### A blend beside a plane an add left in two pieces is refused at every size
+### A blend that builds beside a split builds a patch more
 
-- **Symptom:** a Fillet or Chamfer on an edge that ends on, or runs beside,
-  a plane an `add` left as two coplanar faces is refused whatever its size,
-  and the size its refusal names does not fit either. An L joined from two
-  boxes, its wall's edge alone: "no radius builds on these edges, down to
-  0.00257 mm", where the same L extruded from one profile rounds R2.5 and
-  R3.5 to their closed forms (9463.66702, 9409.58736). A cylinder joined
-  flush with a bar along its bottom, its bottom rim chamfered: "the largest
-  distance that fits is 0.121 mm", where 7.5 builds once the bottom is one
-  face. An L bracket's front inner outline rounded after its bend round
-  builds 13 faces where the case counts 12.
-- **Cause:** an `add` keeps the coplanar faces it joined apart until a
-  Refine (the operation table's `Refine` row), and OpenCASCADE's blend
-  builder fails, or builds a patch more, where the blend's end or its run
-  meets the edge between two pieces of one plane. The size search then
-  reads the builder's failure at every size as the size's. Every case
-  below passes when a Refine follows each `add` (an experiment on the
-  corpus; the translator does not do it), except where noted.
-- **Where:** `ApplyBodyMode` (`src/core/BodyMode.cpp`) leaves the faces;
-  `EdgeBlendNamed` (`src/core/ElementHistory.cpp`) blends on them.
-- **Likely fix:** merge the coplanar faces next to the picked edges on the
-  blend's copy before the builder (`ShapeUpgrade_UnifySameDomain`, names
-  through its history as `RefineFeature` keeps them), or merge them in the
-  `add` itself. Either moves element names, so it is a change of its own.
-- **Cases:** `solidcore/fillets/12342-round-wall-and-ledge-edges-r2-5`,
-  `solidcore/fillets/12342-round-wall-edge-r5-past-the-wall-refused` (at
-  R5 still [not built](modeling/README.md#not-built) once merged: past
-  its 4 mm wall), `solidcore/fillets/14755-round-between-cone-and-plane-chamfers`
-  (its rim chamfer; the bar's chamfers after it take two distances and are
-  not translated), `solidcraft/fillets/556-fillet-edge-ending-on-curved-boss`,
-  `851-chamfer-arc-and-top-front-2`, `851-chamfer-arc-top-edge-9-5`,
-  `851-fillet-top-front-and-front-left-upright`,
-  `851-fillet-top-front-then-front-left-upright`,
-  `851-fillet-top-front-then-upright`,
-  `every-l-bracket-both-bends-r3-r8-concentric`,
-  `every-l-bracket-outside-bend-r5`,
-  `every-l-bracket-front-inner-outline-after-bend-round-r1` (the face more).
+- **Symptom:** an L bracket joined from two boxes, its bend rounded, then
+  its front inner outline rounded R1, builds 13 faces where the case counts
+  12 (the volume right).
+- **Cause:** where a blend runs along the edge between two pieces of one
+  plane an `add` left, OpenCASCADE's builder builds a corner patch there.
+  The blend is built on the body as it is whenever that builds, and only a
+  blend that does not is built on a copy with the pieces merged
+  ([a blend beside a split](modeling/README.md#a-blend-beside-a-split)),
+  because the merge renames the pieces.
+- **Where:** `FilletFeature::Execute` (`src/core/features/FilletFeature.cpp`).
+- **Likely fix:** merge for this blend too, which renames the piece the
+  merged face does not take its name from; a choice between the face and
+  the name.
+- **Case:** `solidcraft/fillets/every-l-bracket-front-inner-outline-after-bend-round-r1`.
 
 ### A round runs on across a crease of a few degrees
 

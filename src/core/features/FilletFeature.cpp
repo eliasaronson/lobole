@@ -265,70 +265,107 @@ bool FilletFeature::Execute(RegenContext& ctx) {
       fit::RefusingBounds(*body, indices, op,
                           asked / (1.0 + fit::kRefuseMargin)),
       asked);
+  // The body with the splits the blend meets merged
+  // (docs/modeling/README.md#a-blend-beside-a-split): what a blend the
+  // builder fails on as it is builds on, and what the size that fits
+  // measures; EdgeBlendNamed merges its own copy the same way.
+  std::vector<int> onBase;
+  const Body base = topo::BlendBody(*body, indices, op, onBase);
   ElementMap map;
   std::string error;
   topo::EdgeBlendFailure failure;
   CADShape result;
-  if (!past && op == EdgeBlendOp::Chamfer) {
+  // Why a built result is not kept, or empty: the blend builder reported
+  // success on blends that crossed themselves, and the part went on with a
+  // body check_geometry called invalid (tools/fuzz.py).
+  const auto unkept = [&](const CADShape& built, double size) -> std::string {
+    (void)size;
+    if (const std::string bad = Measure::InvalidReasons(built); !bad.empty())
+      return std::string(what) + " produced an invalid solid (" + bad + ")";
+    return {};
+  };
+  // The blend at the asked size, its splits merged or (`merge` false) the
+  // body as it is.
+  const auto blendAt = [&](bool merge, ElementMap& named, std::string& err,
+                           topo::EdgeBlendFailure& fail) -> CADShape {
+    if (op != EdgeBlendOp::Chamfer)
+      return topo::EdgeBlendNamed(body->shape, body->elementMap, indices, op,
+                                  radius, GetId(), named, &err, &fail, merge);
     // In stages (ChamferStages). A later stage's edges are what the stages
     // before it left of the picked ones: shortened at the corner, and named
     // afresh, so they are found by place, on the edge they were cut from.
     const std::vector<std::vector<int>> stages = ChamferStages(*body, indices);
     TopTools_IndexedMapOfShape picked;
     TopExp::MapShapes(body->shape.GetShape(), TopAbs_EDGE, picked);
-    result = body->shape;
-    map = body->elementMap;
-    for (size_t k = 0; k < stages.size() && result.IsValid(); k++) {
+    CADShape out = body->shape;
+    named = body->elementMap;
+    for (size_t k = 0; k < stages.size() && out.IsValid(); k++) {
       std::vector<int> at;
       if (k == 0) {
         at = stages[0];
       } else {
         for (int idx : stages[k]) {
           const std::vector<int> left =
-              PiecesOf(TopoDS::Edge(picked(idx + 1)), result.GetShape());
+              PiecesOf(TopoDS::Edge(picked(idx + 1)), out.GetShape());
           if (left.empty()) {
             const std::string* name = body->elementMap.EdgeNameOf(idx);
-            error = "chamfer edge '" + (name != nullptr ? *name : "?") +
-                    "' was consumed by the chamfers built before it at a "
-                    "corner of three";
-            result = CADShape();
-            break;
+            err = "chamfer edge '" + (name != nullptr ? *name : "?") +
+                  "' was consumed by the chamfers built before it at a "
+                  "corner of three";
+            return CADShape();
           }
           at.insert(at.end(), left.begin(), left.end());
         }
-        if (!result.IsValid())
-          break;
       }
       ElementMap next;
-      result = topo::EdgeBlendNamed(result, map, at, op, radius, GetId(), next,
-                                    &error, &failure);
-      map = std::move(next);
+      out = topo::EdgeBlendNamed(out, named, at, op, radius, GetId(), next,
+                                 &err, &fail, merge);
+      named = std::move(next);
     }
-  } else if (!past) {
-    result = topo::EdgeBlendNamed(body->shape, body->elementMap, indices, op,
-                                  radius, GetId(), map, &error, &failure);
-  }
+    return out;
+  };
+  // First on the body as it is, which is what a blend that builds there
+  // has always built, names and all; only where that is not kept and the
+  // blend meets a split is it built on the merged copy, whose merged faces
+  // take one piece's name (a revolve's two coplanar caps rounded together
+  // left a later feature on the other cap's name with nothing to find).
+  const bool merges = !base.shape.GetShape().IsSame(body->shape.GetShape());
   std::string cause;
   if (past) {
     cause = past->why;
-  } else if (!result.IsValid()) {
-    cause = error.empty() ? std::string(what) + " failed" : error;
-    if (!failure.atBuild) {
-      // The edges, not the size: no size would build.
-      SetError(cause);
-      LOG_ERROR("FilletFeature '{}': {}", m_name, GetError());
-      return false;
-    }
-  } else if (const std::string bad = Measure::InvalidReasons(result);
-             !bad.empty()) {
-    // Kept only when it is a valid solid: the blend builder reported success
-    // on blends that crossed themselves, and the part went on with a body
-    // check_geometry called invalid (tools/fuzz.py).
-    cause = std::string(what) + " produced an invalid solid (" + bad + ")";
   } else {
-    body->shape = std::move(result);
-    body->elementMap = std::move(map);
-    return true;
+    result = blendAt(false, map, error, failure);
+    if (result.IsValid())
+      cause = unkept(result, asked);
+    if (merges && (!result.IsValid() || !cause.empty())) {
+      ElementMap merged;
+      std::string err;
+      topo::EdgeBlendFailure fail;
+      CADShape r = blendAt(true, merged, err, fail);
+      std::string why = r.IsValid() ? unkept(r, asked) : std::string();
+      if (r.IsValid() || !result.IsValid()) {
+        // What the merged copy said: it is the faces as they are.
+        fail.atBuild = fail.atBuild || failure.atBuild;
+        result = std::move(r);
+        map = std::move(merged);
+        error = err.empty() ? error : err;
+        failure = fail;
+        cause = std::move(why);
+      }
+    }
+    if (!result.IsValid()) {
+      cause = error.empty() ? std::string(what) + " failed" : error;
+      if (!failure.atBuild) {
+        // The edges, not the size: no size would build.
+        SetError(cause);
+        LOG_ERROR("FilletFeature '{}': {}", m_name, GetError());
+        return false;
+      }
+    } else if (cause.empty()) {
+      body->shape = std::move(result);
+      body->elementMap = std::move(map);
+      return true;
+    }
   }
 
   // The size does not fit: say the one that does
@@ -336,18 +373,25 @@ bool FilletFeature::Execute(RegenContext& ctx) {
   std::optional<fit::Answer> answer =
       fitMemo.For(body->shape, indices, static_cast<int>(op), asked);
   if (!answer) {
-    const CADShape& input = body->shape;
     // Past a refusing bound it is the seed: the least that refuses, and
     // nothing above it builds. Measuring every face as well cost more than
     // the one build under it (100 rims of a plate: 0.35 s against 0.3 s).
     const std::optional<fit::Bound> least =
-        past ? past : fit::Least(fit::BlendBounds(*body, indices, op));
+        past ? past : fit::Least(fit::BlendBounds(base, onBase, op));
     answer = fit::LargestThatBuilds(
         asked, least,
         [&](double size) {
-          const CADShape built =
-              topo::EdgeBlendUnnamed(input, indices, op, size);
-          return built.IsValid() && Measure::InvalidReasons(built).empty();
+          // A size builds as the feature builds it: on the body as it is,
+          // or else on the merged copy; the copy first, which builds more.
+          const CADShape built = topo::EdgeBlendUnnamed(base.shape, onBase, op,
+                                                        size, /*merge=*/false);
+          if (built.IsValid() && unkept(built, size).empty())
+            return true;
+          if (!merges)
+            return false;
+          const CADShape asIs = topo::EdgeBlendUnnamed(body->shape, indices, op,
+                                                       size, /*merge=*/false);
+          return asIs.IsValid() && unkept(asIs, size).empty();
         },
         [] { return heavy::Cancelled(); },
         // A bound OpenCASCADE has been seen to build past is a first

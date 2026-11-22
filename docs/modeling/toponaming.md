@@ -173,7 +173,12 @@ and folds its `Modified`/`Generated`/`IsDeleted` reports into one
 - **Fillet / chamfer** (`topo::EdgeBlendNamed`): blend faces
   `<spine edge name>;G<tag>`; support faces keep their names through
   `Modified`; corner patches fall to the fallback passes. The spine edge itself
-  is consumed, so a reference to it stops resolving.
+  is consumed, so a reference to it stops resolving. A blend the builder
+  fails on as the body is, where it meets the edge between two pieces of
+  one surface an `add` left, is built with the pieces merged
+  ([a blend beside a split](README.md#a-blend-beside-a-split)), that merge
+  and the blend named as one step: the merged face is its first piece's
+  name with `;M<tag>`, and the other piece's name ends there.
 - **Fallback passes** (`topo::ApplyFallbackPasses`), run after history: **U**
   — a named face names each unnamed boundary edge `<face>;U<k>`, which is what
   gives edges (fillet spines) stable names; **L** — a still-unnamed face takes
