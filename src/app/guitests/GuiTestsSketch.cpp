@@ -533,8 +533,9 @@ void RegisterSketchGuiTests(ImGuiTestEngine* engine) {
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
     using K = sketch::ConstraintKind;
+    // The plate's top is the sketch plane, and the cut goes down into it.
     Doc()->AddFeature(std::make_unique<BoxFeature>(
-        "Plate", glm::dvec3(-4, -4, -1), 8.0, 8.0, 1.3));
+        "Plate", glm::dvec3(-4, -4, -1.3), 8.0, 8.0, 1.3));
     auto own =
         std::make_unique<SketchFeature>("Profile", SketchPlane(PlaneType::XY));
     const uint32_t line = own->AddEntity(sketch::Line{{-3, 0}, {3, 0}});
@@ -542,8 +543,9 @@ void RegisterSketchGuiTests(ImGuiTestEngine* engine) {
     own->constraints.push_back({K::Horizontal, {line, 0}, {0, 0}, 0.0});
     Doc()->AddFeature(std::move(own));
     const uint64_t skId = Doc()->GetFeature(1)->GetId();
-    Doc()->AddFeature(
-        std::make_unique<ExtrudeFeature>("Cut", skId, 0.5, ExtrudeMode::Cut));
+    Doc()->AddFeature(std::make_unique<ExtrudeFeature>("Cut", skId, 0.5,
+                                                       ExtrudeMode::Cut,
+                                                       /*reversed=*/true));
     Doc()->Regenerate();
     IM_CHECK(Doc()->GetFeature(2)->GetError().empty());
     IM_CHECK_EQ(Doc()->GetBodies().size(), (size_t)1);
@@ -557,7 +559,8 @@ void RegisterSketchGuiTests(ImGuiTestEngine* engine) {
     ctx->Yield(2);
     for (int i = 0; i < 600 && s_App->camera->IsAnimating(); i++)
       ctx->Yield();
-    s_App->camera->StopAnimation();
+    s_App->camera->FinishAnimation();
+    ctx->Yield(2);
     s_App->camera->SetTarget(glm::vec3(0.0f));
     s_App->camera->SetUp(glm::vec3(0.0f, 1.0f, 0.0f));
     s_App->camera->SetPosition(glm::vec3(0.0f, 0.0f, 10.0f));
