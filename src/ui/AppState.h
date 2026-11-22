@@ -169,8 +169,10 @@ enum class SketchTool {
                    // calibrate/delete for selectedImageId) in the Tool window
   Text,            // click places a label; the Tool window edits its text,
                    // height, font and alignment (docs/sketching/README.md#text)
-  Split            // click a curve to cut it into pieces that stay one curve;
+  Split,           // click a curve to cut it into pieces that stay one curve;
                    // a circle takes two clicks (docs/sketching/README.md#split)
+  LineMidpoint     // 2-click line: its middle, then one end; the other end
+                   // mirrors it (docs/sketching/README.md#midpoint-line)
 };
 
 // Transient state for the active sketch-editing session. The sketch itself
@@ -679,8 +681,8 @@ struct MeasureState {
 // simulation tools, the Model dock shows the Studies panel, and a viewport
 // click assigns the armed boundary condition to the picked face. Results are
 // derived data on the Document; this holds only transient UI/display state.
-struct ShownField; // ui/SimulationView.h
-struct StudyCheck; // ui/SimulationView.h
+struct ShownField;       // ui/SimulationView.h
+struct StudyCheck;       // ui/SimulationView.h
 struct SimGeometryCheck; // ui/SimulationView.h
 struct SimulationState {
   bool active = false;        // in simulation mode (the mode gate)

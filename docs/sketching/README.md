@@ -1190,7 +1190,8 @@ camera fell back to an arbitrary up and Top opened turned 180°
 faces away from the front view, so its sketch is seen from behind: the world
 is upright but +U reads to the left.
 
-**Tools** (`SketchTool`): Select, Point, Line, Circle, Rectangle,
+**Tools** (`SketchTool`): Select, Point, Line, LineMidpoint
+([midpoint line](#midpoint-line)), Circle, Rectangle,
 RectangleCenter, Arc (centre→start→end), ArcThreePoint (start→end→through),
 Ellipse (centre→major end→minor), EllipseArc (5 clicks), Spline (click poles;
 Escape, Enter or a double-click finishes), Trim, Split ([Split](#split)),
@@ -1206,7 +1207,7 @@ shadowed while sketching; rebindable — `src/core/io/Keymap.cpp`):
 
 | draw | modify | constrain | other |
 |---|---|---|---|
-| L line, C circle, Shift+C ellipse, G rectangle, Shift+G centre rectangle, A 3-point arc, Shift+A centre arc, Ctrl+Shift+A elliptic arc, S spline, `.` point, Shift+T text, X project, Shift+I reference image | M trim, K split, O offset, Shift+F fillet, Shift+M mirror, P pattern, D dimension, Q construction, Delete delete | H horizontal, V vertical, N coincident, B parallel, Shift+B perpendicular, T tangent, E equal, Shift+N concentric | Space clear selection, Ctrl+C/V/Shift+V copy/paste/paste linked, Shift+S auto-constrain, Y constraint glyphs, F7 slice, Shift+E extrude, Shift+R revolve, Shift+H holes |
+| L line, Shift+L midpoint line, C circle, Shift+C ellipse, G rectangle, Shift+G centre rectangle, A 3-point arc, Shift+A centre arc, Ctrl+Shift+A elliptic arc, S spline, `.` point, Shift+T text, X project, Shift+I reference image | M trim, K split, O offset, Shift+F fillet, Shift+M mirror, P pattern, D dimension, Q construction, Delete delete | H horizontal, V vertical, N coincident, B parallel, Shift+B perpendicular, T tangent, E equal, Shift+N concentric | Space clear selection, Ctrl+C/V/Shift+V copy/paste/paste linked, Shift+S auto-constrain, Y constraint glyphs, F7 slice, Shift+E extrude, Shift+R revolve, Shift+H holes |
 
 Curvature (G2), point-on-line, symmetric, midpoint, fixed and collinear are
 commands with no default key.
@@ -1263,8 +1264,8 @@ reposition (`labelOffset`).
 The sketch toolbar (`DrawSketchModeToolbar`, `src/ui/Toolbar.cpp`) is one
 row at 1280 px (`toolbar/every_tool_is_reachable` asserts it). Tools that are
 one idea share a **flyout**: the face shows the variant last used and runs
-it, the caret lists them all — Circle/Ellipse, Rectangle/Centre rectangle,
-the three arcs, and Trim/Split. Every flyout row answers to the id its tool
+it, the caret lists them all — Line/Midpoint line, Circle/Ellipse,
+Rectangle/Centre rectangle, the three arcs, and Trim/Split. Every flyout row answers to the id its tool
 would have as a button (`###tb_sk_trim`, `###tb_sk_ellipse`, …), so a test
 or an agent opens the flyout (`cutgrp/###more`) and clicks the row.
 
@@ -1276,6 +1277,32 @@ than reached for, so they do not get three buttons; instead the face is
 and slice off), and its tooltip names all three states. Their keys
 (Shift+S, Y, F7) work as before. Reference image sits beside Project: both
 bring something from outside the sketch into it.
+
+### Midpoint line
+
+The Line flyout's second tool (`SketchTool::LineMidpoint`,
+`sketch.line_midpoint`, Shift+L, `###tb_sk_line_midpoint`): the first click
+is the line's middle, the second one end, and the other end mirrors it about
+the first click, previewed while placing. Each line is its own — it does
+not chain into the next as Line does — and Escape drops a placed middle.
+
+What the committed line carries is what the first click snapped to, and the
+lightest thing that keeps it the middle (`ui::AddMidpointLine`,
+`SketchTools.cpp`):
+
+- **an existing point or the origin**: a `Midpoint` constraint naming that
+  point and the line — no new entity;
+- **a curve** (a line body, circle or arc): a construction point on the
+  curve, held at the line's middle by a `Midpoint` and on the curve by a
+  `PointOnLine`, since a curve has no point a `Midpoint` can name;
+- **free space**: nothing — the line is just a line.
+
+An alignment the middle snapped to (a dashed guide) placed the click and
+holds nothing, there being no point to align. The second click is a line
+end like any other: coincident or on a curve where it snapped, aligned, and
+horizontal / vertical / parallel / perpendicular, measured from the middle
+(which lies on the line's direction). Ctrl or auto-constrain off places the
+raw line. A second click on the first adds nothing.
 
 ### The first dimension
 

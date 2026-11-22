@@ -43,7 +43,7 @@ static const char* const kModelTools[] = {
 // "###tb_sk_<command>" and the flyout faces.
 static const char* const kSketchTools[] = {
     "###tb_sk_finish",
-    "###tb_sk_line",
+    "###tb_sk_linegrp",
     "###tb_sk_circlegrp",
     "###tb_sk_rectgrp",
     "###tb_sk_arcgrp",
@@ -79,6 +79,7 @@ struct SketchFlyout {
   std::initializer_list<const char*> rows;
 };
 static const SketchFlyout kSketchFlyouts[] = {
+    {"linegrp/###more", {"###tb_sk_line", "###tb_sk_line_midpoint"}},
     {"circlegrp/###more", {"###tb_sk_circle", "###tb_sk_ellipse"}},
     {"rectgrp/###more", {"###tb_sk_rectangle", "###tb_sk_rectangle_center"}},
     {"arcgrp/###more",

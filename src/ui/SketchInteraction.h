@@ -4,6 +4,7 @@
 #pragma once
 
 #include "cad/SketchPlane.h"
+#include "core/sketch/SketchInference.h" // Snap
 #include "ui/AppState.h"
 
 #include <glm/glm.hpp>
@@ -131,6 +132,17 @@ void DrawToolPrompt(AppState& state);
 // construction line among other entities names its own axis — the mirror
 // commits immediately. No-op otherwise (the two-step flow proceeds).
 void MirrorToolActivated(AppState& state);
+
+// The midpoint line (docs/sketching/README.md#midpoint-line): a line whose
+// middle is `mid.uv` and one end `end.uv`, the other end mirrored. With
+// `infer`, the middle keeps what it snapped to -- a point (an existing one or
+// the origin) by a Midpoint constraint on that point, a curve by a
+// construction point on the curve held at the middle -- and the end takes a
+// line end's usual inferred constraints (coincident / on a curve / aligned,
+// H/V / parallel / perpendicular). Free space adds nothing. Returns the
+// line's id, 0 (and adds nothing) for a line of no length.
+uint32_t AddMidpointLine(SketchFeature& sketch, const sketch::Snap& mid,
+                         const sketch::Snap& end, bool infer);
 
 // Arms a sketch tool and resets the transient per-tool edit state. ONE
 // implementation: the toolbar button and the keyboard binding each had their

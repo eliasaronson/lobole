@@ -365,6 +365,7 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
   // other tools snap point-by-point.
   const bool drawTool =
       edit.tool == SketchTool::Point || edit.tool == SketchTool::Line ||
+      edit.tool == SketchTool::LineMidpoint ||
       edit.tool == SketchTool::Circle || edit.tool == SketchTool::Rectangle ||
       edit.tool == SketchTool::RectangleCenter ||
       edit.tool == SketchTool::Arc || edit.tool == SketchTool::ArcThreePoint ||
@@ -374,9 +375,12 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
   if (infer) {
     const float ppu = PixelsPerUV(state, sketch->plane, uv);
     // The fixed "other end" for segment-level H/V/parallel/perp snapping: the
-    // pending Line start, or the last placed Spline pole.
+    // pending Line start (a midpoint line's middle, which lies on the same
+    // direction), or the last placed Spline pole.
     std::optional<glm::dvec2> other;
-    if (edit.tool == SketchTool::Line && edit.hasPendingPoint)
+    if ((edit.tool == SketchTool::Line ||
+         edit.tool == SketchTool::LineMidpoint) &&
+        edit.hasPendingPoint)
       other = edit.pendingPoint;
     else if (edit.tool == SketchTool::Spline && !edit.splinePoles.empty())
       other = edit.splinePoles.back();
@@ -1312,6 +1316,9 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
       case SketchTool::Line:
         CommitLine(state, *sketch, index, a, uv, infer);
         break;
+      case SketchTool::LineMidpoint:
+        CommitMidpointLine(state, *sketch, index, a, uv, infer);
+        break;
       case SketchTool::Circle:
         CommitEntity(state, *sketch, index,
                      sketch::Circle{a, glm::length(uv - a)}, infer);
@@ -1327,7 +1334,8 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
       }
       // The line tool chains: the endpoint becomes the next segment's start so
       // continuous polylines can be drawn without reselecting the tool. Escape
-      // or switching tools breaks the chain. Other tools finish after one span.
+      // or switching tools breaks the chain. Other tools finish after one span
+      // -- a midpoint line too: its next click is the next line's middle.
       if (edit.tool == SketchTool::Line) {
         edit.pendingPoint = uv;
         edit.hasPendingPoint = true;

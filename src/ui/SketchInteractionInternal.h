@@ -60,6 +60,10 @@ uint32_t CommitEntity(AppState& state, SketchFeature& sketch, size_t index,
 void CommitLine(AppState& state, SketchFeature& sketch, size_t index,
                 glm::dvec2 a, glm::dvec2 b, bool infer);
 
+// The midpoint line's commit: re-infers both clicks, then AddMidpointLine.
+void CommitMidpointLine(AppState& state, SketchFeature& sketch, size_t index,
+                        glm::dvec2 mid, glm::dvec2 end, bool infer);
+
 void CommitPlacedDimension(AppState& state, const SketchFeature& sketch,
                            glm::dvec2 cursor);
 

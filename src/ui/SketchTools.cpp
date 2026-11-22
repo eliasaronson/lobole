@@ -462,6 +462,65 @@ void CommitLine(AppState& state, SketchFeature& sketch, size_t index,
   state.sketchEdit.lastDrawnStage = 0;
 }
 
+uint32_t AddMidpointLine(SketchFeature& sketch, const sketch::Snap& mid,
+                         const sketch::Snap& end, bool infer) {
+  using K = sketch::ConstraintKind;
+  const glm::dvec2 m = mid.uv, b = end.uv;
+  // The same "no length" floor the solver's own degenerate checks use: a
+  // second click on the first is not a line.
+  if (glm::length(b - m) < 1e-9)
+    return 0;
+  const uint32_t id = sketch.AddEntity(sketch::Line{2.0 * m - b, b});
+  if (!infer)
+    return id;
+  std::vector<sketch::Constraint> candidates;
+  if (mid.coincident) {
+    // The lightest hold: the point it snapped to IS the middle.
+    candidates.push_back({K::Midpoint, *mid.coincident, {id, 0}, 0.0});
+  } else if (mid.pointOnLine) {
+    // A curve has no point a Midpoint can name, so the middle gets one: a
+    // construction point on the curve, held at the line's middle.
+    sketch::Point p;
+    p.p = m;
+    p.construction = true;
+    const uint32_t pid = sketch.AddEntity(p);
+    candidates.push_back({K::Midpoint, {pid, 0}, {id, 0}, 0.0});
+    candidates.push_back(
+        {K::PointOnLine, {pid, 0}, {*mid.pointOnLine, 0}, 0.0});
+  }
+  // An alignment the middle snapped to placed it, and holds nothing: there
+  // is no point there to align.
+  SnapPointConstraints(end, id, 1, candidates);
+  SnapSegmentConstraints(end, id, candidates);
+  ApplyInferred(sketch, candidates);
+  return id;
+}
+
+// Commits a midpoint line: both clicks re-inferred against the existing
+// geometry as CommitLine does (the end's segment snaps measured from the
+// middle, which lies on the line's direction), then one undo step.
+void CommitMidpointLine(AppState& state, SketchFeature& sketch, size_t index,
+                        glm::dvec2 mid, glm::dvec2 end, bool infer) {
+  nlohmann::json before = DocumentIO::FeatureToJson(sketch);
+  sketch::Snap sm, se;
+  sm.uv = mid;
+  se.uv = end;
+  if (infer) {
+    const float ppu = PixelsPerUV(state, sketch.plane, end);
+    sm = sketch::InferPoint(sketch.entities, mid, std::nullopt, 0, ppu);
+    se = sketch::InferPoint(sketch.entities, end, sm.uv, 0, ppu);
+  }
+  const uint32_t id = AddMidpointLine(sketch, sm, se, infer);
+  if (id == 0)
+    return;
+  nlohmann::json after = DocumentIO::FeatureToJson(sketch);
+  state.commands->Execute(
+      std::make_unique<ModifyFeatureCommand>(index, before, after),
+      *state.document);
+  state.sketchEdit.lastDrawn = {id};
+  state.sketchEdit.lastDrawnStage = 0;
+}
+
 LineVertex3D LineVertex(const glm::vec3& p) {
   LineVertex3D v;
   v.position = p;

@@ -257,6 +257,8 @@ const Binding kDefaults[] = {
 
     // ---------------------------------------------------------------- Sketch
     {"sketch.line", Context::Sketch, "Line", "Draw", "L"},
+    {"sketch.line_midpoint", Context::Sketch, "Midpoint Line", "Draw",
+     "Shift+L"},
     {"sketch.circle", Context::Sketch, "Circle", "Draw", "C"},
     {"sketch.ellipse", Context::Sketch, "Ellipse", "Draw", "Shift+C"},
     {"sketch.rectangle", Context::Sketch, "Rectangle", "Draw", "G"},

@@ -919,8 +919,12 @@ void DrawSketchModeToolbar(AppState& state) {
   static int rectVariant = 0;
   static int arcVariant = 0;
   static int cutVariant = 0;
+  static int lineVariant = 0;
 
-  toolBtn("sketch.line", "Line", SketchTool::Line);
+  toolGroup("linegrp", lineVariant,
+            {{"sketch.line", "Line", SketchTool::Line},
+             {"sketch.line_midpoint", "Midpoint Line (its middle, then an end)",
+              SketchTool::LineMidpoint}});
   toolGroup("circlegrp", circleVariant,
             {{"sketch.circle", "Circle", SketchTool::Circle},
              {"sketch.ellipse", "Ellipse", SketchTool::Ellipse}});

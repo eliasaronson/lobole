@@ -571,6 +571,16 @@ def cam_rotary_finish():
     return U(body, _axis())
 
 
+# ---- sketch, appended ----------------------------------------------------
+
+@icon
+def line_midpoint():
+    """A line drawn from its middle: the sketch line, broken around the
+    sketch point the first click places at its centre."""
+    return U(line((1, 13), (4.5, 9.5), w=2), line((9.5, 4.5), (13, 1), w=2),
+             pt(7, 7, 4))
+
+
 # --------------------------------------------------------------------------
 
 

@@ -189,6 +189,10 @@ void BuildSketchOverlay(AppState& state, std::vector<LineVertex3D>& out) {
   case SketchTool::Line:
     poly = sketch::TessellateEntity(sketch::Line{a, b});
     break;
+  case SketchTool::LineMidpoint:
+    // Middle placed: the line through it, mirrored to the cursor.
+    poly = sketch::TessellateEntity(sketch::Line{2.0 * a - b, b});
+    break;
   case SketchTool::Circle:
     poly = sketch::TessellateEntity(sketch::Circle{a, glm::length(b - a)});
     break;
@@ -412,6 +416,11 @@ ToolPrompt SketchToolPrompt(const SketchEditState& edit,
     set("Line", edit.hasPendingPoint ? 2 : 1, 2,
         edit.hasPendingPoint ? "click the next point (Esc to finish)"
                              : "click the start point");
+    break;
+  case T::LineMidpoint:
+    set("Midpoint Line", edit.hasPendingPoint ? 2 : 1, 2,
+        edit.hasPendingPoint ? "click one end (the other mirrors it)"
+                             : "click the middle of the line");
     break;
   case T::Circle:
     set("Circle", edit.hasPendingPoint ? 2 : 1, 2,

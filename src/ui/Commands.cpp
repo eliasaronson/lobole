@@ -619,6 +619,7 @@ const std::vector<Command>& Table() {
       add(id, Sketching, [t](AppState& s) { ArmSketchTool(s, t); });
     };
     tool("sketch.line", SketchTool::Line);
+    tool("sketch.line_midpoint", SketchTool::LineMidpoint);
     tool("sketch.circle", SketchTool::Circle);
     tool("sketch.ellipse", SketchTool::Ellipse);
     tool("sketch.rectangle", SketchTool::Rectangle);

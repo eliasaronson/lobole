@@ -76,6 +76,7 @@ constexpr std::array kIcons = std::to_array<CommandIconEntry>({
 
     // Sketch.
     {"sketch.line", ICON_FA_SLASH},
+    {"sketch.line_midpoint", ICON_DS_LINE_MIDPOINT},
     {"sketch.circle", ICON_DS_CIRCLE},
     {"sketch.ellipse", ICON_DS_ELLIPSE_TOOL},
     {"sketch.rectangle", ICON_DS_RECTANGLE},

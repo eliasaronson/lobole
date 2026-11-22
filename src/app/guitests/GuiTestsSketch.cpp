@@ -267,6 +267,85 @@ void RegisterSketchGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(sk->TypeName() == "Sketch");
   };
 
+  // The midpoint line (docs/sketching/README.md#midpoint-line), from its
+  // flyout row: the first click on the origin is the line's middle, the
+  // second an end, and the line stays centred on the origin when that end is
+  // dragged afterwards. No chain: the next click starts a new line.
+  t = IM_REGISTER_TEST(engine, "sketch", "midpoint_line_centres_on_origin");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    EnterSketchOnPlane(ctx, 0);
+    ctx->Yield();
+    for (int i = 0; i < 600 && s_App->camera->IsAnimating(); i++)
+      ctx->Yield();
+    s_App->sketchEdit.autoConstrain = true;
+    ctx->SetRef("//##DockHost");
+    ctx->ItemClick("**/linegrp/###more");
+    ctx->Yield(2);
+    ctx->ItemClick("//$FOCUSED/###tb_sk_line_midpoint");
+    ctx->Yield(2);
+    IM_CHECK(s_App->sketchEdit.tool == ui::SketchTool::LineMidpoint);
+
+    auto* sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    IM_CHECK(sk != nullptr);
+    const glm::vec2 c = ui::SketchUVToScreen(*s_App, sk->plane, glm::vec2(0));
+    // A few pixels off the origin: the snap, not an exact click, puts the
+    // middle there.
+    ctx->MouseMoveToPos(ImVec2(c.x + 3.0f, c.y - 2.0f));
+    ctx->MouseClick(ImGuiMouseButton_Left);
+    IM_CHECK(s_App->sketchEdit.hasPendingPoint);
+    IM_CHECK_EQ(ui::SketchToolPrompt(s_App->sketchEdit).step, 2);
+    ctx->MouseMoveToPos(ImVec2(c.x + 90.0f, c.y - 40.0f));
+    ctx->Yield(2);
+    GuiShot(ctx, "midpoint_line_preview");
+    ctx->MouseClick(ImGuiMouseButton_Left);
+    ctx->Yield();
+
+    sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    IM_CHECK_EQ(sk->entities.size(), (size_t)1);
+    const uint32_t id = sketch::EntityId(sk->entities[0]);
+    auto lineNow = [&] {
+      sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+      return std::get<sketch::Line>(sk->entities[sk->IndexOfEntity(id)]);
+    };
+    const sketch::Line drawn = lineNow();
+    IM_CHECK(glm::length(drawn.a + drawn.b) < 1e-9);
+    IM_CHECK(glm::length(drawn.b) > 0.0);
+    bool held = false;
+    for (const sketch::Constraint& k : sk->constraints)
+      held |= k.kind == sketch::ConstraintKind::Midpoint &&
+              k.a.entity == sketch::kOrigin && k.b.entity == id;
+    IM_CHECK(held);
+    // Not chained: the tool waits for the next line's middle.
+    IM_CHECK(s_App->sketchEdit.tool == ui::SketchTool::LineMidpoint);
+    IM_CHECK(!s_App->sketchEdit.hasPendingPoint);
+
+    // Escape cancels a placed middle without committing anything.
+    ctx->MouseMoveToPos(ImVec2(c.x - 70.0f, c.y + 50.0f));
+    ctx->MouseClick(ImGuiMouseButton_Left);
+    IM_CHECK(s_App->sketchEdit.hasPendingPoint);
+    ctx->KeyPress(ImGuiKey_Escape);
+    ctx->Yield();
+    IM_CHECK(!s_App->sketchEdit.hasPendingPoint);
+    IM_CHECK(lineNow().b == drawn.b);
+    IM_CHECK_EQ(sk->entities.size(), (size_t)1);
+
+    // Drag the end: the other end answers through the origin.
+    s_App->sketchEdit.tool = ui::SketchTool::Select;
+    ctx->Yield();
+    const glm::vec2 from =
+        ui::SketchUVToScreen(*s_App, sk->plane, glm::vec2(drawn.b));
+    ctx->MouseMoveToPos(ImVec2(from.x, from.y));
+    ctx->MouseDown(ImGuiMouseButton_Left);
+    IM_CHECK(s_App->sketchDrag.mode == ui::SketchDragSession::Mode::Point);
+    ctx->MouseMoveToPos(ImVec2(from.x - 30.0f, from.y - 45.0f));
+    ctx->MouseUp(ImGuiMouseButton_Left);
+    ctx->Yield();
+    const sketch::Line moved = lineNow();
+    IM_CHECK(glm::length(moved.b - drawn.b) > 1e-3);
+    IM_CHECK(glm::length(moved.a + moved.b) < 1e-6);
+  };
+
   t = IM_REGISTER_TEST(engine, "sketch", "draw_line_undo");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");

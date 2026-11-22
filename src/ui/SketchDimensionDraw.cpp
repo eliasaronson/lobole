@@ -921,8 +921,8 @@ void DrawDimensionOnCreate(AppState& state) {
   if (!edit.IsEditing())
     return;
   using T = SketchTool;
-  const bool drawTool = edit.tool == T::Line || edit.tool == T::Circle ||
-                        edit.tool == T::Rectangle ||
+  const bool drawTool = edit.tool == T::Line || edit.tool == T::LineMidpoint ||
+                        edit.tool == T::Circle || edit.tool == T::Rectangle ||
                         edit.tool == T::RectangleCenter ||
                         edit.tool == T::Arc || edit.tool == T::ArcThreePoint;
   if (!drawTool || edit.lastDrawn.empty()) {
