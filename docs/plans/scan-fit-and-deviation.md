@@ -1,18 +1,15 @@
 # A scan: what a fit found, and how far the model is from it
 
 A primitive fitted to a scan rests on the surface that was clicked, says how
-good it is and takes hints
+good it is, takes hints and says what it found when one surface does not
+explain the region
 ([fitting a primitive to a mesh](../modeling/README.md#fitting-a-primitive-to-a-mesh)).
-It should also say what it found when it will not fit, and fit a torus. A
+It should also fit a torus. A
 model built on a scan should be checkable against that scan: laid onto it,
 and coloured by how far it stands off.
 
 ## The problem
 
-- **A refusal does not say what is there.** A click on a stepped bore, a
-  lip, or two faces meeting at a few degrees grows one region over both and
-  reports a fit with a large `rms_mm`, or refuses with a distance. Nothing
-  says "two cylinders, R4.68 and R5.18".
 - **No torus.** `fit_primitive` cannot fit a round or a ring, and mesh
   recognition leaves the corner where two fillets meet as facets
   (docs/interchange/README.md#not-done).
@@ -28,22 +25,7 @@ and coloured by how far it stands off.
 
 ## The shape of the fix
 
-### 1. A fit that says what it found
-
-- **Two surfaces.** When the fit's `rms_mm` is over the tolerance, the
-  region is split in two by distance to two models of the asked kind (from
-  several starts) and each refitted. The split is kept only if both hold a
-  real share of the region, they stand further apart than their scatter, and
-  one smooth surface (a quadric for planes; a radius varying evenly along
-  the axis for cylinders) does not explain the region as well. The call is
-  then refused naming both: "two cylinders here: R4.68 mm and R5.18 mm,
-  stepping at 12.4 mm along the axis; click one, or give `radius_mm`". A
-  `from_fit` datum fails with the same sentence.
-- **A plane on a crown.** A plane whose region's normals spread past 10°, or
-  whose region covers under 15% of its own bounding rectangle, is a strip
-  along the top of a round. It is refused naming the cylinder that fits.
-
-### 2. A torus
+### 1. A torus
 
 `kind: "torus"` in `mesh::Fit` and `fit_primitive`: every normal of a torus
 passes through its spine circle at the tube's radius. For a candidate tube
@@ -61,7 +43,7 @@ as a region kind, rebuilt on a `Geom_ToroidalSurface`, with the same three
 checks and demotion as the other kinds. The fillet-corner line leaves
 "Not done".
 
-### 3. Laying a scan onto a body
+### 2. Laying a scan onto a body
 
 `align_import {mode: "best_fit", onto, …}` moves an Import's placement so its
 mesh lies on `onto`: a body of the part (B-Rep, by its tessellation, or
@@ -88,7 +70,7 @@ another mesh body).
 A datum's seed is a world point, so a re-scan laid onto the old scan's body
 by this keeps its datums.
 
-### 4. How far a body is from the scan
+### 3. How far a body is from the scan
 
 `compare_scan {scan, body, tolerance_mm?}` (inspection; changes nothing).
 `scan` is a mesh body, `body` any body.
@@ -129,11 +111,10 @@ where they compare a body with its mesh.
 
 Each lands on its own with the suites green.
 
-- **B.** Two surfaces and the crown (§1).
-- **C.** The torus (§2), in `fit_primitive` and the datums, then in
+- **C.** The torus (§1), in `fit_primitive` and the datums, then in
   recognition.
-- **D.** Best fit (§3).
-- **E.** Deviation (§4): the RPC, then the picture and the tool.
+- **D.** Best fit (§2).
+- **E.** Deviation (§3): the RPC, then the picture and the tool.
 
 ## Not in this plan
 
@@ -146,8 +127,7 @@ sketch: [section-sketch-relations.md](section-sketch-relations.md).
 ## Files
 
 - `src/core/mesh/Grow.cpp`, `Fit.{h,cpp}`, `Segment.{h,cpp}`; new
-  `src/core/mesh/Split.{h,cpp}` (two surfaces), `Register.{h,cpp}` (ICP),
-  `Deviation.{h,cpp}`
+  `src/core/mesh/Register.{h,cpp}` (ICP), `Deviation.{h,cpp}`
 - `src/core/MeshFit.{h,cpp}`, the datum features' `fit`, `FitReport`
 - `src/core/ImportAlign.{h,cpp}`, `src/core/mesh/Align.{h,cpp}`
 - `src/cad/MeshRebuild.cpp` (the torus)
@@ -165,9 +145,6 @@ sketch: [section-sketch-relations.md](section-sketch-relations.md).
 Every fixture is tilted off the axes, so a fit that only works axis-aligned
 cannot pass, and every number is checked against the generator's.
 
-- **Two surfaces.** A stepped bore (R4.68 / R5.18) and a 0.3 mm step
-  between two planes are refused naming both sizes; a single tapered bore
-  and a gently crowned plate are not split.
 - **The torus.** A scanned ring and a concave round between two faces:
   both radii within the noise, `concave` right. A faceted CAD part with
   fillets meeting at a corner is recognised with a toroidal face and passes
@@ -184,9 +161,7 @@ cannot pass, and every number is checked against the generator's.
   scan of half the part gives `no_scan` near a half. A scan against the
   body it was sampled from reads `within` near 1.
 - **Cost** (CPU time, `[slow]`): best fit of a 500k-triangle scan and its
-  deviation each have a stated budget, set from the first measurement; the
-  two-surface split keeps the region's cost check
-  (`tests/test_mesh_fit_scan.cpp`) within twice the old growth.
+  deviation each have a stated budget, set from the first measurement.
 - **Through the pipeline:** a smoke that imports a scan, lays it on a body,
   fits its datums, compares, and reads the same numbers after save and
   reopen; `refused_calls_smoke` covers each new refusal changing nothing.

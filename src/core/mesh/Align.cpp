@@ -64,7 +64,12 @@ PlaneRegion GrowPlane(const TriMesh& m, uint32_t seed, double toleranceMm) {
     return r;
   // The region fit_primitive grows for a plane: a disk round the seed
   // fitted robustly, grown under it and refitted (GrowFrom).
-  const Region grown = GrowFrom(m, seed, Kind::Plane, toleranceMm);
+  // Not judged (two surfaces, a crown): a floor is the plane the scan
+  // stands on, whatever else it is.
+  GrowOptions options;
+  options.judge = false;
+  const Region grown =
+      GrowFrom(m, seed, Kind::Plane, toleranceMm, nullptr, options);
   if (grown.fit.ok) {
     r.fit = grown.fit;
     r.triangles = grown.triangles;

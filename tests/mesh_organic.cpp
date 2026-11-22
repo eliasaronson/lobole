@@ -726,6 +726,107 @@ Arc ScannedArc(double radius, double arcDeg, double length, double spacing,
   return a;
 }
 
+glm::dvec3 Bore::At(double h, double turnDeg) const {
+  const glm::dvec3 ex =
+      glm::normalize(glm::cross(glm::dvec3(0.0, 0.0, 1.0), axis));
+  const glm::dvec3 ey = glm::cross(axis, ex);
+  const double th = turnDeg * kPi / 180.0;
+  return base + axis * h +
+         (ex * std::cos(th) + ey * std::sin(th)) * radiusAt(h);
+}
+
+Bore ScannedBore(std::function<double(double)> radiusAt, double length,
+                 double spacing, double noise) {
+  Bore b;
+  b.radiusAt = std::move(radiusAt);
+  b.length = length;
+  b.noise = noise;
+  b.axis = glm::normalize(glm::dvec3(0.25, 1.0, -0.3));
+  b.base = {-4.0, 6.0, 2.5};
+  const glm::dvec3 ex =
+      glm::normalize(glm::cross(glm::dvec3(0.0, 0.0, 1.0), b.axis));
+  const glm::dvec3 ey = glm::cross(b.axis, ex);
+  double widest = 0.0;
+  const int nv = std::max(2, int(std::lround(length / spacing)));
+  for (int j = 0; j <= nv; j++)
+    widest = std::max(widest, b.radiusAt(length * j / nv));
+  const int nu = std::max(8, int(std::lround(2.0 * kPi * widest / spacing)));
+  mesh::TriMesh m;
+  uint64_t key = 0xb0e;
+  for (int j = 0; j <= nv; j++) {
+    const double h = length * j / nv;
+    const double r = b.radiusAt(h);
+    for (int i = 0; i < nu; i++) {
+      const double th = 2.0 * kPi * i / nu;
+      const glm::dvec3 radial = ex * std::cos(th) + ey * std::sin(th);
+      m.positions.push_back(b.base + b.axis * h +
+                            radial * (r + noise * Noise(key++)));
+    }
+  }
+  const auto id = [&](int i, int j) { return uint32_t(j * nu + (i % nu)); };
+  for (int j = 0; j < nv; j++)
+    for (int i = 0; i < nu; i++) {
+      // (turn, along) is right-handed with the outward radial: wound the
+      // other way, the triangles face the axis.
+      m.triangles.push_back({id(i, j), id(i + 1, j + 1), id(i + 1, j)});
+      m.triangles.push_back({id(i, j), id(i, j + 1), id(i + 1, j + 1)});
+    }
+  mesh::BuildAdjacency(m);
+  m.quantum = mesh::Float32Quantum(m.positions);
+  Organic& o = b.organic;
+  o.name = "bore";
+  m.Bounds(o.lo, o.hi);
+  o.mesh = std::move(m);
+  o.boundaryLoops = 2;
+  return b;
+}
+
+glm::dvec3 Sheet::ToWorld(const glm::dvec3& local) const {
+  return origin + turn * local;
+}
+
+glm::dvec3 Sheet::Normal() const { return turn * glm::dvec3(0.0, 0.0, 1.0); }
+
+glm::dvec3 Sheet::At(double x, double y) const {
+  return ToWorld({x, y, heightAt(x, y)});
+}
+
+Sheet ScannedSheet(std::function<double(double, double)> heightAt, double width,
+                   double depth, double spacing, double noise) {
+  Sheet s;
+  s.heightAt = std::move(heightAt);
+  s.width = width;
+  s.depth = depth;
+  s.noise = noise;
+  s.turn = Turn({-0.3, 0.8, 0.45}, 0.52);
+  s.origin = {5.0, -3.0, 8.0};
+  const int nx = std::max(2, int(std::lround(width / spacing)));
+  const int ny = std::max(2, int(std::lround(depth / spacing)));
+  mesh::TriMesh m;
+  uint64_t key = 0x5ee7;
+  for (int j = 0; j <= ny; j++)
+    for (int i = 0; i <= nx; i++) {
+      const double x = width * i / nx, y = depth * j / ny;
+      m.positions.push_back(
+          s.ToWorld({x, y, s.heightAt(x, y) + noise * Noise(key++)}));
+    }
+  const auto id = [&](int i, int j) { return uint32_t(j * (nx + 1) + i); };
+  for (int j = 0; j < ny; j++)
+    for (int i = 0; i < nx; i++) {
+      // Counter-clockwise seen from +z: facing up.
+      m.triangles.push_back({id(i, j), id(i + 1, j), id(i + 1, j + 1)});
+      m.triangles.push_back({id(i, j), id(i + 1, j + 1), id(i, j + 1)});
+    }
+  mesh::BuildAdjacency(m);
+  m.quantum = mesh::Float32Quantum(m.positions);
+  Organic& o = s.organic;
+  o.name = "sheet";
+  m.Bounds(o.lo, o.hi);
+  o.mesh = std::move(m);
+  o.boundaryLoops = 1;
+  return s;
+}
+
 Organic Torus(size_t triangles) {
   const double R = 30.0, r = 10.0;
   const int nv = std::max(3, int(std::lround(std::sqrt(triangles / 6.0))));

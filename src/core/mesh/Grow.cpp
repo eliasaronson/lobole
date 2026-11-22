@@ -6,6 +6,8 @@
 
 #include "core/mesh/Segment.h"
 
+#include "core/mesh/Split.h"
+
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -213,7 +215,7 @@ Region Settle(const TriMesh& m, std::vector<uint32_t> region, Kind kind,
               double tol, FitResult fit, double side,
               const glm::dvec3& seedCentre, const glm::dvec3& seedNormal,
               const GrowOptions& opt, std::vector<uint8_t>& stamp,
-              std::string* why, std::vector<uint32_t>* covered) {
+              std::string* why, std::vector<uint32_t>* covered, bool judge) {
   Region r;
   r.fit.kind = kind;
   const FitHints& hints = opt.hints;
@@ -295,6 +297,50 @@ Region Settle(const TriMesh& m, std::vector<uint32_t> region, Kind kind,
   r.sigma = used == 0 ? 0.0 : std::sqrt(usedSum / double(used));
   r.residualLo = used == 0 ? 0.0 : lo;
   r.residualHi = used == 0 ? 0.0 : hi;
+  // 6. Two surfaces the one fit averages are refused naming both, unless
+  // a hint picks one of them out.
+  if (judge) {
+    fit.kind = kind;
+    const TwoSurfaces two =
+        SplitTwo(m, region, fit, opt.noiseMm > 0.0 ? opt.noiseMm : tol);
+    if (two.two) {
+      if (hints.outside || hints.radiusMin || hints.radiusMax || hints.axis) {
+        // The one the hints describe, from its triangle nearest the seed.
+        const std::vector<uint32_t>* meets = nullptr;
+        int meeting = 0;
+        uint32_t nearest = 0;
+        for (const auto* tris : {&two.trianglesA, &two.trianglesB}) {
+          if (tris->empty())
+            continue;
+          uint32_t t0 = tris->front();
+          double d0 = std::numeric_limits<double>::max();
+          for (uint32_t t : *tris)
+            if (const double d = glm::length(Centre(m, t) - seedCentre);
+                d < d0) {
+              d0 = d;
+              t0 = t;
+            }
+          const FitResult& f = tris == &two.trianglesA ? two.a : two.b;
+          if (hints.Miss(f, Centre(m, t0), UnitNormal(m, t0)).empty()) {
+            meeting++;
+            meets = tris;
+            nearest = t0;
+          }
+        }
+        if (meeting == 1) {
+          GrowOptions inner = opt;
+          inner.judge = false;
+          Region one = FitTriangles(m, *meets, nearest, kind, tol, why, inner);
+          if (!one.fit.ok && covered != nullptr)
+            *covered = region;
+          return one;
+        }
+      }
+      Region refused = Failed(kind, why, covered, two.Describe(), &region);
+      refused.twoSurfaces = true;
+      return refused;
+    }
+  }
   if (kind != Kind::Plane) {
     std::vector<glm::dvec3> pts;
     pts.reserve(verts.size());
@@ -674,8 +720,68 @@ Region GrowFrom(const TriMesh& m, uint32_t seed, Kind kind, double tol,
       in[t] = 0;
   }
 
-  return Settle(m, std::move(region), kind, tol, fit, side, seedCentre,
-                seedNormal, opt, stamp, why, covered);
+  Region settled =
+      Settle(m, std::move(region), kind, tol, fit, side, seedCentre, seedNormal,
+             opt, stamp, why, covered, opt.judge);
+  if (!settled.fit.ok || kind != Kind::Plane || !opt.judge)
+    return settled;
+
+  // 6. A plane on the crown of a round: refused naming the round.
+  const double noise = opt.noiseMm > 0.0 ? opt.noiseMm : tol;
+  const PlaneBow bow =
+      BowOf(m, settled.triangles, settled.fit, settled.extent, settled.area);
+  if (!bow.Crown(settled.fit.rms > kSplitAbove * noise))
+    return settled;
+  char buf[160];
+  std::string msg = "the plane fitted here is a strip along the crown of a "
+                    "round: ";
+  if (bow.spreadRad > kCrownSpreadDeg * M_PI / 180.0) {
+    std::snprintf(buf, sizeof buf,
+                  "its normals turn %.1f deg across it (a flat's stay "
+                  "within %.0f)",
+                  bow.spreadRad * 180.0 / M_PI, kCrownSpreadDeg);
+  } else {
+    std::snprintf(buf, sizeof buf,
+                  "it covers %.0f%% of its bounding rectangle (a flat face "
+                  "at least %.0f%%) and bows past the noise, rms %.3g mm",
+                  100.0 * bow.cover, 100.0 * kCrownCover, settled.fit.rms);
+  }
+  msg += buf;
+  // What does fit there: the round's cylinder, or a sphere. The plane's
+  // own hints (a normal) are not a round's; the box is.
+  GrowOptions round = opt;
+  round.hints = FitHints{};
+  round.hints.withinLo = hints.withinLo;
+  round.hints.withinHi = hints.withinHi;
+  std::string roundWhy;
+  const Region cyl = GrowFrom(m, seed, Kind::Cylinder, tol, &roundWhy, round);
+  if (cyl.fit.ok) {
+    glm::dvec3 a = cyl.fit.axis;
+    int big = 0;
+    for (int i = 1; i < 3; i++)
+      if (std::abs(a[i]) > std::abs(a[big]))
+        big = i;
+    if (a[big] < 0.0)
+      a = -a;
+    std::snprintf(buf, sizeof buf,
+                  "; a cylinder fits there: R%.4g mm, axis [%.4g, %.4g, "
+                  "%.4g] through [%.4g, %.4g, %.4g] -- fit kind cylinder",
+                  cyl.fit.radius, a.x, a.y, a.z, cyl.fit.origin.x,
+                  cyl.fit.origin.y, cyl.fit.origin.z);
+    msg += buf;
+  } else if (const Region sph =
+                 GrowFrom(m, seed, Kind::Sphere, tol, nullptr, round);
+             sph.fit.ok) {
+    std::snprintf(buf, sizeof buf,
+                  "; a sphere fits there: R%.4g mm about [%.4g, %.4g, "
+                  "%.4g] -- fit kind sphere",
+                  sph.fit.radius, sph.fit.origin.x, sph.fit.origin.y,
+                  sph.fit.origin.z);
+    msg += buf;
+  } else {
+    msg += "; no cylinder or sphere fits there either (" + roundWhy + ")";
+  }
+  return fail(msg, &settled.triangles);
 }
 
 Region FitTriangles(const TriMesh& m, std::vector<uint32_t> triangles,
@@ -711,7 +817,7 @@ Region FitTriangles(const TriMesh& m, std::vector<uint32_t> triangles,
   const double side =
       glm::dot(m.AreaNormal(seed), fit.Normal(seedCentre)) < 0.0 ? -1.0 : 1.0;
   return Settle(m, std::move(triangles), kind, tol, fit, side, seedCentre,
-                seedNormal, opt, stamp, why, nullptr);
+                seedNormal, opt, stamp, why, nullptr, /*judge=*/false);
 }
 
 } // namespace mesh

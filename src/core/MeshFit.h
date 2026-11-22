@@ -76,6 +76,10 @@ struct Candidate {
   double areaMm2 = 0.0;
   double rmsMm = 0.0;
   std::string why; // when not ok
+  // Refused as two surfaces (mesh::SplitTwo), over this much area: auto
+  // does not take another kind over the same triangles.
+  bool twoSurfaces = false;
+  double twoAreaMm2 = 0.0;
 };
 
 struct Result {

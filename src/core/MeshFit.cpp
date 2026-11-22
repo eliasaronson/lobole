@@ -328,14 +328,22 @@ bool Fit(const std::vector<const Body*>& bodies, const Request& r, Result& out,
   mesh::GrowOptions options;
   options.clipSigma = r.clipSigma;
   options.hints = r.hints;
+  // Whether a region is two surfaces is judged against the scan's own
+  // noise, not a tolerance given wider to take more of it.
+  options.noiseMm = r.toleranceMm ? mesh::ScanTolerance(m) : out.toleranceMm;
   std::vector<mesh::Region> grown;
   std::vector<size_t> seedsTried;
+  // Per kind, the triangles it was refused as two surfaces over.
+  std::vector<std::vector<uint32_t>> twoOver;
   for (mesh::Kind k : kinds) {
     std::string why;
     mesh::Region g;
     std::vector<uint8_t> covered(seeds.size() > 1 ? m.triangles.size() : 0, 0);
     size_t attempts = 0;
     std::vector<glm::dvec3> triedFacing;
+    bool two = false;
+    double twoArea = 0.0;
+    std::vector<uint32_t> twoTris;
     for (uint32_t seed : seeds) {
       if (seeds.size() > 1 && covered[seed])
         continue;
@@ -359,8 +367,15 @@ bool Fit(const std::vector<const Body*>& bodies, const Request& r, Result& out,
                          &reached);
       if (g.fit.ok)
         break;
-      if (why.empty())
+      if (why.empty()) {
         why = thisWhy; // the nearest surface's reason
+        if (g.twoSurfaces) {
+          two = true;
+          twoTris = reached;
+          for (uint32_t t : reached)
+            twoArea += m.Area(t);
+        }
+      }
       if (seeds.size() == 1)
         break;
       triedFacing.push_back(facing);
@@ -383,6 +398,11 @@ bool Fit(const std::vector<const Body*>& bodies, const Request& r, Result& out,
     c.areaMm2 = g.area;
     c.rmsMm = g.fit.rms;
     c.why = why;
+    c.twoSurfaces = !g.fit.ok && two;
+    c.twoAreaMm2 = twoArea;
+    std::sort(twoTris.begin(), twoTris.end());
+    twoOver.push_back(c.twoSurfaces ? std::move(twoTris)
+                                    : std::vector<uint32_t>{});
     out.tried.push_back(c);
     grown.push_back(std::move(g));
   }
@@ -412,6 +432,28 @@ bool Fit(const std::vector<const Body*>& bodies, const Request& r, Result& out,
     if (pick < 0 || Simplicity(grown[i].fit.kind) <
                         Simplicity(grown[size_t(pick)].fit.kind))
       pick = static_cast<int>(i);
+  }
+  // Two surfaces found by one kind are what is there: a more general kind
+  // fitted over the same triangles averages them.
+  for (size_t i = 0; i < out.tried.size(); i++) {
+    const Candidate& c = out.tried[i];
+    if (!c.twoSurfaces)
+      continue;
+    // Over the same triangles: at least half the pick's area is in them.
+    bool same = pick < 0;
+    if (!same) {
+      const mesh::Region& p = grown[size_t(pick)];
+      double shared = 0.0;
+      for (uint32_t t : p.triangles)
+        if (std::binary_search(twoOver[i].begin(), twoOver[i].end(), t))
+          shared += m.Area(t);
+      same = shared >= 0.5 * p.area;
+    }
+    if (same) {
+      error = c.why + " (at point_mm " + Point(r.pointMm) + " on '" + out.body +
+              "', tolerance_mm " + Mm(out.toleranceMm) + ")";
+      return false;
+    }
   }
   if (pick < 0) {
     error = "no plane, sphere, cylinder or cone fits at point_mm " +

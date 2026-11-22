@@ -985,6 +985,10 @@ below refit, and what the Fit tool previews.
    triangles given rather than grown.
 6. A curved kind whose region is flat to the tolerance is refused, naming
    the plane: the radius it gave would be the noise's.
+7. **What one surface does not explain is said**
+   ([two surfaces](#two-surfaces)): a plane or cylinder region that is two
+   surfaces is refused naming both, and a plane along the crown of a round
+   naming the round.
 
 `kind` is `plane | cylinder | cone | sphere | auto`; any other is refused,
 naming them. `auto` grows each and keeps the one covering the most area,
@@ -1013,6 +1017,88 @@ because a sigma taken over what a cut kept is smaller than the noise.
 (`meshfit::kPartialArcDeg`): a partial arc is where a radius is least
 certain. And `tolerance_mm`, `triangles`, `area_mm2`, `body`,
 `seed_distance_mm`, and with hints `seeds_tried`.
+
+### Two surfaces
+
+A tolerance wide enough to take a step, a lip or two faces a few tenths
+apart grows one region over both, and one fit over them is neither: a
+bore stepping from R4.68 to R5.18 fits R4.93 to 0.25 mm, inside a
+0.6 mm tolerance. So the region is judged (`mesh::SplitTwo`,
+`src/core/mesh/Split.{h,cpp}`, run by `GrowFrom`; `GrowOptions::judge`,
+which `align_import`'s floor turns off):
+
+- **When**: a plane or cylinder whose `rms_mm` over the region is past a
+  third of the scan's own noise tolerance (`mesh::kSplitAbove`; that
+  tolerance is about six sigma of a vertex's noise, so this is twice the
+  noise's sigma) -- the scan's, not a `tolerance_mm` given wider, which
+  is what lets the region take both. A region the noise explains costs
+  nothing more.
+- **The split**: up to 4,096 of the region's vertices are put in two by
+  distance to two surfaces of the kind, from several starts (the
+  residual's sign, and the region cut across at its quartiles: along the
+  axis, or along both of a plane's principal directions), each refitted
+  and the points reassigned to the nearer until nothing moves; the start
+  with the least squared distance is kept, and each surface refitted over
+  its own points within three robust sigma (a shoulder's vertices belong
+  to neither).
+- **Kept only if** each holds at least 15% of the vertices
+  (`kSplitShare`), they stand more than four times the larger one's
+  robust sigma apart (`kSplitApart`; the median distance of each's points
+  from the other), and one smooth surface does not explain the region
+  within 1.5 times as well (`kSplitSmooth`): for planes a quadric of the
+  height over the fitted plane, for cylinders a radius varying evenly
+  along the axis (a line in the distance along it). A crowned plate and a
+  taper pass the first two and fail the third.
+- **Then refused, naming both**, the sentence a `from_fit` datum fails
+  with too: "two cylinders here: R4.68 mm and R5.18 mm, stepping at 12.4
+  mm along the axis [0.2326, 0.9315, -0.2796] from [-3.996, 5.999, 2.506];
+  click one, or give radius_mm" (the step where the fewest points of
+  either stand on the wrong side of a cut along the axis, measured from
+  the region's end, on the axis the two agree on -- the one fit across
+  both leans 0.85° on that bore; "side by side" when no such cut exists),
+  or "two planes here: 0.30 mm apart and 0.002 deg to each other, through
+  [..] and [..]; click one, or give within (a box round the one you
+  mean)" (`axis` for two planes more than a degree apart).
+- **A hint that meets one of them alone** (`side`, `radius_mm`, `axis`)
+  says which was meant: that one's triangles are fitted (`FitTriangles`),
+  and the fit is its. `within` needs no split: it keeps the region to one.
+- **Under `auto`** a kind refused as two surfaces stops auto taking a
+  more general kind over the same triangles (a cone fits a stepped bore
+  as well as anything does).
+
+**A plane on a crown.** A plane whose normals turn more than 10° across
+its region (`kCrownSpreadDeg`, read from the quadric through its
+vertices, so a scan's noisy facets do not count), or that covers under
+15% of its own bounding rectangle (`kCrownCover`) while its rms is past
+the noise as above, is a strip along the top of a round, the width the
+tolerance lets a plane reach across it. It is refused naming what fits
+there, grown from the same seed: "the plane fitted here is a strip along
+the crown of a round: its normals turn 22.7 deg across it (a flat's stay
+within 10); a cylinder fits there: R12 mm, axis [..] through [..] -- fit
+kind cylinder" (or a sphere, or neither, with why). Under `auto` the plane
+candidate fails with that and the round is taken. The second test needs
+the bow as well because a washer's face is a flat ring that covers less
+than that of its square.
+
+How it is checked (`tests/test_mesh_fit_scan.cpp`, the fixtures tilted
+off the axes): a bore of R4.68 for 12.4 mm and R5.18 after, ±0.05 mm of
+noise, the step joined by the row of triangles across it: at the scan's
+own tolerance a click fits the cylinder clicked (R4.68); at 0.6 mm it is
+refused naming both, the radii within 0.01 mm and the step within 0.2 mm
+of the generated ones (apart 13 times their scatter, the even radius 4.5
+times the two cylinders' rms), and `radius_mm [5, 5.4]` fits R5.18; a 40
+x 30 plate with a 0.3 mm step: refused, 0.297 mm apart, each plane
+through its own part (apart 7.8 times, the quadric 2.7); a bore tapering
+0.4 mm over 25 and a plate crowned 0.4 mm over 40 (its normals turning
+4.6°) are examined and not split -- both pass the share and the
+apartness (4.5 and 8 times their scatter) and fail only the smooth
+surface, which explains them better than the two do (0.64 and 0.69 of
+their rms); a plane
+asked of the post's side is refused naming its R12 cylinder, its top
+still a plane. `tests/test_datum_from_fit.cpp`: a from_fit DatumAxis on
+the stepped bore fails with the sentence. `refused_calls_smoke.py`: a
+stepped shaft's two cylinders (as a cylinder and under auto), the 0.3 mm
+step on its top and a plane on its side, each refused changing nothing.
 
 ### Hints
 
@@ -1074,7 +1160,9 @@ fits capped at 65,536 points and the hypotheses scored on 4,096. A noisy
 sphere grown whole takes 12 ms at 10k triangles, 0.24 s at 300k and 1.3 s
 at 2M (hidden `[fit-cost]`); against the growth by distance alone that
 came before the band, the peel and the clip, measured in the same run
-(`[slow]`, CPU time, held to twice): 1.1 times at 300k and 1.2 at 2M. The
+(`[slow]`, CPU time, held to twice): 1.2 times at 300k and at 2M. Where
+the [split](#two-surfaces) runs, a stepped bore of 240k triangles grown
+over both its cylinders and refused: 1.3 times. The
 noise tolerance is a stride through at most 200,000 edges, under 20 ms at
 any size. A datum refits this on every regeneration that reaches it.
 

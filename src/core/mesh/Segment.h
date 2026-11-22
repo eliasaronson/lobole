@@ -67,6 +67,8 @@ struct Region {
   double length = 0.0;    // a cylinder's, along its axis (mm)
   double arc = 0.0;       // a cylinder's about its axis, a sphere's cap (rad)
   glm::dvec2 extent{0.0}; // a plane's, along its principal directions (mm)
+  // A failed GrowFrom's: it was refused as two surfaces (mesh::SplitTwo).
+  bool twoSurfaces = false;
 };
 
 // A ring of flats whose corners fit a circle but that turns too far a facet
@@ -154,6 +156,14 @@ struct GrowOptions {
   // it: 1, 2 or 3; 0 keeps every vertex ("all").
   int clipSigma = 3;
   FitHints hints;
+  // Say what the region is when one surface does not explain it
+  // (docs/modeling/README.md#two-surfaces): refuse two surfaces of the
+  // kind (mesh::SplitTwo), and a plane on the crown of a round, naming
+  // what is there.
+  bool judge = true;
+  // The scan's noise tolerance (ScanTolerance) the split's trigger is a
+  // share of; 0 takes the tolerance the region grows by.
+  double noiseMm = 0.0;
 };
 
 // The surface of `kind` that triangle `seed` (adjacency built) lies on,
@@ -183,6 +193,11 @@ struct GrowOptions {
 // carries `why`; `covered`, when given, gets the region it grew (none when
 // no fit was found on the seed's disk, which may reach past its surface),
 // so a caller trying seeds beside it can skip the surface it tried.
+//  6. judged (`options.judge`): a plane or cylinder region whose rms is past
+//     the noise is split in two (SplitTwo) and refused naming both when it
+//     is two surfaces -- unless a hint (side, radius_mm, axis) meets one of
+//     them alone, which is then fitted; a plane that is a strip along the
+//     crown of a round (BowOf) is refused naming the cylinder that fits.
 Region GrowFrom(const TriMesh& mesh, uint32_t seed, Kind kind,
                 double toleranceMm, std::string* why = nullptr,
                 const GrowOptions& options = {},
@@ -190,7 +205,9 @@ Region GrowFrom(const TriMesh& mesh, uint32_t seed, Kind kind,
 
 // The fit of `kind` over `triangles` as given (adjacency built), through
 // triangle `seed`: robust, then clipped and refused as GrowFrom's step 5,
-// with the same figures. For a region chosen some other way than growing.
+// with the same figures. For a region chosen some other way than growing:
+// it is not judged (step 6), the robust fit and the clip being what keeps
+// the triangles given beside the surface out of it.
 Region FitTriangles(const TriMesh& mesh, std::vector<uint32_t> triangles,
                     uint32_t seed, Kind kind, double toleranceMm,
                     std::string* why = nullptr,

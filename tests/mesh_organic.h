@@ -19,6 +19,7 @@
 #include <glm/glm.hpp>
 
 #include <filesystem>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -124,6 +125,43 @@ struct Arc {
 };
 Arc ScannedArc(double radius, double arcDeg, double length, double spacing,
                double noise, bool bore = false);
+
+// A scanned bore whose radius is `radiusAt(h)` at `h` mm along its axis,
+// for telling one surface from two (docs/modeling/README.md#two-surfaces):
+// a stepped bore, a taper. The whole turn, `length` long, open at both
+// ends and facing its axis, a grid of about `spacing` (a step between two
+// grid rows is joined by the row of triangles across it, as a scan joins
+// what it cannot resolve), tilted off the axes and moved off the origin;
+// every vertex moved radially by a noise of at most `noise`.
+struct Bore {
+  Organic organic;
+  glm::dvec3 base{0.0}, axis{0.0, 0.0, 1.0}; // axis: largest component +
+  double length = 0.0, noise = 0.0;
+  std::function<double(double)> radiusAt;
+  // The point at `h` along the axis and `turnDeg` round it, on the bore.
+  [[nodiscard]] glm::dvec3 At(double h, double turnDeg) const;
+};
+Bore ScannedBore(std::function<double(double)> radiusAt, double length,
+                 double spacing, double noise);
+
+// A scanned sheet: a height field `heightAt(x, y)` over [0, width] x [0,
+// depth] facing +z in its own frame, a grid of about `spacing`, turned off
+// the axes and moved off the origin; every vertex moved along the sheet's
+// normal by a noise of at most `noise`. Open: a stepped or crowned plate's
+// top.
+struct Sheet {
+  Organic organic;
+  glm::dmat3 turn{1.0};
+  glm::dvec3 origin{0.0};
+  double width = 0.0, depth = 0.0, noise = 0.0;
+  std::function<double(double, double)> heightAt;
+  [[nodiscard]] glm::dvec3 ToWorld(const glm::dvec3& local) const;
+  [[nodiscard]] glm::dvec3 Normal() const; // the sheet's +z, world
+  // The surface over (x, y), world.
+  [[nodiscard]] glm::dvec3 At(double x, double y) const;
+};
+Sheet ScannedSheet(std::function<double(double, double)> heightAt, double width,
+                   double depth, double spacing, double noise);
 
 // A triangle soup with what a bad file has, and how many of each.
 struct DirtySoup {

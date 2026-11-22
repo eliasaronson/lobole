@@ -551,6 +551,7 @@ set(core_sources
     src/core/mesh/Fit.cpp
     src/core/mesh/Segment.cpp
     src/core/mesh/Grow.cpp
+    src/core/mesh/Split.cpp
     src/core/mesh/MeshBvh.cpp
     src/core/mesh/Slice.cpp
     src/core/io/RecognitionJson.cpp

@@ -221,6 +221,31 @@ TEST_CASE("A datum from_fit says why it cannot fit", "[datum][fit]") {
   }
 }
 
+TEST_CASE("A datum from_fit over two surfaces fails naming both",
+          "[datum][fit]") {
+  // A bore stepping from R4.68 to R5.18 at 12.4 mm, fitted at a tolerance
+  // that takes both (docs/modeling/README.md#two-surfaces): the datum fails
+  // with fit_primitive's sentence, and its output is the default.
+  const fixtures::Bore b = fixtures::ScannedBore(
+      [](double h) { return h < 12.4 ? 4.68 : 5.18; }, 25.0, 0.25, 0.05);
+  const fs::path stl = fixtures::WriteStl(b.organic.mesh, "two-surfaces");
+  Document doc;
+  doc.AddFeature(ScanImport(stl));
+  const uint64_t importId = doc.GetFeature(0)->GetId();
+  auto axis =
+      std::make_unique<DatumAxisFeature>("Bore", DatumAxisKind::FromFit);
+  axis->fit = {importId, b.At(6.0, 30.0), mesh::Kind::Cylinder, 0.6};
+  doc.AddFeature(std::move(axis));
+  doc.Regenerate();
+  const auto& a = *dynamic_cast<const DatumAxisFeature*>(doc.GetFeature(1));
+  CHECK_THAT(a.GetError(),
+             ContainsSubstring("two cylinders here: R4.68 mm and R5.18 mm, "
+                               "stepping at 12.4 mm along the axis"));
+  CHECK(a.FitReport().is_null());
+  CHECK(a.Direction() == glm::dvec3(1.0, 0.0, 0.0));
+  fs::remove(stl);
+}
+
 TEST_CASE("A sketch on a fitted plane stands on the scan's top",
           "[datum][fit][sketch]") {
   ScanPart s;

@@ -14,6 +14,7 @@
 #include "core/mesh/Fit.h"
 #include "core/mesh/MeshBvh.h"
 #include "core/mesh/Segment.h"
+#include "core/mesh/Split.h"
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
@@ -626,6 +627,230 @@ TEST_CASE("The used points and the figures they give", "[mesh][fit]") {
   }
 }
 
+// ---- two surfaces, and a plane on a crown
+// (docs/modeling/README.md#two-surfaces) --------------------------------
+
+namespace {
+
+// A bore of R4.68 for its first 12.4 mm and R5.18 after, 25 long: a step a
+// scan joins with the row of triangles across it.
+constexpr double kStepAt = 12.4, kNarrow = 4.68, kWide = 5.18;
+
+const fixtures::Bore& SteppedBore() {
+  static const fixtures::Bore b = fixtures::ScannedBore(
+      [](double h) { return h < kStepAt ? kNarrow : kWide; }, 25.0, 0.25, 0.05);
+  return b;
+}
+
+// A 40 x 30 plate with a 0.3 mm step across it 18 mm in.
+constexpr double kPlateStep = 0.3, kPlateStepAt = 18.0;
+
+const fixtures::Sheet& SteppedPlate() {
+  static const fixtures::Sheet s = fixtures::ScannedSheet(
+      [](double x, double) { return x < kPlateStepAt ? 0.0 : kPlateStep; },
+      40.0, 30.0, 0.25, 0.05);
+  return s;
+}
+
+// The region a kind grows over with the split and the crown left out, and
+// what the split makes of it.
+mesh::TwoSurfaces SplitOf(const mesh::TriMesh& m, uint32_t seed,
+                          mesh::Kind kind, double tol) {
+  mesh::GrowOptions o;
+  o.judge = false;
+  std::string why;
+  const mesh::Region r = mesh::GrowFrom(m, seed, kind, tol, &why, o);
+  INFO(why);
+  REQUIRE(r.fit.ok);
+  return mesh::SplitTwo(m, r.triangles, r.fit, mesh::ScanTolerance(m));
+}
+
+void Print(const char* what, const mesh::TwoSurfaces& t) {
+  std::printf("%s: examined %d two %d, shares %.2f/%.2f, apart %.4f vs "
+              "scatter %.4f (x%.1f, needs %.0f), two rms %.4f vs smooth "
+              "%.4f (x%.2f, needs %.1f)\n",
+              what, t.examined, t.two, t.shareA, t.shareB, t.apart, t.scatter,
+              t.scatter > 0.0 ? t.apart / t.scatter : 0.0, mesh::kSplitApart,
+              t.twoRms, t.smoothRms,
+              t.twoRms > 0.0 ? t.smoothRms / t.twoRms : 0.0,
+              mesh::kSplitSmooth);
+}
+
+} // namespace
+
+TEST_CASE("A stepped bore one fit would average is refused, naming both",
+          "[mesh][fit]") {
+  const fixtures::Bore& b = SteppedBore();
+  const mesh::TriMesh& m = b.organic.mesh;
+  const uint32_t seed = SeedAt(m, b.At(6.0, 30.0));
+  SECTION("at the scan's own tolerance the click is one of them") {
+    std::string why;
+    const mesh::Region r = mesh::GrowFrom(m, seed, mesh::Kind::Cylinder,
+                                          mesh::ScanTolerance(m), &why);
+    INFO(why);
+    REQUIRE(r.fit.ok);
+    CHECK_THAT(r.fit.radius, WithinAbs(kNarrow, 0.01));
+  }
+  // A tolerance wide enough to take both: the fit across them is neither.
+  const double tol = 0.6;
+  SECTION("refused") {
+    std::string why;
+    mesh::GrowOptions o;
+    o.noiseMm = mesh::ScanTolerance(m);
+    const mesh::Region r =
+        mesh::GrowFrom(m, seed, mesh::Kind::Cylinder, tol, &why, o);
+    std::printf("stepped bore: %s\n", why.c_str());
+    CHECK_FALSE(r.fit.ok);
+    CHECK(r.twoSurfaces);
+    CHECK_THAT(why, ContainsSubstring("two cylinders here: R4.68 mm and "
+                                      "R5.18 mm, stepping at 12.4 mm along "
+                                      "the axis"));
+    CHECK_THAT(why, ContainsSubstring("click one, or give radius_mm"));
+  }
+  SECTION("the numbers, against the generator's") {
+    const mesh::TwoSurfaces t = SplitOf(m, seed, mesh::Kind::Cylinder, tol);
+    Print("stepped bore", t);
+    REQUIRE(t.two);
+    CHECK_THAT(t.a.radius, WithinAbs(kNarrow, 0.01));
+    CHECK_THAT(t.b.radius, WithinAbs(kWide, 0.01));
+    CHECK(LineAngleDeg(t.a.axis, b.axis) < 0.1);
+    CHECK(FromLine(b.base, t.a.origin, t.a.axis) < 0.05);
+    REQUIRE(t.steps);
+    // The step lies between the grid rows either side of 12.4.
+    const glm::dvec3 at = t.from + t.stepAt * t.axis;
+    CHECK_THAT(glm::dot(at - b.base, b.axis), WithinAbs(kStepAt, 0.2));
+    CHECK(glm::dot(t.axis, b.axis) > 0.999);
+  }
+  SECTION("radius_mm picks one out") {
+    mesh::GrowOptions o;
+    o.noiseMm = mesh::ScanTolerance(m);
+    o.hints.radiusMin = 5.0;
+    o.hints.radiusMax = 5.4;
+    std::string why;
+    const mesh::Region r =
+        mesh::GrowFrom(m, seed, mesh::Kind::Cylinder, tol, &why, o);
+    INFO(why);
+    REQUIRE(r.fit.ok);
+    CHECK_THAT(r.fit.radius, WithinAbs(kWide, 0.01));
+    CHECK(LineAngleDeg(r.fit.axis, b.axis) < 0.1);
+  }
+}
+
+TEST_CASE("A 0.3 mm step between two planes is refused, naming both",
+          "[mesh][fit]") {
+  const fixtures::Sheet& s = SteppedPlate();
+  const mesh::TriMesh& m = s.organic.mesh;
+  const uint32_t seed = SeedAt(m, s.At(8.0, 15.0));
+  SECTION("at the scan's own tolerance the click is one of them") {
+    std::string why;
+    const mesh::Region r = mesh::GrowFrom(m, seed, mesh::Kind::Plane,
+                                          mesh::ScanTolerance(m), &why);
+    INFO(why);
+    REQUIRE(r.fit.ok);
+    CHECK(std::abs(r.fit.Distance(s.At(8.0, 15.0))) < 0.01);
+    CHECK(std::abs(r.fit.Distance(s.At(30.0, 15.0)) - kPlateStep) < 0.01);
+  }
+  const double tol = 0.6;
+  SECTION("refused") {
+    std::string why;
+    mesh::GrowOptions o;
+    o.noiseMm = mesh::ScanTolerance(m);
+    const mesh::Region r =
+        mesh::GrowFrom(m, seed, mesh::Kind::Plane, tol, &why, o);
+    std::printf("stepped plate: %s\n", why.c_str());
+    CHECK_FALSE(r.fit.ok);
+    CHECK_THAT(why, ContainsSubstring("two planes here: 0.30 mm apart and "
+                                      "0.0"));
+    CHECK_THAT(why, ContainsSubstring("click one, or give within"));
+  }
+  SECTION("the numbers, against the generator's") {
+    const mesh::TwoSurfaces t = SplitOf(m, seed, mesh::Kind::Plane, tol);
+    Print("stepped plate", t);
+    REQUIRE(t.two);
+    CHECK_THAT(t.offset, WithinAbs(kPlateStep, 0.005));
+    CHECK(t.angle * 180.0 / kPi < 0.05);
+    CHECK(LineAngleDeg(t.a.axis, s.Normal()) < 0.05);
+    // The lower through the plate's first part, the upper its second.
+    const glm::dvec3 lowPlane = s.ToWorld({0.0, 0.0, 0.0});
+    CHECK(std::abs(glm::dot(t.throughA - lowPlane, s.Normal())) < 0.01);
+    CHECK(std::abs(glm::dot(t.throughB - lowPlane, s.Normal()) - kPlateStep) <
+          0.01);
+  }
+}
+
+TEST_CASE("A tapered bore and a gently crowned plate are not split",
+          "[mesh][fit]") {
+  const double tol = 0.6;
+  SECTION("a taper") {
+    const fixtures::Bore b = fixtures::ScannedBore(
+        [](double h) { return 4.9 + 0.4 * h / 25.0; }, 25.0, 0.25, 0.05);
+    const mesh::TriMesh& m = b.organic.mesh;
+    const uint32_t seed = SeedAt(m, b.At(12.5, 30.0));
+    const mesh::TwoSurfaces t = SplitOf(m, seed, mesh::Kind::Cylinder, tol);
+    Print("taper", t);
+    CHECK(t.examined);
+    CHECK_FALSE(t.two);
+    // One radius varying evenly along the axis explains it better than
+    // two cylinders do.
+    CHECK(t.smoothRms < t.twoRms);
+    mesh::GrowOptions o;
+    o.noiseMm = mesh::ScanTolerance(m);
+    std::string why;
+    const mesh::Region r =
+        mesh::GrowFrom(m, seed, mesh::Kind::Cylinder, tol, &why, o);
+    INFO(why);
+    CHECK(r.fit.ok);
+  }
+  SECTION("a crowned plate") {
+    // 0.4 mm of crown over 40 mm: a turn of 4.6 deg edge to edge.
+    const fixtures::Sheet s = fixtures::ScannedSheet(
+        [](double x, double) {
+          const double u = (x - 20.0) / 20.0;
+          return 0.4 * (1.0 - u * u);
+        },
+        40.0, 30.0, 0.25, 0.05);
+    const mesh::TriMesh& m = s.organic.mesh;
+    const uint32_t seed = SeedAt(m, s.At(20.0, 15.0));
+    const mesh::TwoSurfaces t = SplitOf(m, seed, mesh::Kind::Plane, tol);
+    Print("crowned plate", t);
+    CHECK(t.examined);
+    CHECK_FALSE(t.two);
+    CHECK(t.smoothRms < t.twoRms);
+    mesh::GrowOptions o;
+    o.noiseMm = mesh::ScanTolerance(m);
+    std::string why;
+    const mesh::Region r =
+        mesh::GrowFrom(m, seed, mesh::Kind::Plane, tol, &why, o);
+    INFO(why);
+    REQUIRE(r.fit.ok);
+    const mesh::PlaneBow bow =
+        mesh::BowOf(m, r.triangles, r.fit, r.extent, r.area);
+    std::printf("crowned plate: normals turn %.2f deg (4.6), cover %.2f\n",
+                bow.spreadRad * 180.0 / kPi, bow.cover);
+    CHECK_THAT(bow.spreadRad * 180.0 / kPi, WithinAbs(4.58, 0.3));
+  }
+}
+
+TEST_CASE("A plane on the crown of a round is refused, naming the cylinder",
+          "[mesh][fit]") {
+  const fixtures::Post& post = Post();
+  const mesh::TriMesh& m = post.organic.mesh;
+  std::string why;
+  const mesh::Region r =
+      mesh::GrowFrom(m, SeedAt(m, post.onCylinder), mesh::Kind::Plane,
+                     mesh::ScanTolerance(m), &why);
+  std::printf("plane on the post's side: %s\n", why.c_str());
+  CHECK_FALSE(r.fit.ok);
+  CHECK_THAT(why, ContainsSubstring("strip along the crown of a round"));
+  CHECK_THAT(why, ContainsSubstring("a cylinder fits there: R12 mm"));
+  CHECK_THAT(why, ContainsSubstring("fit kind cylinder"));
+  // The post's top is a plane, and stays one.
+  std::string topWhy;
+  CHECK(mesh::GrowFrom(m, SeedAt(m, post.onTop), mesh::Kind::Plane,
+                       mesh::ScanTolerance(m), &topWhy)
+            .fit.ok);
+}
+
 // What the region and the clip cost against the growth by distance alone
 // that came before them, on the same machine in the same run: CPU time, a
 // COST check (docs/ui/testing.md#tests-that-time-things).
@@ -656,6 +881,35 @@ TEST_CASE("The region and the clip cost at most twice the old growth",
                 now.used);
     CHECK(nowS <= 2.0 * oldS);
     CHECK_THAT(now.fit.radius, WithinAbs(s.radius, 0.01));
+  }
+  // Where the split runs: a stepped bore of 240k triangles grown at a
+  // tolerance that takes both its cylinders, split and refused.
+  {
+    const fixtures::Bore b = fixtures::ScannedBore(
+        [](double h) { return h < 50.0 ? 30.0 : 30.5; }, 100.0, 0.4, 0.05);
+    const mesh::TriMesh& m = b.organic.mesh;
+    const uint32_t seed = SeedAt(m, b.At(25.0, 40.0));
+    const double tol = 0.6;
+    mesh::GrowOptions o;
+    o.noiseMm = mesh::ScanTolerance(m);
+    const auto cpu = [&](auto&& f) {
+      const std::clock_t t0 = std::clock();
+      f();
+      return double(std::clock() - t0) / CLOCKS_PER_SEC;
+    };
+    mesh::Region now, old;
+    std::string why;
+    const double oldS =
+        cpu([&] { old = LegacyGrowFrom(m, seed, mesh::Kind::Cylinder, tol); });
+    const double nowS = cpu([&] {
+      now = mesh::GrowFrom(m, seed, mesh::Kind::Cylinder, tol, &why, o);
+    });
+    REQUIRE(old.fit.ok);
+    std::printf("stepped bore %zu: region + split %.3f s CPU, the old "
+                "growth %.3f s (x%.2f): %s\n",
+                m.TriangleCount(), nowS, oldS, nowS / oldS, why.c_str());
+    CHECK(now.twoSurfaces);
+    CHECK(nowS <= 2.0 * oldS);
   }
 }
 

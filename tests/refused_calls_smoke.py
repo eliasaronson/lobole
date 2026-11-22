@@ -38,6 +38,7 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from smoke_app import launch  # noqa: E402
+from smoke_meshes import stepped_shaft  # noqa: E402
 from smoke_shapes import cylinder, mesh_sphere, sphere  # noqa: E402
 from smoke_world import (World, build_fixture, changed,  # noqa: E402
                          outside_baselines)
@@ -554,6 +555,36 @@ def main():
                      '1, 2, 3 or "all"')]:
                 check(label, method, params, needle=needle, tab=part["name"])
             d.call("delete_feature", feature_id=imp)
+
+            # What a fit found where one surface does not explain the region
+            # (docs/modeling/README.md#two-surfaces): two cylinders, two
+            # planes, a plane along the crown of a round -- each refused,
+            # naming what is there, and changing nothing.
+            shaft_stl = os.path.join(work, "stepped-shaft.stl")
+            stepped_shaft(shaft_stl)
+            d.call("import_step", path=shaft_stl, representation="mesh",
+                   keep_origin=True, up_axis="none")
+            shaft = d.call("get_state")["features"][-1]["id"]
+            side = [5.18, 0, 6]
+            for label, params, needle in [
+                    ("fit_primitive two cylinders",
+                     {"point_mm": side, "kind": "cylinder",
+                      "tolerance_mm": 0.6},
+                     "two cylinders here: R4.68 mm and R5.18 mm, stepping "
+                     "at 12.4 mm along the axis"),
+                    ("fit_primitive auto over two cylinders",
+                     {"point_mm": side, "tolerance_mm": 0.6},
+                     "two cylinders here"),
+                    ("fit_primitive two planes",
+                     {"point_mm": [3.5, 0, 25], "kind": "plane",
+                      "tolerance_mm": 0.6},
+                     "two planes here: 0.30 mm apart"),
+                    ("fit_primitive a plane on a crown",
+                     {"point_mm": side, "kind": "plane"},
+                     "strip along the crown of a round")]:
+                check(label, "fit_primitive", dict(params, feature_id=shaft),
+                      needle=needle, tab=part["name"])
+            d.call("delete_feature", feature_id=shaft)
 
             # An expression requirement and a design sweep
             # (docs/requirements/README.md#expression, #design-sweep): every
