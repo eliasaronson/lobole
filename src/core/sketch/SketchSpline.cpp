@@ -207,64 +207,33 @@ std::optional<SplineCut> CutSpline(const BSpline& s, double u) {
       onKnot = true;
     }
 
-  // The breaks between pieces, each raised to multiplicity p.
-  std::vector<double> breaks;
-  if (onKnot) {
-    breaks.push_back(u);
-  } else {
-    double before = lo, after = hi;
-    for (double k : inner) {
-      if (k < u)
-        before = k;
-      else if (k > u && after == hi)
-        after = k;
-    }
-    if (before > lo)
-      breaks.push_back(before);
-    breaks.push_back(u);
-    if (after < hi)
-      breaks.push_back(after);
-  }
+  // How many times u is already a knot: what the uncut curve's continuity
+  // there is (C^(p-m); mid-span the spline with u inserted once, C^(p-1)).
+  const int had = static_cast<int>(std::count(U.begin(), U.end(), u));
   std::vector<glm::dvec2> P = s.poles;
   std::vector<int> src(n);
   for (int i = 0; i < n; i++)
     src[i] = i;
-  for (double b : breaks)
-    while (std::count(U.begin(), U.end(), b) < p)
-      InsertKnot(U, P, p, b, &src);
-
-  std::vector<double> all{lo};
-  all.insert(all.end(), breaks.begin(), breaks.end());
-  all.push_back(hi);
+  while (std::count(U.begin(), U.end(), u) < p)
+    InsertKnot(U, P, p, u, &src);
   SplineCut cut;
-  for (size_t i = 0; i + 1 < all.size(); i++) {
+  for (const auto& [b0, b1] : {std::pair{lo, u}, std::pair{u, hi}}) {
     SplinePiece piece;
-    piece.spline =
-        SliceSpline(U, P, p, all[i], all[i + 1], &src, &piece.source);
+    piece.spline = SliceSpline(U, P, p, b0, b1, &src, &piece.source);
     piece.spline.construction = s.construction;
-    // A piece whose knots are evenly spaced is stored as a plain spline:
-    // the same curve, reparametrised.
-    if (UniformUpToScale(piece.spline.knots, p))
-      piece.spline.knots.clear();
+    BSpline plain = piece.spline;
+    plain.knots.clear();
+    if (SplineKnots(plain) == piece.spline.knots)
+      piece.spline.knots.clear(); // the default, stored as no knots
     cut.pieces.push_back(std::move(piece));
-    if (all[i + 1] <= u)
-      cut.before = cut.pieces.size();
-    if (i + 2 < all.size()) {
-      const double b = all[i + 1];
-      // Mid-span the curve is a polynomial; at a knot it is C^(p-m).
-      const std::vector<double> orig = SplineKnots(s);
-      const int had = static_cast<int>(std::count(orig.begin(), orig.end(), b));
-      const int smooth = b == u && !onKnot ? p + 1 : p - had;
-      cut.joints.push_back(smooth >= 2   ? PieceJoint::G2
-                           : smooth == 1 ? PieceJoint::G1
-                                         : PieceJoint::C0);
-    }
   }
-  // Mid-span at degree 1 the two pieces are collinear: tangent, not G2.
-  if (p == 1)
-    for (size_t j = 0; j < cut.joints.size(); j++)
-      if (cut.joints[j] == PieceJoint::G2)
-        cut.joints[j] = PieceJoint::G1;
+  cut.before = 1;
+  const int continuity = p - std::max(had, 1);
+  cut.joints.push_back(p == 1 && had == 0 ? PieceJoint::G1
+                       : p >= 2 && continuity >= std::min(2, p - 1)
+                           ? PieceJoint::Smooth
+                       : continuity >= 1 ? PieceJoint::G1
+                                         : PieceJoint::C0);
   return cut;
 }
 

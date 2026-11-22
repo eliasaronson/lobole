@@ -6,6 +6,7 @@
 #include "common/Logger.h"
 #include "core/Angles.h"
 #include "core/sketch/ConstraintEndCurvature.h"
+#include "core/sketch/ConstraintSplineJoint.h"
 #include "core/sketch/SketchFillet.h" // EndsOf
 #include "core/sketch/SketchOrientation.h"
 #include "core/sketch/SketchText.h"
@@ -75,6 +76,8 @@ const char* KindWord(ConstraintKind k) {
     return "curvature";
   case K::ArcLength:
     return "arc_length";
+  case K::SplineJoint:
+    return "smooth";
   }
   return "?";
 }
@@ -123,6 +126,9 @@ const char* Accepts(ConstraintKind k) {
            "by a coincident (tangent and equal curvature at that end)";
   case K::ArcLength:
     return "a circular arc";
+  case K::SplineJoint:
+    return "the meeting ends (first or last pole) of two splines of the same "
+           "degree, 2 or more, joined by a coincident";
   }
   return "";
 }
@@ -1170,6 +1176,79 @@ void Solver::Impl::LoadFrom(const SketchFeature& sketch,
             const double length = 0.5 * (glm::length(ta) + glm::length(tb));
             auto* c =
                 ConstraintEndCurvature::SplineSpline(a3, fa, b3, fb, s, length);
+            c->setTag(tag++);
+            im.sys.addConstraint(c);
+          }
+        }
+      }
+      break;
+    }
+    case ConstraintKind::SplineJoint: {
+      // Smooth (docs/sketching/README.md#smooth): the refs ARE the joint --
+      // an end of each spline, joined by a coincident -- and the first (and,
+      // from degree 3, second) derivatives agree there, each read in its
+      // own spline's parameter: linear in the six end poles.
+      const uint32_t ea = con.a.entity, eb = con.b.entity;
+      const auto endOf = [&](const PointRef& r) {
+        const GCS::BSpline& g = *im.splineOf[r.entity];
+        return r.which == 0 ||
+               static_cast<size_t>(r.which) + 1 == g.poles.size();
+      };
+      const auto same = [](const PointRef& x, const PointRef& y) {
+        return x.entity == y.entity && x.which == y.which;
+      };
+      const auto joined = [&] {
+        for (const Constraint& c : sketch.constraints)
+          if (c.kind == ConstraintKind::Coincident &&
+              ((same(c.a, con.a) && same(c.b, con.b)) ||
+               (same(c.a, con.b) && same(c.b, con.a))))
+            return true;
+        return false;
+      };
+      if (!isSpline(ea) || !isSpline(eb) || ea == eb) {
+        why = "got " + describe({ea, 0}) + " and " + describe({eb, 0});
+        if (isSpline(ea) != isSpline(eb))
+          why += "; a line or an arc meets a spline smoothly through "
+                 "`tangent` or `curvature`";
+      } else if (im.splineOf[ea]->degree != im.splineOf[eb]->degree) {
+        why = describe({ea, 0}) + " is of degree " +
+              std::to_string(im.splineOf[ea]->degree) + " and " +
+              describe({eb, 0}) + " of degree " +
+              std::to_string(im.splineOf[eb]->degree) +
+              "; smooth joins two splines of one degree (use curvature)";
+      } else if (im.splineOf[ea]->degree < 2) {
+        why = "a degree-1 spline is a polyline, with no derivative to carry "
+              "past its end; use tangent";
+      } else if (!endOf(con.a) || !endOf(con.b)) {
+        why = "the refs must be an END of each spline (pole 0 or its last), "
+              "got " +
+              describe(con.a) + " and " + describe(con.b);
+      } else if (!joined()) {
+        why = describe(con.a) + " and " + describe(con.b) +
+              " are not joined; join them with a coincident first";
+      } else {
+        const GCS::BSpline& sa = *im.splineOf[ea];
+        const GCS::BSpline& sb = *im.splineOf[eb];
+        const auto a3 = endPoles(con.a), b3 = endPoles(con.b);
+        const int top = std::min(2, sa.degree - 1);
+        for (int order = 1; order <= top; order++) {
+          const auto wa = EndDerivativeWeights(sa.flattenedknots, sa.degree,
+                                               con.a.which == 0, order);
+          const auto wb = EndDerivativeWeights(sb.flattenedknots, sb.degree,
+                                               con.b.which == 0, order);
+          // Errors in millimetres: divided by the mean knot factor, to the
+          // order's power.
+          const double k = 0.5 * (std::abs(wa[1]) + std::abs(wb[1]));
+          const double k1 =
+              0.5 * (std::abs(EndDerivativeWeights(sa.flattenedknots, sa.degree,
+                                                   con.a.which == 0, 1)[1]) +
+                     std::abs(EndDerivativeWeights(sb.flattenedknots, sb.degree,
+                                                   con.b.which == 0, 1)[1]));
+          const double scale = order == 1 ? 1.0 / std::max(k, 1e-300)
+                                          : 1.0 / std::max(k1 * k1, 1e-300);
+          for (int axis = 0; axis < 2; axis++) {
+            auto* c =
+                new ConstraintSplineJoint(a3, wa, b3, wb, order, axis, scale);
             c->setTag(tag++);
             im.sys.addConstraint(c);
           }

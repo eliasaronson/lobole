@@ -22,10 +22,13 @@ namespace sketch {
 void InsertKnot(std::vector<double>& U, std::vector<glm::dvec2>& P, int p,
                 double u, std::vector<int>* source = nullptr);
 
-// How two consecutive pieces of a cut spline meet: where the curve was
-// C2 or smoother, G2 (a Coincident and a Curvature); C1, G1 (a Coincident
-// and a Tangent); C0, a Coincident alone.
-enum class PieceJoint { C0, G1, G2 };
+// How the two pieces of a cut spline meet, as the curve did there: Smooth
+// (a Coincident and a SplineJoint: C2 from degree 3, C1 at degree 2) where
+// the spline with the cut's knot inserted once is that smooth; G1 (a
+// Coincident and a Tangent) at a cubic's double knot, and mid-span at degree
+// 1, where the pieces are collinear; C0, a Coincident alone, at a knot of
+// full multiplicity (a polyline's corner).
+enum class PieceJoint { C0, G1, Smooth };
 
 // One piece of a cut spline: a storable spline, and for
 // each of its poles the original pole it is (-1 for a pole the cut made).
@@ -34,14 +37,14 @@ struct SplinePiece {
   std::vector<int> source;
 };
 
-// The pieces cutting `s` at parameter `u` (strictly inside its domain,
-// SplineDomain) makes, in order along it. Over the span u lies in, each side is
-// a Bezier; past the next knot, raised to full multiplicity, the whole spans
-// are one clamped-uniform spline; a side inside one span is one Bezier, and
-// a cut on a knot leaves two clamped-uniform splines. `before` pieces end at
-// u, the rest start there. `joints[i]` joins pieces i and i+1. Every piece
-// keeps `s`'s construction flag; ids are 0. Nullopt when `u` is not inside
-// the domain or `s` has fewer than two poles.
+// The two pieces cutting `s` at parameter `u` (strictly inside its domain,
+// SplineDomain) makes, in order along it: `u` inserted to multiplicity p
+// (fewer on an existing knot, snapped to within 1e-9 of a span) and the
+// poles divided there, each piece keeping the parent's knots on its side,
+// not renormalised (an empty vector when they come out clamped-uniform), so
+// the two read the curve in one parameter. `before` is 1. `joints[0]` joins
+// them. Every piece keeps `s`'s construction flag; ids are 0. Nullopt when
+// `u` is not inside the domain or `s` has fewer than two poles.
 struct SplineCut {
   std::vector<SplinePiece> pieces;
   std::vector<PieceJoint> joints;

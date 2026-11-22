@@ -82,6 +82,8 @@ const char* ConstraintKindName(sketch::ConstraintKind k) {
     return "curvature (G2)";
   case K::ArcLength:
     return "arc length";
+  case K::SplineJoint:
+    return "smooth (C2)";
   }
   return "?";
 }

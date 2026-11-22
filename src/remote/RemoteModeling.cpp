@@ -568,7 +568,8 @@ ConstraintKindTable() {
       {"diameter", sketch::ConstraintKind::Diameter},
       {"distance_pl", sketch::ConstraintKind::DistancePL},
       {"curvature", sketch::ConstraintKind::Curvature},
-      {"arc_length", sketch::ConstraintKind::ArcLength}};
+      {"arc_length", sketch::ConstraintKind::ArcLength},
+      {"smooth", sketch::ConstraintKind::SplineJoint}};
   return kinds;
 }
 
@@ -948,7 +949,11 @@ static constexpr MethodDoc ModelingMethods[] = {
      "represent (radius on an ellipse, tangent to a spline away from its "
      "end) is refused naming what its kind takes. `curvature` (G2) takes "
      "two curves joined end to end by a coincident, at least one a spline, "
-     "and holds them tangent with equal curvature there. One that "
+     "and holds them tangent with equal curvature there. `smooth` takes the "
+     "meeting ENDS of two splines of one degree (2 or more) joined by a "
+     "coincident, refs [[a, its end pole], [b, its end pole]], and holds "
+     "their derivatives equal there (C2; C1 at degree 2) -- what Split "
+     "joins a spline's two pieces with. One that "
      "constrains nothing -- the sketch already fixes it, or it contradicts "
      "the sketch -- is refused too, naming the constraints (indices) it "
      "repeats or contradicts. A `midpoint` takes the place of a "
@@ -980,7 +985,8 @@ static constexpr MethodDoc ModelingMethods[] = {
      "{sketch_id, entity1, entity2, radius (mm), near?: [u, v] (sketch mm)} "
      "with a tangent arc, trimming both to it. Lines, arcs, elliptical arcs "
      "and open splines; a spline is cut exactly at its tangent point and its "
-     "corner side removed. `near` picks the corner when the two share two "
+     "corner side removed, one spline left. `near` picks the corner when the "
+     "two share two "
      "ends (refused without it). A radius too large is refused naming the "
      "largest that fits. Returns arc_id, `replaced` ([{spline, pieces}]: "
      "each cut spline and its pieces in order) and `dropped` (each "
@@ -997,8 +1003,10 @@ static constexpr MethodDoc ModelingMethods[] = {
      "`at` moves to the nearest point of the curve (refused past a "
      "hundredth of its length) and the joint slides, one more DOF. A line's "
      "pieces stay collinear, an arc's concentric, an ellipse's on one "
-     "ellipse; a spline is cut exactly by knot insertion into pieces joined "
-     "in G2 (a closed spline takes one cut, its seam is the other), and a "
+     "ellipse; a spline is cut exactly by knot insertion into TWO splines "
+     "on its own knots, joined coincident and `smooth` (as smooth as the "
+     "curve was there; a closed spline takes one cut, its seam is the "
+     "other), and a "
      "constraint on a pole the cut replaced is dropped and named in "
      "`dropped`. A generated entity, a circle-shaped ellipse, a cut at an "
      "end, an equal length on the line and an arc_length on the arc are "

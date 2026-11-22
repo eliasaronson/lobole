@@ -641,6 +641,8 @@ const char* ConstraintWord(ConstraintKind k) {
     return "curvature";
   case K::ArcLength:
     return "arc_length";
+  case K::SplineJoint:
+    return "smooth";
   }
   return "constraint";
 }

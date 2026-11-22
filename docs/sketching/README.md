@@ -15,6 +15,7 @@ in the file; the UI and expressions show degrees.
 | data model, entity ops (add/delete/split/trim/trim along a path/mirror/fillet/pattern/offset, derived ops, images), the first-dimension rescale | `src/core/features/SketchFeature.{h,cpp}` |
 | PlaneGCS adapter, drag sessions, DOF diagnosis, value edits (continuation), `JudgeAddition` | `src/core/sketch/SketchSolver.{h,cpp}` |
 | the curvature equation of a G2 joint, a `GCS::Constraint` of our own | `src/core/sketch/ConstraintEndCurvature.{h,cpp}` |
+| Smooth, the derivative equations of a spline joint, the same | `src/core/sketch/ConstraintSplineJoint.{h,cpp}` |
 | orientations a value edit must keep, `MeasureDimension` (pure geometry) | `src/core/sketch/SketchOrientation.{h,cpp}` |
 | loops, open ends, OCC wires/faces/prisms/revolves, offset, projection of model faces/edges | `src/core/sketch/SketchProfile.{h,cpp}` |
 | a section into a sketch: the cut of mesh and B-Rep bodies, its fits | `src/core/sketch/SketchSection.{h,cpp}`; the Section tool's "To sketch" in `src/ui/SectionToSketch.{h,cpp}` |
@@ -207,7 +208,8 @@ Kinds (JSON strings in brackets):
   [`equal`], Tangent [`tangent`], PointOnLine [`point_on_line`], Symmetric
   [`symmetric`], Midpoint [`midpoint`], Fixed [`fixed`], Concentric
   [`concentric`], Collinear [`collinear`], Curvature [`curvature`, G2:
-  [below](#curvature-continuity)].
+  [below](#curvature-continuity)], SplineJoint [`smooth`, C2:
+  [below](#smooth)].
 - Dimensions (`IsDimension`; carry `value`, an optional expression, and a
   label position): Distance [`distance`], DistanceX [`distance_x`], DistanceY
   [`distance_y`], DistancePL [`distance_pl`, point-to-line], Radius
@@ -475,31 +477,61 @@ properties. Golden `vNEXT-spline-knots`.
 #### A spline cut exactly
 
 Split and Fillet cut a spline where it is crossed or where a fillet touches
-it (`sketch::CutSpline`, `core/sketch/SketchSpline.{h,cpp}`). The sketch
-stores only clamped-uniform splines, so a piece that starts mid-span is not
-one storable spline. Knot insertion (Boehm, `sketch::InsertKnot`, which the
-DXF reader's `SplineToSketch` uses too) changes no point of the curve: the
-cut u, in span [k, k+1], is raised to multiplicity p, and so are k and k+1
-(where they are inside the domain). Over the span each side is then a
-Bézier, past the next knot the whole spans are one clamped-uniform spline,
-a side inside one span is one Bézier, and a cut on a knot leaves two
-clamped-uniform splines: up to four pieces, which together ARE the curve
-(`tests/test_sketch_split_curves.cpp` evaluates them against it, 1e-12
-relative). Consecutive pieces are joined Coincident and Curvature where the
-curve was C2 (mid-span; a knot of a cubic), Coincident and Tangent where it
-was C1 (a knot of a quadratic; mid-span at degree 1, where the pieces are
-collinear), and Coincident alone at a knot of a polyline and at a closed
-spline's seam (one cut makes the pieces of a closed spline; the seam is its
-other). The longest piece keeps the id.
+it (`sketch::CutSpline`, `core/sketch/SketchSpline.{h,cpp}`). Knot insertion
+(Boehm, `sketch::InsertKnot`, which the DXF reader's `SplineToSketch` uses
+too) changes no point of the curve: the cut u is raised to multiplicity p
+(fewer when it is already a knot; a cut within 1e-9 of a span of one is
+snapped onto it) and the poles are divided there (`sketch::SliceSpline`).
+That gives TWO splines, each on the parent's knots on its side, not
+renormalised ([Representation](#representation); a piece whose knots come
+out clamped-uniform stores none), so the two read the curve in one
+parameter and together ARE it (`tests/test_spline_smooth.cpp` evaluates
+them against `Geom2d_BSplineCurve` on the parent's knots, 1e-9). The longer
+piece keeps the id.
 
-A pole the insertion leaves in place keeps its constraints and its
+The pieces are joined Coincident, and as smooth as the curve was there:
+Coincident + [Smooth](#smooth) where the spline with the cut's knot
+inserted once is C2 (a cubic mid-span or at a single knot; a quadratic's,
+C1); Coincident + Tangent at a cubic's double knot, and mid-span at degree
+1, where the pieces are collinear; Coincident alone at a knot of full
+multiplicity (a polyline's corner) and at a closed spline's seam (one cut
+makes the two pieces of a closed spline; the seam is its other). So a cubic
+cut once has exactly the freedom of the uncut spline with one knot
+inserted: 2 degrees of freedom more than before the cut (it was 8, with
+four pieces joined G2), and dragging a pole moves the two pieces as that
+one spline would move.
+
+Only the degree − 1 poles of the cut's own span are replaced (two, for a
+cubic). A pole the insertion leaves in place keeps its constraints and its
 expressions (`p4x`), re-indexed onto its piece (each `SplinePiece` names the
-original pole of each of its poles). A constraint on a pole the insertion
-replaced is dropped, and the edit names each one, in the RPC's `dropped`
-and the prompt pill: "fixed (constraint 6) on pole 4 of spline 9", "the
-expression on p3x of spline 9". The pieces carry more poles than the spline
-did, so the DOF rises, and the pill's count says by how much. No format
-change: the results are entities and constraints the file already holds.
+original pole of each of its poles); a constraint on an end follows the end
+to its piece, and a point on the spline goes to the piece it lies on. A
+constraint on a replaced pole is dropped, and the edit names each one, in
+the RPC's `dropped` and the prompt pill: "fixed (constraint 6) on pole 4 of
+spline 9", "the expression on p3x of spline 9".
+
+#### Smooth
+
+Smooth [`smooth`] (`ConstraintKind::SplineJoint`, badge `C2`, `C1` at degree
+2) joins the meeting ENDS of two splines of one degree that a Coincident
+joins — its refs are those two ends, `[[a, last pole], [b, 0]]` for a cut's
+pieces: the first and, from degree 3, second derivatives agree there, each
+read in its own spline's parameter. On pieces that keep their parent's
+knots that is exactly C2 (C1) continuity of the parent, so Coincident +
+Smooth leave them the one curve with the cut's knot inserted. A clamped
+spline's derivatives at an end are fixed combinations of its three end
+poles and the knot spacing there (`EndDerivativeWeights`), so each
+coordinate of each derivative is one LINEAR equation —
+`ConstraintSplineJoint`, a `GCS::Constraint` of our own beside
+`ConstraintEndCurvature`: four for a cubic, two for a quadratic. Deleting
+the badge frees the joint, as deleting any constraint does (the pieces then
+part when a pole beside it is dragged); Tangent or Curvature can be put
+there instead. It is refused, naming why, for anything but two splines, two
+splines of different degrees (use curvature), a degree-1 spline (a polyline
+has no derivative to carry; use tangent), a ref that is not an end, and two
+ends no Coincident joins. It has no toolbar command: Split makes it, and
+`add_constraint` takes it. At degree 4 and above it still holds two
+derivatives, so the pieces have more freedom than the uncut curve had.
 
 In the GUI the axis ends are dots and pick points (inference snaps to them
 too), so dragging one resizes and turns the ellipse. Dragging an ellipse or
@@ -1391,8 +1423,8 @@ one cut, so the cursor goes along the curve meant; at a T it is the bar
 (the stem's foot would be a cut at an end). Two curves neither of which is
 a line, an arc or a circle cross where their polylines do, refined by
 Newton on both parameters. It previews a tick across the curve at the cut
-(`sketch::TangentAt`) and the pieces in alternating shades (a spline's up
-to four, `SplitPieces`). Each click is one solve and one undo step; a tap
+(`sketch::TangentAt`) and the two pieces in alternating shades
+(`SplitPieces`). Each click is one solve and one undo step; a tap
 in empty space or Enter finishes. A circle or an ellipse takes two clicks:
 the prompt reads "Split (Step 1/2)" over it and "Step 2/2" once the first
 cut is held; Escape drops the held cut and keeps the tool, a click on
@@ -1535,8 +1567,9 @@ There is no RPC to delete a single constraint, trim, paste or break a link; `mod
   `headless_smoke.py`, and its refusals in `refused_calls_smoke.py`.
 - `tests/test_sketch_import.cpp` `[import]` — the conic image (similarity,
   mirror, skew) exact; each DXF mapping row's entity and geometry (a bulge
-  arc's radius and side; a non-uniform spline's Bézier pieces equal to it at
-  sampled parameters within 1e-9, an unclamped one too); the ezdxf plate
+  arc's radius and side; a non-uniform spline as ONE spline on its knots
+  equal to it within 1e-9, an unclamped one too, cut only at a corner and
+  past 255 poles); the ezdxf plate
   (inches, nested rotated INSERT, layers, construction, CRLF); units from
   `$INSUNITS`, the caller, the default, and the refusals; every refused DXF
   and SVG naming its handle or element; the mirrored OCS; our own
@@ -1579,6 +1612,15 @@ There is no RPC to delete a single constraint, trim, paste or break a link; `mod
 - `tests/test_sketch_inference.cpp` `[inference]` `[datum]`,
   `tests/test_sketch_selection.cpp` `[selection]` — the pure passes.
 - `tests/test_spline.cpp` `[spline]` `[profile]` — evaluator vs OCC, profiles.
+- `tests/test_spline_knots.cpp` `[knots]` — stored knots against
+  `Geom2d_BSplineCurve` (evaluation, hodographs, samples, the profile edge
+  and path wire forwards and reversed), the file form and its refusals, a
+  polyline's corners through extrude and mass properties.
+  `tests/test_spline_smooth.cpp` — the two-piece cut against the parent,
+  the DOF it adds, a drag against the uncut spline with the knot inserted,
+  Smooth's refusals, the closed spline, the owner's split extruding to the
+  same volume, the fillet leaving one spline. Goldens `vNEXT-spline-knots`,
+  `vNEXT2-spline-smooth`.
 - `tests/test_reference_image.cpp` — placement, calibration, asset storage in
   both formats, regen-hash exclusion, `show_always` round trip.
 - `tests/underlay_show_always_smoke.py` — a show-always underlay in a quick

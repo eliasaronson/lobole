@@ -612,6 +612,7 @@ PointSlots PointSlotsOf(const sketch::Constraint& con, bool cIsLine) {
   case K::Distance:
   case K::DistanceX:
   case K::DistanceY:
+  case K::SplineJoint: // the two meeting ends
     return {true, true, false};
   case K::Horizontal:
   case K::Vertical: // two points, or one line with no second ref
@@ -1376,8 +1377,9 @@ SketchFeature::SplitSplineAt(uint32_t id, double u, glm::dvec2 at,
   };
   for (size_t i = lo; i + 1 < hi; i++) {
     added.push_back({K::Coincident, {ids[i], last(i)}, {ids[i + 1], 0}, 0.0});
-    if (cut->joints[i] == sketch::PieceJoint::G2)
-      added.push_back({K::Curvature, {ids[i], 0}, {ids[i + 1], 0}, 0.0});
+    if (cut->joints[i] == sketch::PieceJoint::Smooth)
+      added.push_back(
+          {K::SplineJoint, {ids[i], last(i)}, {ids[i + 1], 0}, 0.0});
     else if (cut->joints[i] == sketch::PieceJoint::G1)
       added.push_back({K::Tangent, {ids[i], 0}, {ids[i + 1], 0}, 0.0});
   }

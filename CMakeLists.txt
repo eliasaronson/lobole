@@ -595,6 +595,7 @@ set(core_sources
     src/core/features/PatternFeature.cpp
     src/core/sketch/SketchSolver.cpp
     src/core/sketch/ConstraintEndCurvature.cpp
+    src/core/sketch/ConstraintSplineJoint.cpp
     src/core/fem/FemStudy.cpp
     src/core/fem/FemMeshReport.cpp
     src/core/fem/FemFields.cpp

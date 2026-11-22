@@ -871,7 +871,7 @@ void RegisterSketchGuiTests(ImGuiTestEngine* engine) {
       IM_CHECK_EQ(e.splitPreviewCurve, spline);
       IM_CHECK_EQ(e.splitPreviewCuts.size(), (size_t)1);
       IM_CHECK_LT(glm::length(e.splitPreviewCuts[0] - xs[0]), 1e-9);
-      IM_CHECK_GE(e.splitPreviewPieces.size(), (size_t)2);
+      IM_CHECK_EQ(e.splitPreviewPieces.size(), (size_t)2);
     }
     GuiShot(ctx, "split_hover_spline");
     ctx->MouseClick(ImGuiMouseButton_Left);
@@ -882,8 +882,14 @@ void RegisterSketchGuiTests(ImGuiTestEngine* engine) {
     for (const sketch::Entity& e : sk->entities)
       if (std::holds_alternative<sketch::BSpline>(e))
         pieces.push_back(sketch::EntityId(e));
-    IM_CHECK_GE(pieces.size(), (size_t)2);
+    IM_CHECK_EQ(pieces.size(), (size_t)2); // one cut, two splines
     IM_CHECK(sk->IndexOfEntity(spline) != SIZE_MAX);
+    {
+      int smooth = 0;
+      for (const sketch::Constraint& c : sk->constraints)
+        smooth += c.kind == sketch::ConstraintKind::SplineJoint ? 1 : 0;
+      IM_CHECK_EQ(smooth, 1); // the C2 badge at the joint
+    }
     for (uint32_t p : pieces)
       for (const glm::dvec2& q : sketch::BSplineSampleUV(
                std::get<sketch::BSpline>(sk->entities[sk->IndexOfEntity(p)])))

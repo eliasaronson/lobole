@@ -1137,6 +1137,15 @@ void DrawConstraintGlyphs(AppState& state) {
     case K::Curvature:
       badge(i, c.a.entity, "G2");
       break;
+    case K::SplineJoint: {
+      // C2 from degree 3; a quadratic's joint holds the first derivative.
+      const size_t si = sketch->IndexOfEntity(c.a.entity);
+      const auto* sp = si < sketch->entities.size()
+                           ? std::get_if<sketch::BSpline>(&sketch->entities[si])
+                           : nullptr;
+      badge(i, c.a.entity, sp && sketch::BSplineDegree(*sp) == 2 ? "C1" : "C2");
+      break;
+    }
     case K::Symmetric:
       badge(i, c.c.entity, "sym");
       break;

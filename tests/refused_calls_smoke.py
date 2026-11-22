@@ -402,6 +402,39 @@ def main():
                       needle=needle, tab=part["name"])
             d.call("delete_feature", feature_id=spl["id"])
 
+            # Smooth (docs/sketching/README.md#smooth): the meeting ends of
+            # two splines of one degree joined by a coincident, or refused
+            # naming what it takes, the sketch unchanged.
+            smo = d.call("add_feature", feature={
+                "type": "Sketch", "name": "Smooth probe",
+                "plane": {"origin": [0, 0, 720], "normal": [0, 0, 1],
+                          "uAxis": [1, 0, 0]},
+                "entities": [
+                    {"type": "spline",
+                     "poles": [[0, 0], [2, 3], [4, -1], [6, 0]]},
+                    {"type": "spline",
+                     "poles": [[6, 0], [8, 1], [10, -2], [12, 0]]},
+                    {"type": "spline", "degree": 2,
+                     "poles": [[12, 0], [14, 2], [16, 0]]},
+                    {"type": "line", "a": [-4, 0], "b": [0, 0]}]})
+            sa, sb, sq, sline = smo["entity_ids"]
+            d.call("add_constraints", sketch_id=smo["id"], constraints=[
+                {"kind": "coincident", "refs": [[sb, 3], [sq, 0]]},
+                {"kind": "coincident", "refs": [[sline, 1], [sa, 0]]}])
+            for label, refs, needle in [
+                    ("smooth not joined", [[sa, 3], [sb, 0]],
+                     "join them with a coincident first"),
+                    ("smooth on a pole", [[sa, 1], [sb, 0]],
+                     "must be an END of each spline"),
+                    ("smooth across degrees", [[sb, 3], [sq, 0]],
+                     "smooth joins two splines of one degree"),
+                    ("smooth on a line", [[sline, 1], [sa, 0]],
+                     "`tangent` or `curvature`")]:
+                check(label, "add_constraint",
+                      dict(sketch_id=smo["id"], kind="smooth", refs=refs),
+                      needle=needle, tab=part["name"])
+            d.call("delete_feature", feature_id=smo["id"])
+
             # Imports (docs/interchange/README.md#up-axis,
             # docs/sketching/README.md#importing-dxf-and-svg): every one read
             # and checked before a feature, a sketch or a tab exists.

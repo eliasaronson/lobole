@@ -880,6 +880,12 @@ enum class ConstraintKind {
   // (docs/sketching/README.md#curvature-continuity).
   Curvature,
   ArcLength, // a.entity is a circular arc: r x sweep = value (mm)
+  // Smooth (vNEXT2): a, b are the meeting ENDS (first or last pole) of two
+  // splines of one degree that a Coincident joins: the first and, from
+  // degree 3, second derivatives agree there, each in its own spline's
+  // parameter -- what keeps the two pieces of a cut spline the one curve
+  // (docs/sketching/README.md#smooth).
+  SplineJoint,
 };
 
 // Which kinds are dimensions (carry a numeric value + a canvas annotation
@@ -1151,9 +1157,11 @@ public:
   // one the cut is not near); an ellipse's two arcs Coincident at both
   // cuts, Tangent at the first, and the two axis ends of piece 2 farthest
   // from the cuts on piece 1's ellipse. A spline is cut exactly by knot
-  // insertion (sketch::CutSpline): the pieces are joined Coincident and
-  // Curvature where the curve was C2, Tangent where C1, and Coincident alone
-  // where C0 (a closed spline's seam). A constraint on an end goes with the
+  // insertion (sketch::CutSpline) into two splines on its own knots, joined
+  // Coincident and SplineJoint (Smooth) where the curve with the cut's knot
+  // inserted is C2 (C1 at degree 2), Tangent at a cubic's double knot or
+  // mid-span at degree 1, and Coincident alone where C0 (a closed spline's
+  // seam). A constraint on an end goes with the
   // piece holding the end, and so does a tangent joined there; one on the
   // whole curve stays on piece 1; a whole-edge distance spans the pieces and
   // a midpoint of the line becomes a symmetric of its outer ends. A spline

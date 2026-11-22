@@ -820,7 +820,7 @@ def main():
 
         phase("Split and fillet a spline, split an ellipse")
         # docs/sketching/README.md#a-spline-cut-exactly: a spline is cut by
-        # knot insertion, so its pieces are the curve; a constraint on a
+        # knot insertion into two splines on its knots, joined smooth; a constraint on a
         # pole the cut replaced is dropped and named. One undo step each.
         d.call("new_project")
         skq = d.call("add_feature", feature={
@@ -841,8 +841,11 @@ def main():
         before_q = d.call("get_state")["features"][0]
         sq = d.call("split", sketch_id=skq["id"], entity_id=qs, at=[5, 2],
                     crossing=ql)
-        expect(len(sq["entity_ids"]) >= 2 and qs in sq["entity_ids"],
-               f"a spline splits into pieces, one keeping the id: {sq}")
+        expect(len(sq["entity_ids"]) == 2 and qs in sq["entity_ids"],
+               f"a spline splits into two pieces, one keeping the id: {sq}")
+        qcons = d.call("get_state")["features"][0]["constraints"]
+        expect(sum(c["kind"] == "smooth" for c in qcons) == 1,
+               f"the two pieces are joined smooth: {qcons}")
         expect(sq["dropped"] and all(
             "on pole" in x and f"of spline {qs}" in x for x in sq["dropped"]),
             f"each replaced pole's constraint is named: {sq['dropped']}")

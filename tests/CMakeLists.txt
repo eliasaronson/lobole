@@ -196,6 +196,7 @@ add_executable(designer_tests
     test_mate_import_print.cpp
     test_spline.cpp
     test_spline_knots.cpp
+    test_spline_smooth.cpp
     test_ellipse_arc.cpp
     test_sketch_curves.cpp
     test_sketch_split_curves.cpp

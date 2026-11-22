@@ -446,6 +446,8 @@ const char* ConstraintKindToString(sketch::ConstraintKind k) {
     return "curvature";
   case K::ArcLength: // v191
     return "arc_length";
+  case K::SplineJoint: // vNEXT2
+    return "smooth";
   }
   return "coincident";
 }
@@ -496,6 +498,8 @@ sketch::ConstraintKind ConstraintKindFromString(const std::string& s) {
     return K::Curvature;
   if (s == "arc_length")
     return K::ArcLength;
+  if (s == "smooth")
+    return K::SplineJoint;
   throw std::runtime_error("Unknown constraint kind: " + s);
 }
 
