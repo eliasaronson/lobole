@@ -1319,6 +1319,62 @@ void RegisterSketchGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(s_App->commands->CanUndo()); // one undoable edit
   };
 
+  // A sketch held in place cannot be relocated, so a dimensioned line in it
+  // is dragged as far as its own freedom goes; and a driven dimension, which
+  // fixes nothing, never turns a drag into a relocation.
+  t = IM_REGISTER_TEST(engine, "drag", "dimensioned_line_in_a_held_sketch");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    EnterSketchOnPlane(ctx, 0);
+    ctx->Yield();
+    auto* sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    IM_CHECK(sk != nullptr);
+    nlohmann::json before = DocumentIO::FeatureToJson(*sk);
+    using K = sketch::ConstraintKind;
+    const double turn = glm::radians(25.0);
+    uint32_t l0 = sk->AddEntity(sketch::Line{{-2, -1}, {2, -1}});
+    uint32_t l1 = sk->AddEntity(sketch::Line{
+        {-1, 1}, {-1 + 2 * std::cos(turn), 1 + 2 * std::sin(turn)}});
+    sk->constraints.push_back({K::Fixed, {l0, 0}, {0, 0}, 0.0});
+    sk->constraints.push_back({K::Horizontal, {l0, 0}, {0, 0}, 0.0});
+    sk->constraints.push_back({K::Distance, {l0, 0}, {l0, 1}, 4.0});
+    sk->constraints.push_back({K::Angle, {l0, 0}, {l1, 0}, turn});
+    sketch::Constraint ref{K::DistancePL, {l1, 0}, {l0, 0}, 2.0};
+    ref.driven = true;
+    sk->constraints.push_back(ref);
+    nlohmann::json after = DocumentIO::FeatureToJson(*sk);
+    s_App->commands->Execute(
+        std::make_unique<ModifyFeatureCommand>(0, before, after), *Doc());
+    ctx->Yield();
+    sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    s_App->sketchEdit.tool = ui::SketchTool::Select;
+
+    auto lineOf = [&](uint32_t id) {
+      sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+      return std::get<sketch::Line>(sk->entities[sk->IndexOfEntity(id)]);
+    };
+    const sketch::Line was = lineOf(l1);
+    const glm::dvec2 mid = 0.5 * (was.a + was.b);
+    glm::vec2 from = ui::SketchUVToScreen(*s_App, sk->plane, glm::vec2(mid));
+    glm::vec2 to = ui::SketchUVToScreen(*s_App, sk->plane,
+                                        glm::vec2(mid + glm::dvec2(0.5, 1.0)));
+    ctx->MouseMoveToPos(ImVec2(from.x, from.y));
+    ctx->MouseDown(ImGuiMouseButton_Left);
+    IM_CHECK(s_App->sketchDrag.mode == ui::SketchDragSession::Mode::LineBody);
+    ctx->MouseMoveToPos(ImVec2(to.x, to.y));
+    ctx->MouseUp(ImGuiMouseButton_Left);
+    ctx->Yield();
+
+    const sketch::Line now = lineOf(l1);
+    IM_CHECK(now.a.y > was.a.y + 0.5 && now.b.y > was.b.y + 0.5);
+    IM_CHECK(now.a.x > was.a.x + 0.25);
+    const glm::dvec2 d = glm::normalize(now.b - now.a);
+    IM_CHECK(std::abs(std::atan2(d.y, d.x) - turn) < 1e-6);
+    const sketch::Line held = lineOf(l0);
+    IM_CHECK(glm::length(held.a - glm::dvec2(-2, -1)) < 1e-9);
+    IM_CHECK(glm::length(held.b - glm::dvec2(2, -1)) < 1e-9);
+  };
+
   // An ellipse by direct manipulation
   // (docs/sketching/README.md#ellipses-and-splines): its major-axis end is a
   // handle that resizes it in place,

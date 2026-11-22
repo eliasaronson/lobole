@@ -121,9 +121,46 @@ std::vector<uint8_t> InferrablePoints(const sketch::Entity& entity) {
 bool LineHasDrivingDimension(const SketchFeature& sketch, uint32_t lineId) {
   return std::any_of(sketch.constraints.begin(), sketch.constraints.end(),
                      [lineId](const sketch::Constraint& c) {
-                       return sketch::IsDimension(c.kind) &&
+                       return sketch::IsDimension(c.kind) && !c.driven &&
                               (c.a.entity == lineId || c.b.entity == lineId);
                      });
+}
+
+// Whether the whole sketch follows a pull on every one of its points: a
+// sketch held to the origin, a datum or a projected edge does not, and a
+// drag that asked for it would move nothing.
+bool SketchCanTranslate(const SketchFeature& sketch, uint32_t lineId) {
+  const size_t at = sketch.IndexOfEntity(lineId);
+  const auto* line = at == SIZE_MAX
+                         ? nullptr
+                         : std::get_if<sketch::Line>(&sketch.entities[at]);
+  if (line == nullptr)
+    return false;
+  // A step the size of the line's own tenth, off both axes.
+  const double step = 0.1 * glm::length(line->b - line->a);
+  if (!(step > 0.0))
+    return false;
+  const glm::dvec2 delta = step * glm::normalize(glm::dvec2(0.6, 0.8));
+  std::vector<sketch::PointRef> points;
+  std::vector<glm::dvec2> targets;
+  for (const sketch::Entity& entity : sketch.entities)
+    for (const auto& [which, point] : EntityPoints(entity)) {
+      points.push_back({sketch::EntityId(entity), which});
+      targets.push_back(glm::dvec2(point) + delta);
+    }
+  sketch::Solver probe;
+  probe.Load(sketch);
+  if (!probe.BeginDrag(points))
+    return false;
+  probe.SetDragTargets(targets);
+  if (!probe.SolveDrag(sketch::Solver::DragGuard::None).ok)
+    return false;
+  std::vector<sketch::Entity> moved = sketch.entities;
+  probe.WriteBack(moved);
+  const auto& now = std::get<sketch::Line>(moved[at]);
+  const double slack = 0.1 * step;
+  return glm::length(glm::dvec2(now.a) - glm::dvec2(line->a) - delta) < slack &&
+         glm::length(glm::dvec2(now.b) - glm::dvec2(line->b) - delta) < slack;
 }
 
 void BeginSketchTranslate(SketchDragSession& drag,
@@ -174,9 +211,12 @@ void BeginDragSession(AppState& state, SketchFeature& sketch, size_t index,
     ok = drag.solver->BeginRadiusDrag(drag.circleId);
   } else if (pick.body && std::holds_alternative<sketch::Line>(e)) {
     const auto& l = std::get<sketch::Line>(e);
-    if (LineHasDrivingDimension(sketch, pick.ref.entity)) {
+    if (LineHasDrivingDimension(sketch, pick.ref.entity) &&
+        SketchCanTranslate(sketch, pick.ref.entity)) {
       // A driving dimension defines the line's size. Moving its body should
       // therefore relocate the unconstrained sketch, not fight that value.
+      // A sketch that is held somewhere cannot be relocated: there the line
+      // moves as far as its own freedom goes, like any other.
       BeginSketchTranslate(drag, sketch);
     } else {
       drag.mode = SketchDragSession::Mode::LineBody;

@@ -1095,7 +1095,11 @@ short of mirroring and follows again when the cursor comes back
 (`DragGuard::None` is the unguarded solve, for tests). UI modes (`SketchDragSession::Mode`): `Point`, `LineBody`
 (both endpoints, rigid delta), `CircleRim` (radius), and `SketchTranslate`
 (dragging a line that carries a driving dimension moves the whole sketch
-instead of fighting the dimension).
+instead of fighting the dimension). The whole sketch is moved only when it
+can be: a sketch held to the origin, a datum or a fixed point is probed at
+the press with a pull on every point, and where the line does not follow,
+the drag is a `LineBody` one and the line moves as far as its own freedom
+goes. A driven dimension fixes nothing and does not count.
 
 `SketchFeature::Execute` re-solves only when a dimension or coordinate is
 expression-driven or external geometry exists (after `VisitExprs` has
