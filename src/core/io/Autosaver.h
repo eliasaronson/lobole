@@ -48,6 +48,15 @@ public:
   static void SetInstanceTag(const std::string& tag);
   static std::string InstanceTag();
 
+  // What kind of instance this process is, recorded beside every unsaved
+  // slot it writes (`unsaved-<tag>.autosave.kind`, one word): "windowed"
+  // for the person's visible app; "hidden", "headless", "offscreen" or
+  // "gui-tests" for an agent's or a test's. "" (the default, and a process
+  // that never says) writes no record. Set by main() before the session
+  // begins (docs/versioning/README.md#every-instance-has-its-own-unsaved-slot).
+  static void SetInstanceKind(const std::string& kind);
+  static std::string InstanceKind();
+
   // Is this file name an unsaved slot -- any instance's, or the shared
   // `unsaved.autosave.json` / `.d` builds before the tag wrote?
   [[nodiscard]] static bool IsUnsavedSlot(const std::string& filename);
@@ -69,7 +78,14 @@ public:
     std::string tag;
     int64_t modifiedUnix = 0;
     size_t documents = 0;
+    // The kind of instance that wrote it (SetInstanceKind); "" when the
+    // slot carries no record -- one written before the record was.
+    std::string kind;
   };
+  // Is this slot offered to the person (File > Open Recent > Unsaved
+  // work)? Only one a windowed instance wrote, and one with no record of
+  // its kind, which may be theirs; an agent's or a test's is not.
+  [[nodiscard]] static bool OfferedToPerson(const UnsavedSlot& slot);
   // The slots in `stateDir` holding a document that no live instance owns --
   // tags not in `live` and not this process's -- newest first.
   static std::vector<UnsavedSlot>
@@ -78,7 +94,11 @@ public:
   // The slot of instance `tag` in `stateDir`, when it holds a document.
   static std::optional<UnsavedSlot> SlotOf(const std::string& stateDir,
                                            const std::string& tag);
-  // Deletes instance `tag`'s slot (its file and its directory) from
+  // Records this instance's kind beside its own unsaved slot, when it has
+  // one (SetInstanceKind; a no-op while the kind is ""). Called after every
+  // write into the slot, and when this instance takes a slot over.
+  static void NoteSlotKind();
+  // Deletes instance `tag`'s slot (its file, its directory and its kind) from
   // `stateDir`. Refuses this instance's own, and a tag that is not a plain
   // name; false with the reason when there is nothing to delete.
   static bool DiscardUnsavedSlot(const std::string& stateDir,

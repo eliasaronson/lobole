@@ -1912,6 +1912,11 @@ int main(int argc, char** argv) {
   // hidden window, which is an agent's or a test's: its work is no one's to
   // be offered.
   const bool visibleWindow = windowed && !args.hidden;
+  // Beside every unsaved slot this instance writes: only the person's own
+  // window's are listed as their Unsaved work.
+  Autosaver::SetInstanceKind(visibleWindow ? "windowed"
+                             : windowed    ? "hidden"
+                                           : sessionMode);
   if (auto session =
           crash::BeginSession(RuntimePaths::UserStateDir(), sessionMode)) {
     SetCrashReportFiles(session->crashFile, session->dumpFile, session->marker,

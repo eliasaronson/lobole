@@ -13,7 +13,9 @@
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <mutex>
+#include <set>
 #include <string>
 #include <utility>
 
@@ -26,11 +28,30 @@ std::string Autosaver::StateDir() {
 namespace {
 
 std::mutex g_tagMutex;
-std::string g_tag; // "" until set: InstanceTag() then says "pid<pid>"
+std::string g_tag;  // "" until set: InstanceTag() then says "pid<pid>"
+std::string g_kind; // "" = no record of this instance's kind
 
 constexpr const char* kUnsavedPrefix = "unsaved-";
 constexpr const char* kFileSuffix = ".autosave.json";
 constexpr const char* kDirSuffix = ".autosave.d";
+// Beside a slot, one word: the kind of instance that wrote it. A sidecar of
+// its own because the slot is a document (or a directory of them) in the
+// document format, which has no place for who wrote it.
+constexpr const char* kKindSuffix = ".autosave.kind";
+
+fs::path KindPath(const fs::path& stateDir, const std::string& tag) {
+  return stateDir / (kUnsavedPrefix + tag + kKindSuffix);
+}
+
+std::string ReadKind(const fs::path& file) {
+  std::error_code ec;
+  if (!fs::is_regular_file(file, ec))
+    return {};
+  std::ifstream in(file);
+  std::string word;
+  in >> word;
+  return word;
+}
 
 // The tag an unsaved slot's name carries; "" for the old shared slot.
 std::string TagOf(const std::string& name) {
@@ -63,6 +84,49 @@ std::string Autosaver::InstanceTag() {
   return g_tag.empty() ? "pid" + std::to_string(platform::CurrentPid()) : g_tag;
 }
 
+void Autosaver::SetInstanceKind(const std::string& kind) {
+  if (kind.find_first_of(" \t\r\n/\\") != std::string::npos) {
+    LOG_WARN("Autosaver: refusing instance kind '{}'", kind);
+    return;
+  }
+  std::lock_guard guard(g_tagMutex);
+  g_kind = kind;
+}
+
+std::string Autosaver::InstanceKind() {
+  std::lock_guard guard(g_tagMutex);
+  return g_kind;
+}
+
+bool Autosaver::OfferedToPerson(const UnsavedSlot& slot) {
+  return slot.kind.empty() || slot.kind == "windowed";
+}
+
+void Autosaver::NoteSlotKind() {
+  const std::string kind = InstanceKind();
+  if (kind.empty())
+    return;
+  const fs::path file = KindPath(StateDir(), InstanceTag());
+  if (ReadKind(file) == kind)
+    return;
+  std::error_code ec;
+  fs::create_directories(file.parent_path(), ec);
+  const fs::path tmp = file.string() + ".tmp";
+  {
+    std::ofstream out(tmp, std::ios::trunc);
+    out << kind << "\n";
+    if (!out) {
+      LOG_WARN("Autosaver: could not write {}", tmp.string());
+      return;
+    }
+  }
+  fs::rename(tmp, file, ec);
+  if (ec) {
+    LOG_WARN("Autosaver: could not write {}: {}", file.string(), ec.message());
+    fs::remove(tmp, ec);
+  }
+}
+
 bool Autosaver::IsUnsavedSlot(const std::string& name) {
   if (name == "unsaved.autosave.json" || name == "unsaved.autosave.d")
     return true;
@@ -80,20 +144,43 @@ void Autosaver::PruneUnsavedSlots(const std::string& stateDir,
   // Per tag, its file and directory together, aged by the newest of them.
   std::map<std::string, std::pair<fs::file_time_type, std::vector<fs::path>>>
       orphans;
+  std::vector<std::pair<std::string, fs::path>> kinds;
+  std::set<std::string> slotted;
   for (const auto& e : fs::directory_iterator(stateDir, ec)) {
     const std::string name = e.path().filename().string();
+    if (name.starts_with(kUnsavedPrefix) && name.ends_with(kKindSuffix)) {
+      kinds.emplace_back(
+          name.substr(std::char_traits<char>::length(kUnsavedPrefix),
+                      name.size() -
+                          std::char_traits<char>::length(kUnsavedPrefix) -
+                          std::char_traits<char>::length(kKindSuffix)),
+          e.path());
+      continue;
+    }
     if (!IsUnsavedSlot(name))
       continue;
     const std::string tag = TagOf(name);
+    slotted.insert(tag);
     if (tag == mine || std::find(live.begin(), live.end(), tag) != live.end())
       continue;
     std::error_code tec;
     const fs::file_time_type t = fs::last_write_time(e.path(), tec);
     auto& [newest, paths] = orphans[tag];
-    if (paths.empty() || t > newest)
+    if (paths.empty()) {
       newest = t;
+      paths.push_back(KindPath(stateDir, tag)); // goes with its slot
+    } else if (t > newest) {
+      newest = t;
+    }
     paths.push_back(e.path());
   }
+  // A record whose slot is gone (cleared by a save) is no one's.
+  for (const auto& [tag, path] : kinds)
+    if (!slotted.contains(tag) && tag != mine &&
+        std::find(live.begin(), live.end(), tag) == live.end()) {
+      std::error_code rm;
+      fs::remove(path, rm);
+    }
   std::vector<std::pair<fs::file_time_type, std::vector<fs::path>>> byAge;
   for (auto& [tag, entry] : orphans)
     byAge.push_back(std::move(entry));
@@ -149,6 +236,8 @@ SlotsByTag(const std::string& stateDir) {
       documents = 1;
     }
     Autosaver::UnsavedSlot& slot = out[TagOf(name)];
+    if (slot.tag.empty() && !TagOf(name).empty())
+      slot.kind = ReadKind(KindPath(stateDir, TagOf(name)));
     slot.tag = TagOf(name);
     slot.documents += documents;
     if (slot.path.empty() || when > slot.modifiedUnix ||
@@ -219,6 +308,8 @@ bool Autosaver::DiscardUnsavedSlot(const std::string& stateDir,
       any = true;
     }
   }
+  if (any && !tag.empty())
+    fs::remove(KindPath(stateDir, tag), ec);
   if (!any && error)
     *error = "no unsaved work named " + tag + " in " + stateDir;
   return any;
@@ -248,6 +339,8 @@ void Autosaver::Clear(const std::string& projectPath) {
   fs::remove(SidecarPath(projectPath), ec);
   // A save means the disk is now the truth, for every document.
   fs::remove_all(SidecarDir(projectPath), ec);
+  if (projectPath.empty())
+    fs::remove(KindPath(StateDir(), InstanceTag()), ec);
 }
 
 std::string Autosaver::SidecarDir(const std::string& projectPath) {
@@ -331,6 +424,8 @@ bool Autosaver::MaybeSave(const Document& doc, const std::string& projectPath,
     return false;
   }
 
+  if (projectPath.empty())
+    NoteSlotKind(); // the unsaved slot says who wrote it
   m_lastSaveTime = now;
   m_lastSavedDocInstance = doc.InstanceId();
   m_lastSavedDocVersion = doc.SaveStamp();

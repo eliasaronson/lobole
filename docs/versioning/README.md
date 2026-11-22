@@ -425,8 +425,29 @@ into its report.
 
 A slot outlives its session after a dirty exit. A stopped session's is
 offered back at the next start ([below](#a-stop-offers-unsaved-work-back)),
-and every one no running instance owns is listed under File > Open Recent >
-Unsaved work. `crash::CollectDeadSessions`, after copying the dead sessions'
+and every one no running instance owns that the person's own app wrote is
+listed under File > Open Recent > Unsaved work.
+
+**Each slot records the kind of instance that wrote it**, so an agent's
+never-saved work is not offered to the person: before, every headless
+session an agent ran left a "1 document" row in that menu. The record is a
+one-word sidecar beside the slot, `unsaved-<instance>.autosave.kind`
+(`windowed`, `hidden`, `headless`, `offscreen` or `gui-tests`;
+`Autosaver::SetInstanceKind`, set by `main()` from the same flags that pick
+the session mode), written temp + rename after every write into the slot
+(`Autosaver::NoteSlotKind`). A sidecar rather than a field in the slot,
+because the slot IS a document in the document format (or a directory of
+them): who wrote it is not a property of the document, and a field there
+would be a format change for every reader of it to carry. The record goes
+with its slot -- `Clear`, `DiscardUnsavedSlot` and `PruneUnsavedSlots`
+delete it, and the prune also deletes a record whose slot is gone -- and a
+slot this instance takes over is recorded as this instance's. The menu lists
+a slot a `windowed` instance wrote, and one with no record
+(`Autosaver::OfferedToPerson`): a slot written before the record was may be
+the person's. `autosave_status`'s `unsaved_slots` still lists every one,
+with its `kind` and whether it is `offered`. The stop offer is unchanged:
+only the visible windowed app leaves a stop note, so only its work is
+offered back at a start. `crash::CollectDeadSessions`, after copying the dead sessions'
 slots into their reports, prunes the slots no live session owns beyond the
 newest ten (`kKeepUnsavedSlots`; the shared slot older builds left counts as
 one of them) — never a live session's, never its own, and never one a stop
@@ -493,15 +514,17 @@ When it does not:
 - `--headless`, `--offscreen`, `--hidden` and `--gui-tests` runs: they leave
   no note when stopped and take none when started. A hidden window is an
   agent's or a test's, and every instance on the machine shares the state
-  dir -- its work is no one's to be offered to the person at their app. Their
-  slots are still listed by Open Recent, and their notes still kept from
-  pruning, for the visible start they are for;
+  dir -- its work is no one's to be offered to the person at their app. Nor
+  are their slots listed by Open Recent, which lists only a windowed
+  instance's ([above](#every-instance-has-its-own-unsaved-slot)); their notes
+  are still kept from pruning, for the visible start they are for;
 - a live session's slot, ever: notes and markers are checked by their lock
   (`crash::LiveSessionStems`).
 
-`autosave_status` reports the pending offer (`unsaved_offer`) and the slots
-Open Recent lists (`unsaved_slots`), each `{path, tag, modified_unix,
-documents}`.
+`autosave_status` reports the pending offer (`unsaved_offer`) and every
+slot no live instance owns (`unsaved_slots`), each `{path, tag,
+modified_unix, documents, kind, offered}` -- `offered` is whether Open
+Recent lists it.
 
 A stopped session that had a SAVED project leaves its sidecar beside the
 project, newer than the project file: opening that project by File > Open
@@ -911,7 +934,7 @@ hidden `[.reader_corpus]` case over generator output under `scratch/`
 | `format_version_gate` (`tools/format-version.py check`) | `kVersion` is `kVersionLanded` + `kVersionPending`; the pending rows, golden names and `vNEXT` placeholders agree with it |
 | `tests/test_serialization.cpp` `[io]` | round trips, directory form; duplicate id files, duplicate index ids and conflict markers refused; unknown feature, entity and mate types refused by name |
 | `tests/test_baked_geometry.cpp` `[baked]` | a baked open executes nothing; a recipe edited behind the app's back and a broken blob rebuild; a failed model is not baked; datums, warnings and bends survive a baked open; `commit_geometry` off |
-| `tests/test_autosaver.cpp` `[autosave]` | sidecar paths, fires only when dirty + changed + due, a replaced document at the same version still autosaves; `Clear("")` takes this instance's unsaved slot and no other's; orphaned slots pruned beyond the count, never a live one |
+| `tests/test_autosaver.cpp` `[autosave]` | sidecar paths, fires only when dirty + changed + due, a replaced document at the same version still autosaves; `Clear("")` takes this instance's unsaved slot and no other's; orphaned slots pruned beyond the count, never a live one; each slot's kind recorded, only a windowed instance's (or an unrecorded one) offered, the record going with its slot |
 | `tests/autosave_instances_smoke.py` | two instances on one state dir: each autosaves its own unsaved slot, and one's save leaves the other's alone |
 | `tests/test_save_stamp.cpp` `[savestamp]` | each kind of saved edit that regenerates nothing (tolerance, units, tube, print process, configuration, study, asset; assembly units and undo; drawing undo; a job's GUI and RPC edits and undo) reads dirty and clean after a save; a study run is not an edit; autosave writes them |
 | `tests/test_conventions.cpp` | every `Document` mutator regenerates or marks the edit; no new mutable accessor |

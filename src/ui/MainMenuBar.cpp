@@ -63,7 +63,7 @@ bool BeginTopMenu(AppState& state, const char* label) {
 // entries are disabled and say why, with a one-click way to drop them.
 //
 // Below them, **Unsaved work**: every never-saved session's work that no
-// running instance owns, newest first
+// running instance owns and a windowed instance wrote, newest first
 // (docs/versioning/README.md#a-stop-offers-unsaved-work-back). Read once a
 // second at most while the menu is drawn: it lists a directory and tries a
 // lock per session.
@@ -73,8 +73,13 @@ void DrawOpenRecentMenu(AppState& state, bool fileMenuAppearing) {
   static double unsavedAt = -1.0;
   if (fileMenuAppearing || unsavedAt < 0.0 ||
       ImGui::GetTime() - unsavedAt > 1.0) {
+    // The person's own: an agent's or a test's instance shares the state
+    // dir, and its never-saved work is no one's to be offered.
     unsaved = Autosaver::OrphanUnsavedSlots(
         Autosaver::StateDir(), crash::LiveSessionStems(Autosaver::StateDir()));
+    std::erase_if(unsaved, [](const Autosaver::UnsavedSlot& slot) {
+      return !Autosaver::OfferedToPerson(slot);
+    });
     unsavedAt = ImGui::GetTime();
   }
   if (!ImGui::BeginMenu("Open Recent", !recent.empty() || !unsaved.empty()))

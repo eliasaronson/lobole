@@ -13,6 +13,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <map>
 #include <unistd.h>
 
 namespace fs = std::filesystem;
@@ -313,4 +314,70 @@ TEST_CASE("Discarding unsaved work deletes that instance's slot and no other",
   CHECK_FALSE(Autosaver::DiscardUnsavedSlot(state.string(), "gone", &error));
   CHECK(error.find("no unsaved work") != std::string::npos);
   fs::remove_all(state);
+}
+
+// Agents' instances share the state dir with the person's app, and each
+// leaves its never-saved work there: File > Open Recent > Unsaved work
+// filled with a dozen headless sessions' boxes. Every slot records the kind
+// of instance that wrote it; only a windowed one's -- or one written before
+// the record was, which may be the person's -- is offered.
+TEST_CASE("Only a windowed instance's unsaved work is offered to the person",
+          "[autosave]") {
+  const fs::path root = TempDir("kinds");
+  REQUIRE(::setenv("XDG_STATE_HOME", root.string().c_str(), 1) == 0);
+  const fs::path state = Autosaver::StateDir();
+  Document doc = MakeDoc();
+  const auto write = [&](const std::string& tag, const std::string& kind) {
+    Autosaver::SetInstanceTag(tag);
+    Autosaver::SetInstanceKind(kind);
+    Autosaver saver(0.001);
+    saver.Prime(0.0);
+    REQUIRE(saver.MaybeSave(doc, "", doc.SaveStamp() - 1, 1.0));
+  };
+  write("20261122-010000-1", "headless");
+  write("20261122-010000-2", "windowed");
+  write("20261122-010000-3", "hidden");
+  write("20261122-010000-4", ""); // as builds before the record wrote
+  const auto kindFile = [&](const std::string& tag) {
+    return state / ("unsaved-" + tag + ".autosave.kind");
+  };
+  CHECK(fs::exists(kindFile("20261122-010000-1")));
+  CHECK_FALSE(fs::exists(kindFile("20261122-010000-4")));
+
+  Autosaver::SetInstanceTag("20261122-020000-9");
+  Autosaver::SetInstanceKind("windowed");
+  std::map<std::string, Autosaver::UnsavedSlot> byTag;
+  for (const auto& s : Autosaver::OrphanUnsavedSlots(state.string(), {}))
+    byTag[s.tag] = s;
+  REQUIRE(byTag.size() == 4);
+  CHECK(byTag["20261122-010000-1"].kind == "headless");
+  CHECK(byTag["20261122-010000-2"].kind == "windowed");
+  CHECK(byTag["20261122-010000-3"].kind == "hidden");
+  CHECK(byTag["20261122-010000-4"].kind.empty());
+  CHECK_FALSE(Autosaver::OfferedToPerson(byTag["20261122-010000-1"]));
+  CHECK(Autosaver::OfferedToPerson(byTag["20261122-010000-2"]));
+  CHECK_FALSE(Autosaver::OfferedToPerson(byTag["20261122-010000-3"]));
+  CHECK(Autosaver::OfferedToPerson(byTag["20261122-010000-4"]));
+  // The record is not a slot of its own.
+  CHECK_FALSE(
+      Autosaver::IsUnsavedSlot("unsaved-20261122-010000-1.autosave.kind"));
+  CHECK(Autosaver::SlotOf(state.string(), "20261122-010000-1")->kind ==
+        "headless");
+
+  // The record goes with its slot: discarded, cleared, pruned.
+  std::string error;
+  CHECK(Autosaver::DiscardUnsavedSlot(state.string(), "20261122-010000-1",
+                                      &error));
+  CHECK_FALSE(fs::exists(kindFile("20261122-010000-1")));
+  Autosaver::SetInstanceTag("20261122-010000-2");
+  Autosaver::Clear("");
+  CHECK_FALSE(fs::exists(kindFile("20261122-010000-2")));
+  Autosaver::SetInstanceTag("20261122-020000-9");
+  std::ofstream(kindFile("nobody")) << "headless\n"; // its slot is gone
+  Autosaver::PruneUnsavedSlots(state.string(), {}, 1);
+  CHECK_FALSE(fs::exists(kindFile("nobody")));
+  CHECK_FALSE((fs::exists(kindFile("20261122-010000-3")) &&
+               !fs::exists(state / "unsaved-20261122-010000-3.autosave.json")));
+  Autosaver::SetInstanceKind("");
+  fs::remove_all(root);
 }

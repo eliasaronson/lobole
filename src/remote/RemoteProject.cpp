@@ -358,8 +358,11 @@ static constexpr MethodDoc ProjectMethods[] = {
      "recovered. Also `unsaved_offer`: the never-saved work a stopped "
      "session left, which this start offers (windowed only; null when there "
      "is none), and `unsaved_slots`: every never-saved session's work no "
-     "running instance owns, newest first, as File > Open Recent > Unsaved "
-     "work lists it. Each is {path, tag, modified_unix, documents}; "
+     "running instance owns, newest first. Each is {path, tag, "
+     "modified_unix, documents, kind, offered}: `kind` the instance that "
+     "wrote it (windowed, hidden, headless, offscreen, gui-tests; null for "
+     "a slot with no record), and `offered` whether File > Open Recent > "
+     "Unsaved work lists it (a windowed instance's, or one with no record). "
      "open_project on a `path` opens that work untitled and dirty.",
      ""},
     {"project_changed_on_disk",
@@ -1210,7 +1213,9 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
       return json{{"path", slot.path},
                   {"tag", slot.tag},
                   {"modified_unix", slot.modifiedUnix},
-                  {"documents", slot.documents}};
+                  {"documents", slot.documents},
+                  {"kind", slot.kind.empty() ? json(nullptr) : json(slot.kind)},
+                  {"offered", Autosaver::OfferedToPerson(slot)}};
     };
     json slots = json::array();
     for (const Autosaver::UnsavedSlot& slot : Autosaver::OrphanUnsavedSlots(

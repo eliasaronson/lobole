@@ -947,7 +947,8 @@ void RegisterProjectGuiTests(ImGuiTestEngine* engine) {
   };
 
   // File > Open Recent > Unsaved work lists every never-saved session's work
-  // no running instance owns, newest first; a pick opens it untitled and
+  // no running instance owns and a windowed instance wrote (an agent's
+  // headless slot is left out), newest first; a pick opens it untitled and
   // dirty. A slot of several documents is a submenu of them. File > Open
   // File... takes the same road for a .json, and refuses anything else by
   // naming what it accepts. And a SAVED project with a newer autosave --
@@ -959,26 +960,44 @@ void RegisterProjectGuiTests(ImGuiTestEngine* engine) {
     const fs::path state(Autosaver::StateDir());
     fs::create_directories(state);
     RecentProjects::Clear();
-    const auto save = [&](const fs::path& p, double width) {
+    const auto save = [&](const fs::path& p, double width,
+                          const char* name = "Box 1") {
       Document d;
-      d.AddFeature(std::make_unique<BoxFeature>("Box 1", glm::vec3(0), width,
-                                                10.0, 10.0));
+      d.AddFeature(
+          std::make_unique<BoxFeature>(name, glm::vec3(0), width, 10.0, 10.0));
       fs::create_directories(p.parent_path());
       IM_CHECK(DocumentIO::Save(d, p.string()).has_value());
     };
     const fs::path one = state / "unsaved-20200303-000000-31.autosave.json";
     const fs::path several = state / "unsaved-20200303-000000-32.autosave.d";
+    // An agent's: a headless instance's slot, recorded as such, and the
+    // newest -- not the person's, so not listed.
+    const fs::path agent = state / "unsaved-20200303-000000-33.autosave.json";
+    const fs::path agentKind =
+        state / "unsaved-20200303-000000-33.autosave.kind";
     save(one, 27.0);
     save(several / "parts" / "Bracket.json", 5.0);
     save(several / "parts" / "Plate.json", 6.0);
-    // The one document is the newest.
+    save(agent, 3.0, "Agent box");
+    std::ofstream(agentKind) << "headless\n";
+    // The one document is the newest of the person's.
     fs::last_write_time(several, fs::file_time_type::clock::now() -
                                      std::chrono::hours(2));
     fs::last_write_time(one, fs::file_time_type::clock::now());
-    const auto listed = Autosaver::OrphanUnsavedSlots(
+    fs::last_write_time(agent, fs::file_time_type::clock::now() +
+                                   std::chrono::seconds(5));
+    std::vector<Autosaver::UnsavedSlot> listed = Autosaver::OrphanUnsavedSlots(
         state.string(), crash::LiveSessionStems(state));
+    bool agentThere = false;
+    for (const Autosaver::UnsavedSlot& slot : listed)
+      agentThere |= slot.path == agent.string() && slot.kind == "headless";
+    IM_CHECK(agentThere); // listed by the RPC's question, not offered
+    std::erase_if(listed, [](const Autosaver::UnsavedSlot& slot) {
+      return !Autosaver::OfferedToPerson(slot);
+    });
     int at = -1, atSeveral = -1;
     for (size_t i = 0; i < listed.size(); i++) {
+      IM_CHECK(listed[i].path != agent.string());
       if (listed[i].path == one.string())
         at = static_cast<int>(i);
       if (listed[i].path == several.string())
@@ -998,6 +1017,8 @@ void RegisterProjectGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(WaitForOpen(ctx));
     ctx->Yield(2);
     IM_CHECK(Doc()->FeatureCount() > 0);
+    // The person's slot, not the newer agent's the menu leaves out.
+    IM_CHECK_EQ(Doc()->GetFeature(0)->GetName(), std::string("Box 1"));
     IM_CHECK(s_App->projectPath.empty());
     IM_CHECK(ui::ProjectDirty(*s_App));
     IM_CHECK(RecentProjects::List().empty());
@@ -1052,6 +1073,8 @@ void RegisterProjectGuiTests(ImGuiTestEngine* engine) {
     fs::remove_all(dir);
     fs::remove(one);
     fs::remove_all(several);
+    fs::remove(agent);
+    fs::remove(agentKind);
     RecentProjects::Clear();
   };
 

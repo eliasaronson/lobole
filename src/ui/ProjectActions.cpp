@@ -1474,8 +1474,13 @@ void MarkUnsavedWorkOpened(AppState& state, const std::string& path) {
       std::find(live.begin(), live.end(), tag) == live.end() &&
       !fs::exists(mine, ec) && !fs::exists(Autosaver::SidecarDir(""), ec)) {
     fs::rename(from, mine, ec);
-    if (ec)
+    if (ec) {
       LOG_WARN("Could not take over {}: {}", path, ec.message());
+    } else {
+      // Now this instance's: its record of who wrote it goes with it.
+      fs::remove(stateDir / ("unsaved-" + tag + ".autosave.kind"), ec);
+      Autosaver::NoteSlotKind();
+    }
   }
 }
 } // namespace
@@ -1868,6 +1873,8 @@ int AutosaveProject(AppState& state, Autosaver& autosaver, double now) {
   }
   if (written > 0) {
     autosaver.MarkSaved(now);
+    if (state.projectPath.empty())
+      Autosaver::NoteSlotKind(); // the unsaved slot says who wrote it
     LOG_INFO("Autosaved {} document(s) to {}", written,
              Autosaver::SidecarDir(state.projectPath));
   }

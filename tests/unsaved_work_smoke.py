@@ -17,9 +17,11 @@ In a scratch XDG_STATE_HOME shared by these launches and nothing else:
      gives) makes an unsaved edit and autosaves it; SIGTERM stops it, and
      the stop note is left;
   2. a --headless start and a --hidden window offer nothing, and leave the
-     note for the start it is for;
+     note for the start it is for; the headless one leaves never-saved work
+     of its own, recorded as a headless instance's;
   3. the next visible windowed start offers it (autosave_status), with no
-     crash report;
+     crash report, and lists the headless instance's work as not offered
+     (File > Open Recent > Unsaved work shows only a windowed instance's);
   4. open_project on the offered slot recovers it: untitled, dirty, never
      saved, the offer answered, autosaving into the new instance's own slot.
 
@@ -83,6 +85,10 @@ def main():
                 for p in slots()))
             slot = slots()[0]
             expect(d.call("ping")["dirty"], "the edit is unsaved")
+            kind_file = slot[:-len(".json")] + ".kind"
+            expect(os.path.exists(kind_file) and
+                   open(kind_file).read().strip() == "windowed",
+                   "the slot records that a windowed instance wrote it")
             app.proc.send_signal(signal.SIGTERM)
             app.proc.wait(timeout=30)
         notes = glob.glob(os.path.join(sessions, "*.stopped"))
@@ -98,6 +104,19 @@ def main():
                    "a headless start offers nothing")
             expect([s["path"] for s in status["unsaved_slots"]] == [slot],
                    "but lists the work as no live session's")
+            # An agent's never-saved work: autosaved, left behind by a
+            # dirty exit, and never offered to the person.
+            headless.client.call("add_feature", feature={
+                "type": "Box", "name": "AgentBox", "on": "Top",
+                "width": 5, "depth": 5, "height": 5})
+            headless.client.call("autosave_now")
+        agent_slots = [p for p in slots() if p != slot]
+        expect(len(agent_slots) == 1 and "AgentBox" in open(
+            agent_slots[0], errors="replace").read(),
+            "the headless instance left its own slot behind")
+        agent_slot = agent_slots[0]
+        expect(open(agent_slot[:-len(".json")] + ".kind").read().strip()
+               == "headless", "recorded as a headless instance's")
         with launch(binary, extra_args=["--hidden"], env=env,
                     headless=False) as hidden:
             expect(hidden.client.call("autosave_status")["unsaved_offer"]
@@ -118,6 +137,13 @@ def main():
                    "and calls nothing a crash")
             expect(not glob.glob(os.path.join(sessions, "*.stopped")),
                    "the note is taken: said once")
+            listed = {s["path"]: s for s in status["unsaved_slots"]}
+            expect(listed.get(slot, {}).get("kind") == "windowed" and
+                   listed[slot]["offered"],
+                   "the windowed instance's work is offered as Unsaved work")
+            expect(listed.get(agent_slot, {}).get("kind") == "headless" and
+                   not listed[agent_slot]["offered"],
+                   "the agent's is listed by the RPC but not offered")
 
             # 4 ---------------------------------------------------------
             reply = d.call("open_project", path=slot)
