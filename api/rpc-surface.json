@@ -2,6 +2,7 @@
  "api_version": 1,
  "released": false,
  "methods": {
+  "accept_candidates": ["max_move_mm", "max_sigmas", "only", "sketch_id"],
   "accept_pending": [],
   "add_assembly": ["name"],
   "add_assertion": ["a", "b", "min_mm", "mode", "name", "why"],
@@ -331,6 +332,7 @@
   "set_tube_rules": ["clear", "former_radii_mm", "former_radii_mm_expr", "material", "max_thinning", "max_thinning_expr", "min_straight_mm", "min_straight_mm_expr", "tail_length_mm", "tail_length_mm_expr"],
   "set_units": ["angle", "length", "mass"],
   "set_variable": ["comment", "expression", "name", "scope"],
+  "sketch_candidates": ["max_sigmas", "sketch_id"],
   "solve_assembly": [],
   "split": ["at", "crossing", "entity_id", "sketch_id"],
   "split_for_printing": ["bed_mm", "body", "cuts", "dry_run", "part", "prefix"],

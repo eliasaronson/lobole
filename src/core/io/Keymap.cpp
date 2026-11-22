@@ -286,6 +286,8 @@ const Binding kDefaults[] = {
     {"sketch.mirror", Context::Sketch, "Mirror", "Modify", "Shift+M"},
     {"sketch.pattern", Context::Sketch, "Pattern", "Modify", "P"},
     {"sketch.dimension", Context::Sketch, "Dimension", "Modify", "D"},
+    {"sketch.scan_relations", Context::Sketch,
+     "Relations the scan supports (traced geometry)", "Modify", ""},
     {"sketch.toggle_construction", Context::Sketch,
      "Toggle construction on the selection", "Modify", "Q"},
     {"sketch.clear_selection", Context::Sketch, "Clear the selection", "Modify",

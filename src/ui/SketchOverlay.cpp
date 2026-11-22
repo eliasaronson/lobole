@@ -319,7 +319,10 @@ std::vector<PrimVertex> BuildActiveSketchPrimitives(AppState& state,
             edit.hoveredRef.entity == id) ||
            (edit.tool == SketchTool::Fillet && id != 0 &&
             (edit.filletPreviewCurves[0] == id ||
-             edit.filletPreviewCurves[1] == id));
+             edit.filletPreviewCurves[1] == id)) ||
+           // The Scan relations row under the cursor lights its entities.
+           std::find(edit.litEntities.begin(), edit.litEntities.end(), id) !=
+               edit.litEntities.end();
   };
 
   // Fully-constrained sketches read in a neutral "solved" colour; under-

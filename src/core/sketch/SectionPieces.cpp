@@ -268,6 +268,273 @@ Model FitArc(const std::vector<glm::dvec2>& pts) {
   return m;
 }
 
+// ---- a round held tangent to its lines
+// ---------------------------------------
+
+// Solves the n x n system A x = b (n <= 5) by elimination with partial
+// pivoting; false when singular against the matrix's own scale.
+bool SolveN(int n, double A[5][5], double b[5], double x[5]) {
+  double M[5][6];
+  double scale = 0.0;
+  for (int i = 0; i < n; i++) {
+    for (int j = 0; j < n; j++) {
+      M[i][j] = A[i][j];
+      scale = std::max(scale, std::abs(A[i][j]));
+    }
+    M[i][n] = b[i];
+  }
+  if (!(scale > 0.0))
+    return false;
+  for (int c = 0; c < n; c++) {
+    int piv = c;
+    for (int r = c + 1; r < n; r++)
+      if (std::abs(M[r][c]) > std::abs(M[piv][c]))
+        piv = r;
+    if (!(std::abs(M[piv][c]) > 1e-14 * scale))
+      return false;
+    if (piv != c)
+      for (int j = 0; j <= n; j++)
+        std::swap(M[c][j], M[piv][j]);
+    for (int r = 0; r < n; r++) {
+      if (r == c)
+        continue;
+      const double f = M[r][c] / M[c][c];
+      for (int j = c; j <= n; j++)
+        M[r][j] -= f * M[c][j];
+    }
+  }
+  for (int i = 0; i < n; i++)
+    x[i] = M[i][n] / M[i][i];
+  return true;
+}
+
+double WrapPositive(double a) {
+  a = std::fmod(a, angles::kTwoPi);
+  return a < 0.0 ? a + angles::kTwoPi : a;
+}
+
+// The round and the lines it is held tangent to, as one curve: the circle
+// (centre, radius) and, per tangent side, the angle about the centre of
+// where that line touches it. A point counts for the circle while its
+// angle lies within the round's sweep, else for the line on the side it is
+// nearer (a free side's points are the circle's).
+struct TangentRound {
+  int sense = 1; // +1 when the chain turns counter-clockwise round it
+  bool tangent[2] = {false, false};
+  double freeAngle[2] = {0.0, 0.0}; // a free side's end, about the centre
+
+  int Params() const { return 3 + int(tangent[0]) + int(tangent[1]); }
+
+  // The residual of p and its row of the Jacobian.
+  double Residual(const double* x, const glm::dvec2& p, double* J) const {
+    const glm::dvec2 c(x[0], x[1]);
+    const double r = x[2];
+    double phi[2];
+    int k = 3;
+    for (int s = 0; s < 2; s++)
+      phi[s] = tangent[s] ? x[k++] : freeAngle[s];
+    const glm::dvec2 q = p - c;
+    const double alpha = std::atan2(q.y, q.x);
+    const double sweep = WrapPositive(sense * (phi[1] - phi[0]));
+    const double pos = WrapPositive(sense * (alpha - phi[0]));
+    for (int i = 0; i < 5; i++)
+      J[i] = 0.0;
+    int side = -1;
+    if (pos > sweep) {
+      // Past the end, or before the start: whichever is nearer.
+      side = (pos - sweep) < (angles::kTwoPi - pos) ? 1 : 0;
+      if (!tangent[side])
+        side = -1;
+    }
+    if (side < 0) {
+      const double d = glm::length(q);
+      if (d > 0.0) {
+        J[0] = -q.x / d;
+        J[1] = -q.y / d;
+      }
+      J[2] = -1.0;
+      return d - r;
+    }
+    const glm::dvec2 u(std::cos(phi[side]), std::sin(phi[side]));
+    const glm::dvec2 up(-u.y, u.x);
+    J[0] = -u.x;
+    J[1] = -u.y;
+    J[2] = -1.0;
+    J[3 + (side == 1 && tangent[0] ? 1 : 0)] = glm::dot(up, q);
+    return glm::dot(u, q) - r;
+  }
+};
+
+} // namespace
+
+RoundFit FitTangentRound(const std::vector<glm::dvec2>& arcPts,
+                         const glm::dvec2& centre, double radius,
+                         const RoundSide& before, const RoundSide& after,
+                         double floorSigma) {
+  RoundFit out;
+  if (arcPts.size() < static_cast<size_t>(T::kMinPiecePoints) ||
+      !(radius > 0.0))
+    return out;
+  TangentRound tr;
+  double turn = 0.0;
+  for (size_t k = 1; k < arcPts.size(); k++) {
+    const glm::dvec2 q0 = arcPts[k - 1] - centre, q1 = arcPts[k] - centre;
+    turn += std::atan2(Cross(q0, q1), glm::dot(q0, q1));
+  }
+  tr.sense = turn >= 0.0 ? 1 : -1;
+  const RoundSide* sides[2] = {&before, &after};
+  double x[5] = {centre.x, centre.y, radius, 0.0, 0.0};
+  // Each line's points nearest the round: as many as the round has, and
+  // at least kRoundLinePoints -- the line near the round decides where it
+  // touches; far along it, a wall's own wander would.
+  const size_t window =
+      std::max<size_t>(arcPts.size(), static_cast<size_t>(T::kRoundLinePoints));
+  std::vector<glm::dvec2> pts;
+  std::vector<glm::dvec2> win[2];
+  int k = 3;
+  for (int s = 0; s < 2; s++) {
+    const RoundSide& side = *sides[s];
+    const glm::dvec2 end = s == 0 ? arcPts.front() : arcPts.back();
+    tr.freeAngle[s] = std::atan2(end.y - centre.y, end.x - centre.x);
+    if (!side.tangent || side.pts.size() < 2)
+      continue;
+    const size_t m = std::min(window, side.pts.size());
+    win[s] =
+        s == 0
+            ? std::vector<glm::dvec2>(side.pts.end() - m, side.pts.end())
+            : std::vector<glm::dvec2>(side.pts.begin(), side.pts.begin() + m);
+    // Where the line, as fitted on its own, touches the circle.
+    const glm::dvec2 foot =
+        side.p0 + side.dir * glm::dot(centre - side.p0, side.dir);
+    const glm::dvec2 u = foot - centre;
+    if (!(glm::length(u) > 0.0))
+      return out;
+    tr.tangent[s] = true;
+    x[k++] = std::atan2(u.y, u.x);
+  }
+  out.tangentEnds = int(tr.tangent[0]) + int(tr.tangent[1]);
+  if (out.tangentEnds == 0)
+    return out;
+  pts.insert(pts.end(), win[0].begin(), win[0].end());
+  pts.insert(pts.end(), arcPts.begin(), arcPts.end());
+  pts.insert(pts.end(), win[1].begin(), win[1].end());
+  const int np = tr.Params();
+  const size_t n = pts.size();
+  if (n <= static_cast<size_t>(np) + 2)
+    return out;
+  std::vector<double> res(n);
+  const auto evaluate = [&](const double* p, double A[5][5], double g[5]) {
+    double ssr = 0.0, J[5];
+    if (A != nullptr)
+      for (int i = 0; i < 5; i++) {
+        g[i] = 0.0;
+        for (int j = 0; j < 5; j++)
+          A[i][j] = 0.0;
+      }
+    for (size_t q = 0; q < n; q++) {
+      res[q] = tr.Residual(p, pts[q], J);
+      ssr += res[q] * res[q];
+      if (A == nullptr)
+        continue;
+      for (int i = 0; i < np; i++) {
+        g[i] -= J[i] * res[q];
+        for (int j = 0; j < np; j++)
+          A[i][j] += J[i] * J[j];
+      }
+    }
+    return ssr;
+  };
+  // Levenberg-Marquardt from the free fit.
+  double A[5][5], g[5];
+  double ssr = evaluate(x, A, g);
+  double lambda = 1e-3;
+  for (int it = 0; it < 60; it++) {
+    double D[5][5], step[5], trial[5];
+    for (int i = 0; i < np; i++)
+      for (int j = 0; j < np; j++)
+        D[i][j] = A[i][j] + (i == j ? lambda * A[i][i] : 0.0);
+    if (!SolveN(np, D, g, step))
+      break;
+    for (int i = 0; i < 5; i++)
+      trial[i] = x[i] + (i < np ? step[i] : 0.0);
+    const double s = evaluate(trial, nullptr, nullptr);
+    if (s < ssr && trial[2] > 0.0) {
+      const double gain = ssr - s;
+      std::copy(trial, trial + 5, x);
+      ssr = evaluate(x, A, g);
+      lambda = std::max(lambda * 0.3, 1e-9);
+      if (gain < 1e-14 * (ssr + floorSigma * floorSigma))
+        break;
+    } else {
+      lambda *= 10.0;
+      if (lambda > 1e8)
+        break;
+    }
+  }
+  ssr = evaluate(x, A, g);
+  const double dof = double(n) - double(np);
+  const double s2 = std::max(ssr / dof, floorSigma * floorSigma * 1e-4);
+  const double rho = LagOne(res);
+  out.inflation = (1.0 + rho) / (1.0 - rho);
+  // The covariance: the inverse of the normal matrix, column by column.
+  double cov[5][5];
+  for (int c = 0; c < np; c++) {
+    double e[5] = {0, 0, 0, 0, 0}, col[5];
+    e[c] = 1.0;
+    double Ac[5][5];
+    for (int i = 0; i < 5; i++)
+      for (int j = 0; j < 5; j++)
+        Ac[i][j] = A[i][j];
+    if (!SolveN(np, Ac, e, col))
+      return out;
+    for (int i = 0; i < np; i++)
+      cov[i][c] = col[i];
+  }
+  const double kk = s2 * out.inflation;
+  out.centre = {x[0], x[1]};
+  out.radius = x[2];
+  out.centreSigmaMm = {std::sqrt(std::max(0.0, kk * cov[0][0])),
+                       std::sqrt(std::max(0.0, kk * cov[1][1]))};
+  out.radiusSigmaMm = std::sqrt(std::max(0.0, kk * cov[2][2]));
+  // Against the same points fitted free -- the circle on its own points,
+  // each line on its window -- what holding the tangencies costs, in the
+  // free fit's own sigmas.
+  double free = 0.0;
+  Model circle;
+  circle.arc = true;
+  circle.centre = centre;
+  circle.radius = radius;
+  circle.ok = true;
+  const Model refit = FitArc(arcPts);
+  const Model& c0 = refit.ok ? refit : circle;
+  std::vector<double> freeRes;
+  for (int s = 0; s < 2; s++) {
+    if (s == 1)
+      for (const glm::dvec2& p : arcPts)
+        freeRes.push_back(c0.Residual(p));
+    if (win[s].empty())
+      continue;
+    const Model l = FitLine(win[s]);
+    for (const glm::dvec2& p : win[s])
+      freeRes.push_back(l.ok ? l.Residual(p) : 0.0);
+  }
+  for (double v : freeRes)
+    free += v * v;
+  const double freeDof = double(n) - double(3 + 2 * out.tangentEnds);
+  const double freeRho = LagOne(freeRes);
+  // An exact cut scatters as its floor does (the pieces fit's rule): what
+  // holding it costs is judged against that, not against rounding.
+  const double freeS2 =
+      std::max(free / std::max(freeDof, 1.0), floorSigma * floorSigma) *
+      (1.0 + freeRho) / (1.0 - freeRho);
+  out.tangentSigmas = std::sqrt(std::max(0.0, ssr - free) / freeS2);
+  out.ok = std::isfinite(out.radius) && out.radius > 0.0 &&
+           std::isfinite(out.radiusSigmaMm);
+  return out;
+}
+
+namespace {
+
 // ---- the chain -------------------------------------------------------------
 
 // Points by index on an open chain or round a closed one; a piece is a span
@@ -644,6 +911,60 @@ double LineAllowance(size_t n, const Context& cx) {
   const double allow = 1.0 + (T::kLineWander - 1.0) *
                                  std::min(1.0, double(n) / T::kWanderPoints);
   return cx.sigma * (1.0 + T::kSigmaSlack * cx.s) * allow;
+}
+
+// The uncertainty of the piece's parameters from the fit's normal
+// equations, sigma^2 the residuals' variance, widened by their
+// correlation.
+void Uncertainty(const Model& m, const std::vector<glm::dvec2>& pts,
+                 double floor, PieceFit& f) {
+  const size_t n = pts.size();
+  std::vector<double> r(n);
+  double ssr = 0.0;
+  for (size_t k = 0; k < n; k++) {
+    r[k] = m.Residual(pts[k]);
+    ssr += r[k] * r[k];
+  }
+  const int params = m.arc ? 3 : 2;
+  const double dof = double(std::max<int>(1, int(n) - params));
+  const double s2 = std::max(ssr / dof, floor * floor * 1e-4);
+  f.sigmaMm = std::sqrt(ssr / double(std::max<size_t>(n, 1)));
+  const double rho = LagOne(r);
+  f.inflation = (1.0 + rho) / (1.0 - rho);
+  size_t at = 0;
+  f.stretchMm = WorstStretch(r, T::kStretchPoints, &at);
+  if (!m.arc) {
+    const glm::dvec2 c = Centroid(pts);
+    double stt = 0.0;
+    for (const glm::dvec2& p : pts) {
+      const double t = glm::dot(p - c, m.dir);
+      stt += t * t;
+    }
+    f.offsetSigmaMm = std::sqrt(s2 * f.inflation / double(n));
+    f.angleSigma = stt > 0.0 ? std::sqrt(s2 * f.inflation / stt) : kInf;
+    return;
+  }
+  double A[3][3] = {{0, 0, 0}, {0, 0, 0}, {0, 0, 0}};
+  for (const glm::dvec2& p : pts) {
+    const glm::dvec2 q = p - m.centre;
+    const double d = glm::length(q);
+    if (!(d > 0.0))
+      continue;
+    const double J[3] = {-q.x / d, -q.y / d, -1.0};
+    for (int i = 0; i < 3; i++)
+      for (int j = 0; j < 3; j++)
+        A[i][j] += J[i] * J[j];
+  }
+  double inv[3][3];
+  if (!Invert3(A, inv)) {
+    f.centreSigmaMm = glm::dvec2(kInf);
+    f.radiusSigmaMm = kInf;
+    return;
+  }
+  const double k = s2 * f.inflation;
+  f.centreSigmaMm = {std::sqrt(std::max(0.0, k * inv[0][0])),
+                     std::sqrt(std::max(0.0, k * inv[1][1]))};
+  f.radiusSigmaMm = std::sqrt(std::max(0.0, k * inv[2][2]));
 }
 
 class PiecesFitter {
@@ -1121,64 +1442,64 @@ private:
     return changed;
   }
 
-  // The uncertainty of the piece's parameters from the fit's normal
-  // equations, sigma^2 the residuals' variance, widened by their
-  // correlation.
-  void Uncertainty(const Model& m, const std::vector<glm::dvec2>& pts,
-                   PieceFit& f) {
-    const size_t n = pts.size();
-    std::vector<double> r(n);
-    double ssr = 0.0;
-    for (size_t k = 0; k < n; k++) {
-      r[k] = m.Residual(pts[k]);
-      ssr += r[k] * r[k];
-    }
-    const int params = m.arc ? 3 : 2;
-    const double dof = double(std::max<int>(1, int(n) - params));
-    const double s2 = std::max(ssr / dof, cx_.floor * cx_.floor * 1e-4);
-    f.sigmaMm = std::sqrt(ssr / double(std::max<size_t>(n, 1)));
-    const double rho = LagOne(r);
-    f.inflation = (1.0 + rho) / (1.0 - rho);
-    size_t at = 0;
-    f.stretchMm = WorstStretch(r, T::kStretchPoints, &at);
-    if (!m.arc) {
-      const glm::dvec2 c = Centroid(pts);
-      double stt = 0.0;
-      for (const glm::dvec2& p : pts) {
-        const double t = glm::dot(p - c, m.dir);
-        stt += t * t;
-      }
-      f.offsetSigmaMm = std::sqrt(s2 * f.inflation / double(n));
-      f.angleSigma = stt > 0.0 ? std::sqrt(s2 * f.inflation / stt) : kInf;
+  // A round beside a line is refitted held tangent to it where holding it
+  // costs fewer than kTangentSigmas (FitTangentRound, each side judged on
+  // its own first): its centre, radius and sigmas are then the held fit's,
+  // which carry where it touches.
+  void HoldRounds(std::vector<RoundFit>& held) {
+    const size_t np = PieceCount();
+    held.assign(np, RoundFit{});
+    if (np < 2)
       return;
-    }
-    double A[3][3] = {{0, 0, 0}, {0, 0, 0}, {0, 0, 0}};
-    for (const glm::dvec2& p : pts) {
-      const glm::dvec2 q = p - m.centre;
-      const double d = glm::length(q);
-      if (!(d > 0.0))
+    std::vector<glm::dvec2> arcPts;
+    for (size_t i = 0; i < np; i++) {
+      Piece& p = pieces_[i];
+      if (!p.model.arc || !p.model.ok)
         continue;
-      const double J[3] = {-q.x / d, -q.y / d, -1.0};
-      for (int i = 0; i < 3; i++)
-        for (int j = 0; j < 3; j++)
-          A[i][j] += J[i] * J[j];
+      RoundSide side[2];
+      for (int s = 0; s < 2; s++) {
+        if (!cv_.closed && (s == 0 ? i == 0 : i + 1 == np))
+          continue;
+        const size_t j = s == 0 ? (i + np - 1) % np : (i + 1) % np;
+        const Model& nb = pieces_[j].model;
+        if (j == i || nb.arc || !nb.ok)
+          continue;
+        cv_.Gather(Start(j), End(j), side[s].pts);
+        side[s].p0 = nb.p0;
+        side[s].dir = nb.dir;
+      }
+      cv_.Gather(Start(i), End(i), arcPts);
+      bool keep[2] = {false, false};
+      for (int s = 0; s < 2; s++) {
+        if (side[s].pts.size() < 2)
+          continue;
+        RoundSide one[2];
+        one[s] = side[s];
+        one[s].tangent = true;
+        const RoundFit f = FitTangentRound(
+            arcPts, p.model.centre, p.model.radius, one[0], one[1], cx_.floor);
+        keep[s] = f.ok && f.tangentSigmas < T::kTangentSigmas;
+      }
+      if (!keep[0] && !keep[1])
+        continue;
+      side[0].tangent = keep[0];
+      side[1].tangent = keep[1];
+      const RoundFit f = FitTangentRound(arcPts, p.model.centre, p.model.radius,
+                                         side[0], side[1], cx_.floor);
+      if (!f.ok)
+        continue;
+      p.model.centre = f.centre;
+      p.model.radius = f.radius;
+      held[i] = f;
     }
-    double inv[3][3];
-    if (!Invert3(A, inv)) {
-      f.centreSigmaMm = glm::dvec2(kInf);
-      f.radiusSigmaMm = kInf;
-      return;
-    }
-    const double k = s2 * f.inflation;
-    f.centreSigmaMm = {std::sqrt(std::max(0.0, k * inv[0][0])),
-                       std::sqrt(std::max(0.0, k * inv[1][1]))};
-    f.radiusSigmaMm = std::sqrt(std::max(0.0, k * inv[2][2]));
   }
 
   void Emit(int chainIndex, PiecesFit& out) {
     const size_t np = PieceCount();
     if (np == 0)
       return;
+    std::vector<RoundFit> held;
+    HoldRounds(held);
     // Where each piece starts: its meeting with the one before, or the
     // chain's own end.
     std::vector<glm::dvec2> meet(br_.size());
@@ -1209,7 +1530,12 @@ private:
       f.to = static_cast<uint32_t>(End(i));
       f.points = static_cast<uint32_t>(buf_.size());
       f.arc = m.arc;
-      Uncertainty(m, buf_, f);
+      Uncertainty(m, buf_, cx_.floor, f);
+      if (held[i].ok) {
+        f.centreSigmaMm = held[i].centreSigmaMm;
+        f.radiusSigmaMm = held[i].radiusSigmaMm;
+        f.heldTangent = static_cast<uint8_t>(held[i].tangentEnds);
+      }
       const glm::dvec2 s = m.ok ? m.Project(meet[i]) : buf_.front();
       const glm::dvec2 e =
           m.ok ? m.Project(meet[(i + 1) % br_.size()]) : buf_.back();
@@ -1366,6 +1692,24 @@ SpanMiss MeasureMiss(const Entity& entity, const std::vector<glm::dvec2>& pts,
   cx.rho = noise.correlation;
   cx.s = std::pow(T::kDetailRange, 1.0 - 2.0 * std::clamp(detail, 0.0, 1.0));
   out.explained = Judge(m, pts, cx).explains;
+  return out;
+}
+
+SpanFit FitSpan(const std::vector<glm::dvec2>& pts, bool arc,
+                double floorSigma) {
+  SpanFit out;
+  const Model m = FitKind(pts, arc);
+  if (!m.ok)
+    return out;
+  out.ok = true;
+  out.arc = m.arc;
+  out.p0 = m.p0;
+  out.dir = m.dir;
+  out.centre = m.centre;
+  out.radius = m.radius;
+  out.fit.points = static_cast<uint32_t>(pts.size());
+  out.fit.arc = m.arc;
+  Uncertainty(m, pts, floorSigma, out.fit);
   return out;
 }
 

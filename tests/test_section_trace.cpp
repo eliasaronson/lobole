@@ -19,6 +19,7 @@
 #include "core/features/SketchFeature.h"
 #include "core/io/Serialization.h"
 #include "core/sketch/SectionTrace.h"
+#include "core/sketch/SketchCandidates.h"
 #include "core/sketch/SketchSolver.h"
 
 #include <catch2/catch_test_macros.hpp>
@@ -274,6 +275,42 @@ TEST_CASE("A traced scan's profile, extruded, stands on the scan",
   INFO(out.reply.dump());
   // The scan's own noise is 0.03: within three of it nearly everywhere but
   // the caps' fans, whose edges the wall's noise moves.
+  CHECK(out.deviation.within > 0.97);
+  CHECK(std::abs(out.deviation.meanMm) < 0.02);
+}
+
+TEST_CASE("A traced scan's accepted relations, extruded, stand on the scan",
+          "[sketch][candidates][mesh_body]") {
+  // Through the pipeline: the traced slot with every relation and size the
+  // scan supports accepted (docs/sketching/README.md#accepting-them),
+  // extruded, and compare_scan's answer, as the unconstrained one above.
+  Document doc;
+  const uint64_t scan = ImportScan(doc, ScannedSlot(40, 6, 20, 0.25, 0.03, 15),
+                                   "accept-pipeline");
+  SketchFeature& sk = AddCut(doc);
+  const uint64_t sketchId = sk.GetId();
+  REQUIRE(sketch::TraceSection(sk, 0, 0.5).error.empty());
+  Solve(sk);
+  const sketch::AcceptResult res = sketch::AcceptCandidates(sk, {});
+  INFO(res.accepted.size() << " accepted, " << res.left.size() << " left");
+  CHECK(res.accepted.size() >= 4);
+  bool radius6 = false;
+  for (const auto& a : res.accepted)
+    radius6 |= a.candidate.kind == sketch::CandidateKind::Radius &&
+               a.candidate.nominal == 6.0;
+  CHECK(radius6);
+  doc.Regenerate();
+  auto ex = std::make_unique<ExtrudeFeature>("Body", sketchId, 20.0,
+                                             ExtrudeMode::NewBody);
+  ex->endMode = ExtrudeEnd::Symmetric;
+  doc.AddFeature(std::move(ex));
+  INFO(doc.GetFeature(doc.FeatureCount() - 1)->GetError());
+  REQUIRE(doc.GetBodies().size() == 2);
+  const uint64_t body = doc.GetFeature(doc.FeatureCount() - 1)->GetId();
+  scancompare::Input in;
+  REQUIRE(scancompare::Gather(doc, {scan, body, 0.1}, in).empty());
+  const scancompare::Outcome out = scancompare::Run(in, nullptr, nullptr);
+  INFO(out.reply.dump());
   CHECK(out.deviation.within > 0.97);
   CHECK(std::abs(out.deviation.meanMm) < 0.02);
 }

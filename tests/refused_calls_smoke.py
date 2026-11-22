@@ -327,7 +327,11 @@ def main():
                     ("trace_section a sketch with no section", "trace_section",
                      {"sketch_id": probe, "section": 0}, "no section"),
                     ("section_fit a sketch with no section", "section_fit",
-                     {"sketch_id": probe}, "no section")]:
+                     {"sketch_id": probe}, "no section"),
+                    ("sketch_candidates a sketch with no section",
+                     "sketch_candidates", {"sketch_id": probe}, "no section"),
+                    ("accept_candidates a sketch with no section",
+                     "accept_candidates", {"sketch_id": probe}, "no section")]:
                 check(label, method, params, needle=needle, tab=part["name"])
             d.call("delete_feature", feature_id=probe)
             cut = d.call("add_feature", feature={
@@ -343,6 +347,27 @@ def main():
                      {"sketch_id": cut, "section": sec["external_index"],
                       "detail": -0.5}, "from 0")]:
                 check(label, "trace_section", params, needle=needle,
+                      tab=part["name"])
+            # The relations the scan supports
+            # (docs/sketching/README.md#relations-the-scan-supports):
+            # nothing traced, then each parameter, refused changing nothing.
+            check("sketch_candidates nothing traced", "sketch_candidates",
+                  {"sketch_id": cut}, needle="nothing is traced",
+                  tab=part["name"])
+            d.call("trace_section", sketch_id=cut,
+                   section=sec["external_index"])
+            for label, params, needle in [
+                    ("accept_candidates max_sigmas 0",
+                     {"sketch_id": cut, "max_sigmas": 0}, "> 0"),
+                    ("accept_candidates max_move_mm negative",
+                     {"sketch_id": cut, "max_move_mm": -1}, "> 0"),
+                    ("accept_candidates only not a list",
+                     {"sketch_id": cut, "only": "parallel:1,2"},
+                     "array"),
+                    ("accept_candidates an unknown key",
+                     {"sketch_id": cut, "only": ["parallel:99998,99999"]},
+                     "no candidate parallel:99998,99999")]:
+                check(label, "accept_candidates", params, needle=needle,
                       tab=part["name"])
             d.call("delete_feature", feature_id=cut)
 

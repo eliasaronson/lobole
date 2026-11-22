@@ -32,6 +32,7 @@
 #include "ui/PreviewFeature.h"
 #include "ui/ProjectActions.h"
 #include "ui/ScanCompareTool.h"
+#include "ui/ScanRelations.h"
 #include "ui/SelectionPipeline.h" // ResolveFaceItem
 #include "ui/SimulationActions.h"
 #include "ui/SketchInteraction.h"
@@ -654,6 +655,14 @@ const std::vector<Command>& Table() {
         SetSketchTool(s, SketchTool::Image);
         s.sketchEdit.selectedImageId = after->images.back().id;
       }
+    });
+
+    // The Scan relations session (ui/ScanRelations.h): only a sketch with
+    // geometry traced over a section has anything to offer.
+    add("sketch.scan_relations", SketchHasTraced, [](AppState& s) {
+      s.sketchEdit.relationsOpen = !s.sketchEdit.relationsOpen;
+      if (s.sketchEdit.relationsOpen)
+        SetSketchTool(s, SketchTool::Select);
     });
 
     add("sketch.toggle_construction", SketchHasSelection,

@@ -524,6 +524,7 @@ set(core_sources
     src/core/sketch/SketchSection.cpp
     src/core/sketch/SectionPieces.cpp
     src/core/sketch/SectionTrace.cpp
+    src/core/sketch/SketchCandidates.cpp
     src/core/sketch/SketchSelection.cpp
     src/core/sketch/SketchFillet.cpp
     src/core/sketch/SketchSplit.cpp
@@ -1082,6 +1083,7 @@ set(app_sources
     src/ui/ScanCompareTool.cpp
     src/ui/FitTool.cpp
     src/ui/SectionToSketch.cpp
+    src/ui/ScanRelations.cpp
     src/ui/CreateActions.cpp
     src/ui/DocumentSlots.cpp
     src/ui/ViewActions.cpp

@@ -108,8 +108,8 @@ glm::dvec2 Middle(const Entity& e) {
 
 } // namespace
 
-std::vector<TracedMiss> SectionFitReport(const SketchFeature& sk) {
-  std::vector<TracedMiss> out;
+std::vector<TracedSpan> TracedSpans(const SketchFeature& sk) {
+  std::vector<TracedSpan> out;
   // Per (section, chain): the records measured against it.
   std::map<std::pair<uint32_t, size_t>, std::vector<size_t>> onChain;
   for (const TracedFrom& t : sk.traced) {
@@ -118,7 +118,7 @@ std::vector<TracedMiss> SectionFitReport(const SketchFeature& sk) {
         t.section >= sk.external.size() ||
         sk.external[t.section].kind != ExternalKind::Section)
       continue;
-    TracedMiss m;
+    TracedSpan m;
     m.from = t;
     const ExternalGeom& ext = sk.external[t.section];
     const glm::dvec2 mid = Middle(sk.entities[idx]);
@@ -160,8 +160,10 @@ std::vector<TracedMiss> SectionFitReport(const SketchFeature& sk) {
     }
     const size_t n = chain.points.size();
     for (size_t r = 0; r < rows.size(); r++) {
-      TracedMiss& m = out[rows[r]];
-      m.noiseMm = noise.sigma;
+      TracedSpan& m = out[rows[r]];
+      m.noise = noise;
+      m.floorMm = ext.usedToleranceMm * PieceThresholds::kNoiseFloorShare;
+      m.detail = ext.detail;
       if (at[r].size() < 2)
         continue;
       // In the chain's order from after its widest gap, so a span over a
@@ -175,13 +177,26 @@ std::vector<TracedMiss> SectionFitReport(const SketchFeature& sk) {
           start = (q + 1) % at[r].size();
         }
       }
-      std::vector<glm::dvec2> pts;
       for (size_t q = 0; q < at[r].size(); q++)
-        pts.push_back(chain.points[at[r][(start + q) % at[r].size()]]);
-      const Entity& e = sk.entities[sk.IndexOfEntity(m.from.entity)];
+        m.pts.push_back(chain.points[at[r][(start + q) % at[r].size()]]);
       m.cut = true;
-      m.miss = MeasureMiss(e, pts, noise, ext.detail);
     }
+  }
+  return out;
+}
+
+std::vector<TracedMiss> SectionFitReport(const SketchFeature& sk) {
+  std::vector<TracedMiss> out;
+  for (const TracedSpan& t : TracedSpans(sk)) {
+    TracedMiss m;
+    m.from = t.from;
+    m.noiseMm = t.noise.sigma;
+    if (t.cut) {
+      m.cut = true;
+      m.miss = MeasureMiss(sk.entities[sk.IndexOfEntity(t.from.entity)], t.pts,
+                           t.noise, t.detail);
+    }
+    out.push_back(std::move(m));
   }
   return out;
 }

@@ -127,6 +127,9 @@ uint64_t TraceSectionToSketch(AppState& state, uint64_t sectionId) {
       *state.document);
   // The sketch and its tracing are one step to undo.
   state.commands->CoalesceSince(depth, "Trace section");
+  // What the traced geometry nearly is, offered at once
+  // (docs/sketching/README.md#relations-the-scan-supports).
+  state.sketchEdit.relationsOpen = true;
   LOG_INFO("Section {} traced into sketch {}: {} entities", sectionId, id,
            tr.ids.size());
   return id;

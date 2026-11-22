@@ -9,6 +9,7 @@
 #include "core/Command.h"
 #include "core/features/RevolveFeature.h"
 #include "core/sketch/SectionTrace.h"
+#include "core/sketch/SketchCandidates.h"
 #include "ui/AssemblyActions.h"
 #include "ui/Commands.h"
 #include "ui/DocumentSlots.h"
@@ -20,6 +21,7 @@
 #include "ui/SceneOverlays.h"
 #include "ui/SelectionPipeline.h"
 #include "ui/SimulationActions.h"
+#include "ui/VariableActions.h" // GlobalUndo
 #include "ui/ViewActions.h"
 #include "ui/ViewportHandleDraw.h"
 
@@ -1636,15 +1638,8 @@ void RegisterViewportGuiTests(ImGuiTestEngine* engine) {
     ctx->MouseMoveToPos(ImVec2(at.x, at.y));
     ctx->MouseClick(ImGuiMouseButton_Left);
     ctx->Yield(2);
-    // The section's own line lies under it (a B-Rep's cut is exact): a
-    // click at the same spot cycles from one to the other.
-    const std::vector<uint32_t>& under = sk->external[0].genIds;
-    if (!s_App->sketchEdit.selected.empty() &&
-        std::find(under.begin(), under.end(),
-                  s_App->sketchEdit.selected[0].entity) != under.end()) {
-      ctx->MouseClick(ImGuiMouseButton_Left);
-      ctx->Yield(2);
-    }
+    // The section's own line lies exactly under it (a B-Rep's cut is
+    // exact): the real line still takes the first click.
     IM_CHECK_EQ(s_App->sketchEdit.selected.size(), (size_t)1);
     if (!s_App->sketchEdit.selected.empty())
       IM_CHECK_EQ(s_App->sketchEdit.selected[0].entity, lineId);
@@ -1702,6 +1697,94 @@ void RegisterViewportGuiTests(ImGuiTestEngine* engine) {
     for (const sketch::TracedMiss& m : sketch::SectionFitReport(*sk))
       off += !m.cut || !m.miss.explained;
     IM_CHECK_EQ(off, 2);
+    s_App->sketchEdit = ui::SketchEditState{};
+    ui::ClearSections(*s_App);
+    s_App->sectionToolOpen = false;
+  };
+
+  t = IM_REGISTER_TEST(engine, "section", "scan_relations_apply");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    // Trace opens the Scan relations session on what the traced slot
+    // nearly is; Apply adds the ticked rows in one undo step, and a row
+    // the solve took back is listed with why.
+    ctx->SetRef("//##MainMenuBar");
+    auto sk0 =
+        std::make_unique<SketchFeature>("Slot", SketchPlane(PlaneType::XY));
+    const double half = 20.0, r = 6.0;
+    sk0->AddEntity(sketch::Line{{-half, -r}, {half, -r}});
+    sk0->AddEntity(
+        sketch::Arc{{half, 0}, r, -angles::kPi / 2, angles::kPi / 2});
+    sk0->AddEntity(sketch::Line{{half, r}, {-half, r}});
+    sk0->AddEntity(
+        sketch::Arc{{-half, 0}, r, angles::kPi / 2, 3 * angles::kPi / 2});
+    Doc()->AddFeature(std::move(sk0));
+    const uint64_t slotSketch = Doc()->GetFeature(0)->GetId();
+    Doc()->AddFeature(std::make_unique<ExtrudeFeature>(
+        "Slot body", slotSketch, 20.0, ExtrudeMode::NewBody));
+    ctx->Yield(2);
+    ToolbarClick(ctx, "###tb_section");
+    ctx->Yield(3);
+    IM_CHECK_EQ(s_App->sections.size(), (size_t)1);
+    s_App->sectionActiveId = s_App->sections[0].id;
+    s_App->sections[0].offset = 10.0f;
+    ctx->Yield();
+    const size_t before = Doc()->FeatureCount();
+    ctx->SetRef("//Section###ToolWindow");
+    ctx->ItemClick("**/###tracesection");
+    ctx->Yield(3);
+    auto* sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(before));
+    IM_CHECK(sk != nullptr);
+    if (sk == nullptr)
+      return;
+    IM_CHECK(s_App->sketchEdit.relationsOpen);
+    if (s_App->camera) {
+      s_App->camera->FinishAnimation();
+      s_App->camera->StopAnimation();
+      s_App->camera->SetTarget(glm::vec3(0.0f, 0.0f, 10.0f));
+      s_App->camera->SetUp(glm::vec3(0.0f, 1.0f, 0.0f));
+      s_App->camera->SetPosition(glm::vec3(0.0f, 0.0f, 10.0f + 70.0f));
+    }
+    ctx->Yield(3);
+    ctx->SetRef("//Scan relations###ToolWindow");
+    // The candidates the session lists are the RPC's.
+    const auto rows = sketch::FindCandidates(*sk, {});
+    IM_CHECK(!rows.empty());
+    bool parallelOrLevel = false, tangent = false, radius = false;
+    for (const sketch::Candidate& c : rows) {
+      parallelOrLevel |= c.kind == sketch::CandidateKind::Parallel ||
+                         c.kind == sketch::CandidateKind::Horizontal;
+      tangent |= c.kind == sketch::CandidateKind::Tangent;
+      radius |= c.kind == sketch::CandidateKind::Radius &&
+                std::abs(c.nominal - 6.0) < 1e-9;
+    }
+    IM_CHECK(parallelOrLevel);
+    IM_CHECK(tangent);
+    IM_CHECK(radius);
+    // A row under the cursor lights its entities.
+    ctx->MouseMove("**/###tick", ImGuiTestOpFlags_NoCheckHoveredId);
+    ctx->Yield(2);
+    IM_CHECK(!s_App->sketchEdit.litEntities.empty());
+    GuiShot(ctx, "scan_relations_rows");
+    const size_t cons = sk->constraints.size();
+    const size_t depth = s_App->commands->UndoDepth();
+    ctx->ItemClick("**/###applyrelations");
+    ctx->Yield(3);
+    sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(before));
+    IM_CHECK(sk != nullptr);
+    if (sk == nullptr)
+      return;
+    IM_CHECK(s_App->sketchEdit.relationsApplied > 0);
+    IM_CHECK_EQ(sk->constraints.size(),
+                cons + s_App->sketchEdit.relationsApplied);
+    IM_CHECK_EQ(s_App->commands->UndoDepth(), depth + 1); // one step
+    IM_CHECK(sk->GetError().empty());
+    GuiShot(ctx, "scan_relations_applied");
+    ui::GlobalUndo(*s_App);
+    ctx->Yield(3);
+    sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(before));
+    IM_CHECK(sk != nullptr);
+    if (sk != nullptr)
+      IM_CHECK_EQ(sk->constraints.size(), cons);
     s_App->sketchEdit = ui::SketchEditState{};
     ui::ClearSections(*s_App);
     s_App->sectionToolOpen = false;

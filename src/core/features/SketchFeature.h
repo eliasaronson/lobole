@@ -1019,6 +1019,10 @@ struct PieceFit {
   glm::dvec2 centreSigmaMm{0.0};
   double radiusSigmaMm = 0.0;
   double inflation = 1.0;
+  // An arc's ends at which it was refitted held tangent to the line beside
+  // it (sketch::FitTangentRound): its centre, radius and their sigmas are
+  // that fit's, which carry where it touches.
+  uint8_t heldTangent = 0;
 };
 struct ExternalGeom {
   ElementRef ref; // face (elementMap.names) or edge (edgeNames) of a body

@@ -827,9 +827,17 @@ the chain, its points' residual sigma and worst stretch, and the
 uncertainty of its own parameters from the fit's normal equations -- a
 line's angle and its offset at its middle, an arc's centre and radius --
 widened by its residuals' correlation ((1 + ρ) / (1 − ρ)). The reply lists
-them (`pieces`). A piece's uncertainty is that of its parameters given its
-points; it leaves out where its ends are, which for a small round decides
-much of it (below).
+them (`pieces`). An arc's own uncertainty is that of its parameters given
+its points; it leaves out where its ends are, which for a small round
+decides much of it. So an arc beside a line is refitted **held tangent**
+to it (`sketch::FitTangentRound`): the circle and each line as one curve, a
+point counting for the circle within the round's sweep and for the line
+beyond it, over the round's points and the line's nearest thirty (or the
+round's count), solved by Levenberg-Marquardt. Each side is held only where
+holding it costs fewer than 2.576 sigmas against the round and line fitted
+free over the same points (a keyhole's head meets its stem sharp and is not
+held). The arc's centre, radius and sigmas are then the held fit's, and the
+reply says at how many ends (`held_tangent`).
 
 Measured by `tests/test_section_pieces.cpp` on outlines generated from
 known lines and arcs, tilted and sampled about every 0.2 mm (each step
@@ -846,11 +854,10 @@ or shared by three neighbours:
   the test prints the rates);
 - 1 mm rounds on a 60 x 40 rectangle are found sampled every 0.1 mm with
   0.01 mm of noise (the count right in 149 of 150 draws), each radius
-  within a tenth of a millimetre. **Their sigmas are optimistic**: the true
-  radius lies within two of them 81 % of the time with independent noise
-  and 68 % with shared noise, because a few points decide where such a
-  round's tangent points are and the sigma does not carry that. With
-  0.03 mm of noise the walls take a 1 mm round's tangent ends and two draws
+  within a tenth of a millimetre, and the true radius within two of its
+  (held) sigmas 93-95 % of the time, the centre 93-94 % (from the round's
+  own points alone, 81 % and 68 %: a few points decide where such a round
+  touches the walls). With 0.03 mm of noise the walls take a 1 mm round's tangent ends and two draws
   in five read it as a chamfer; with 0.02 mm, one in twelve;
 - a 0.05 mm wave (wavelength 25 mm) on a 60 mm wall is one line;
 - a B-Rep slot's exact cut comes back as its two lines and two arcs
@@ -892,6 +899,117 @@ Refused, changing nothing: a sketch with no section, a `section` that is
 not one of its sections (naming those that are), a detail outside 0 to 1,
 a section whose cut is empty. `section_fit` on a sketch with sections and
 nothing traced lists nothing.
+
+### Relations the scan supports
+
+A traced slot's sides come out 0.2° from parallel, its ends 0.03 mm from
+equal, a boss 11.97 mm across: whether "parallel" and "12" are inside the
+scan's noise is the scan's to say. `sketch_candidates {sketch_id,
+max_sigmas?}` (`sketch::FindCandidates`,
+`src/core/sketch/SketchCandidates.{h,cpp}`) lists what the traced geometry
+nearly is, each row with the evidence for it.
+
+- **Measured on the cut, not the drawing.** Each traced entity is refitted
+  on the current cut, over the points `section_fit` gives it
+  (`sketch::TracedSpans`); an arc beside traced lines is held tangent to
+  them where that holds ([the pieces fit](#the-pieces-fit)), so a small
+  round's radius carries where it touches.
+- **Relations**: horizontal and vertical (a line square to the sketch's
+  axes), parallel and perpendicular (any two lines), collinear (two lines
+  that do not meet), `on_axis` (collinear with the X or Y axis),
+  `equal_length`, `equal_radius`, concentric, `at_origin` (a round's
+  centre), tangent (where a line and an arc, or two arcs, meet) and
+  symmetric (two rounds of a size, their centres mirrored about an axis).
+  Parallel and perpendicular are not listed between two lines both offered
+  level or upright within three sigmas: those rows say it. Datum planes'
+  traces are not offered yet.
+- **Sizes**: a line's length (both its ends joined), the distance between
+  two parallel lines and between two rounds' centres, an arc's radius, a
+  whole circle's diameter, and an angle between two lines that is not
+  square or straight, each near a round figure. The steps are one table,
+  `sketch::StepsFor`: 0.5 mm below 10 mm and 1 mm above, radii to 0.5 mm,
+  angles to 5°; an inch document in 32nds below an inch and 16ths above,
+  radii to 32nds.
+- **Neighbours only** for equal, tangent, a distance and an angle: pieces
+  that meet (a Coincident joins their ends), are one piece apart along the
+  trace, or face each other -- the first traced piece a normal from one's
+  middle reaches is the other (a slot's sides; a rounded rectangle's
+  opposite corners). Between distant pieces those hold by chance: two 3 mm
+  rounds at opposite ends of a bar are not offered equal.
+- **The evidence**: `off_mm` or `off_deg`, how far the fit is from the
+  relation or the round figure, `sigma_mm`/`sigma_deg`, the fit's own
+  uncertainty of that (a line's angle and offset sigmas, an arc's radius
+  and centre sigmas, a length from where its neighbours place its ends),
+  and `sigmas`, their ratio. Tangent is judged differently: its `sigmas` is
+  what holding it costs, the square root of the chi-square of the
+  tangent-held fit against the free one (FitTangentRound), since the angle
+  at a small round's end is what its own fit knows least. A size carries
+  `measured_mm`/`_deg` and `nominal_mm`/`_deg`.
+- Nothing past `max_sigmas` (default 3: a true relation missed about once
+  in 370), fewest sigmas first, each with a `key` (`parallel:12,14`). A
+  relation the sketch already holds is not listed.
+
+What a scan supports is not what a designer meant: 0.2° off parallel is
+offered on a 12 mm slot sampled every 0.2 mm with 0.05 mm of noise (about
+one sigma there), but on a 40 mm side the same noise resolves 0.2° at
+eight sigmas, and it is not -- the scan says the sides are not parallel.
+Likewise an 11.97 mm boss is offered 12 only where the diameter is known
+to a few hundredths (0.1 mm of noise every 0.5 mm); every 0.2 mm at
+0.05 mm it is known to 0.007 mm and 11.97 is not 12. The designer can
+raise the limit, and accepting then says what holding it costs.
+
+#### Accepting them
+
+`accept_candidates {sketch_id, max_sigmas?, max_move_mm?, only?}`
+(`sketch::AcceptCandidates`) adds the rows as ordinary constraints and
+driving dimensions at their nominal: **relations first, then sizes**, each
+fewest sigmas first, solving after each. A size taken before the relations
+that shape its piece fixes it where they no longer fit (a slot's width
+before its ends are tangent made their equal radius a contradiction).
+
+- One the solver reads as repeating or contradicting what is there
+  (`sketch::JudgeAddition`) is taken back, its `reason` the solver's: on a
+  slot, the fourth tangent once equal radius and three tangents hold.
+- One that moves a traced piece further than `max_move_mm` from where it
+  stood is taken back, naming the piece and the move. The move is measured
+  on the curve, at the piece's own points: the largest change in their
+  distance to it, from before the first row was added -- noise-free, and
+  not at an arc's centre. The default limit is three times that piece's
+  own residual sigma.
+- `only` names the keys to try; a key no candidate has within
+  `max_sigmas` refuses the call, listing those that are.
+- The reply lists `accepted` and `left` (each a candidate row with
+  `move_mm`, and `reason` for a left one) and `section_fit` after: what
+  holding the relations cost, per piece. One undo step.
+
+PlaneGCS has no data term, so the points do not pull on the solve: the
+order, the move limit and the fit report afterwards are what keep the
+sketch on the scan. A dimension accepted at its nominal is a driving
+dimension the designer can change.
+
+Measured by `tests/test_sketch_candidates.cpp` on outlines generated from
+known lines and arcs and sampled as a scan's cut is (asserted): the 12 mm
+slot 0.2° off parallel offers parallel and equal radius in at least four
+draws of five, one 3° off neither; two equal rounds 100 mm apart are not
+offered equal, each its 3 mm radius; the 11.97 mm boss offers 12 and an
+11.7 mm one nothing; accepting the slot's rows leaves it parallel, of one
+radius, tangent at all four joints, every dimension at its nominal and
+every piece within 1.5 times the noise of its points; forced parallel past
+the evidence, a 40 mm slot 3° off is left naming a move of over 0.3 mm; a
+rounded rectangle's equal rounds that repeat the others are left as such.
+Through the pipeline (`test_section_trace.cpp`), a traced scan with every
+row accepted, extruded, stands within 0.1 mm of the scan on over 97 % of
+it.
+
+**In the GUI**, Trace opens the sketch's **Scan relations** session (and
+its toolbar button, shown only on a sketch with traced geometry, reopens
+it; `sketch.scan_relations`, `ui/ScanRelations.{h,cpp}`): the rows with a
+tick each, the round figure, the entities by their place along the trace
+("line 3"), the off and the sigmas as a bar filled to the limit; the row
+under the cursor lights its entities, and its tooltip gives the sigma.
+**Apply** runs the same acceptance on the ticked rows, one undo step; what
+it added and what only repeated it leave the list, and a row it took back
+for any other reason is listed with why.
 
 #### What a section costs
 
@@ -1445,7 +1563,11 @@ sketch.
 Ctrl adds; repeated clicks on one spot cycle candidates. A drag from empty
 space box-selects (`sketch::BoxSelect`): left→right is window (entity wholly
 inside), right→left is crossing (any sample inside or any edge through the
-box); Ctrl adds. Datum hits rank below real geometry.
+box); Ctrl adds. Datum hits rank below real geometry, and construction
+(a projection's, a section's, or drawn so) ranks as if 4 px further away
+than it is (`PickSketchCandidates`): a line traced over a section's line
+lying exactly under it takes the first click, the section's the second,
+while a construction line clearly nearer the cursor still wins.
 
 **Auto-constraints while drawing** (`sketch::InferPoint`, on by default,
 Shift+S toggles, Ctrl suppresses for one click): the point snaps and, on
@@ -1716,6 +1838,8 @@ In `src/remote/RemoteModeling.cpp` (`describe` lists `sketch_entity_types`,
 | `project_section` | `sketch_id, bodies?, tolerance_mm?, fit?, detail?` | [a section into a sketch](#a-section-into-a-sketch); returns `gen_ids`, `tolerance_mm`, `deviation_mm`, `chains`, `open_chains`, and for `fit: "pieces"` `detail` and `pieces` ([the pieces fit](#the-pieces-fit)) |
 | `trace_section` | `sketch_id, section, detail?` | real lines and arcs over a section ([tracing a section](#tracing-a-section)); returns `ids`, `pieces`, `coincident`, `deviation_mm` |
 | `section_fit` | `sketch_id` | per traced entity, how far the current cut stands from it |
+| `sketch_candidates` | `sketch_id, max_sigmas?` | [what the traced geometry nearly is](#relations-the-scan-supports), with the evidence |
+| `accept_candidates` | `sketch_id, max_sigmas?, max_move_mm?, only?` | [adds them](#accepting-them), relations then sizes, each kept only where it holds and keeps the pieces on their points; returns `accepted`, `left`, `section_fit` |
 | `add_reference_image` | `sketch_id, path, at? \| origin?, opacity?, units_per_pixel?, rotation \| rotation_deg, show_always?` | returns `image_id`, `at`, `origin`; turned about its centre |
 | `set_reference_image` | `sketch_id, image_id, opacity?, hidden?, show_always?, at? \| origin?, units_per_pixel?, rotation \| rotation_deg` | returns `at`, `origin`; a turn keeps the centre |
 | `calibrate_reference_image` | `sketch_id, image_id, p1, p2, distance, align?` | `distance` in sketch mm |
@@ -1756,6 +1880,10 @@ There is no RPC to delete a single constraint, trim, paste or break a link; `mod
   tool: real, picked in the viewport, one undo step, unmoved when the
   section is cut again) and `section/pieces_over_a_noisy_scan`; the
   refusals in `refused_calls_smoke.py`.
+- `tests/test_sketch_candidates.cpp` `[candidates]` -- [the relations the
+  scan supports](#relations-the-scan-supports) and accepting them, on
+  generated outlines (above). GUI: `section/scan_relations_apply` (Trace
+  opens the session; a row lights its entities; Apply is one undo step).
 - `tests/test_sketch_import.cpp` `[import]` — the conic image (similarity,
   mirror, skew) exact; each DXF mapping row's entity and geometry (a bulge
   arc's radius and side; a non-uniform spline as ONE spline on its knots

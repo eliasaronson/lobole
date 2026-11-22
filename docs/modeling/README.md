@@ -783,7 +783,9 @@ a stand, an outline-shaped pocket, a rim -- the scan's outline drawn into a
 sketch and offset by the clearance is the parametric route
 ([a section into a sketch](../sketching/README.md#a-section-into-a-sketch));
 to redraw the made part itself, its section traced as the lines and arcs it
-is made of ([tracing a section](../sketching/README.md#tracing-a-section)).
+is made of ([tracing a section](../sketching/README.md#tracing-a-section)),
+with the relations and round sizes the scan supports accepted onto it
+([relations the scan supports](../sketching/README.md#relations-the-scan-supports)).
 
 `Cradle {target_id, tool_id, clearance_mm?, direction?, sweep?,
 resolution_mm?}`:

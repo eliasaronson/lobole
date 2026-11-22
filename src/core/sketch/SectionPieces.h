@@ -70,6 +70,12 @@ struct PieceThresholds {
   static constexpr double kNoiseFloorShare = 0.1;
   // The residuals' lag-one correlation is taken to at most this.
   static constexpr double kMaxCorrelation = 0.95;
+  // A round beside a line is refitted held tangent to it (FitTangentRound)
+  // when holding it costs fewer than this many sigmas (a two-sided 1 %).
+  static constexpr double kTangentSigmas = 2.576;
+  // ...over the line's points nearest the round: as many as the round has,
+  // and at least this many.
+  static constexpr int kRoundLinePoints = 30;
 };
 
 // A chain's noise: a robust sigma of its points' scatter (mm, at least the
@@ -97,6 +103,53 @@ struct PiecesFit {
 // (kNoiseFloorShare of it); `detail` is clamped to [0, 1].
 PiecesFit FitPieces(const CutChain& chain, int chainIndex, double tolerance,
                     double detail);
+
+// One span of points fitted as a line or an arc, with the uncertainty of
+// its parameters as the pieces fit states it (PieceFit's angle, offset,
+// centre and radius sigmas; `from`, `to` and `chain` left 0). `floorSigma`
+// is the noise floor an exact cut is fitted at.
+struct SpanFit {
+  bool ok = false;
+  bool arc = false;
+  glm::dvec2 p0{0.0}, dir{1.0, 0.0}; // a line through p0 along unit dir
+  glm::dvec2 centre{0.0};
+  double radius = 0.0;
+  PieceFit fit;
+};
+SpanFit FitSpan(const std::vector<glm::dvec2>& pts, bool arc,
+                double floorSigma);
+
+// A round refitted held tangent to the lines beside it: the circle and each
+// tangent line as one curve, a point counting for the circle within the
+// round's sweep and for a line beyond it, fitted over the round's points
+// and each line's nearest kRoundLinePoints (or the round's count) together.
+// A round's own fit leaves out where its tangent points are, which for a
+// small round decides much of its radius; this one carries it, so its
+// sigmas hold where the round's own do not
+// (docs/sketching/README.md#the-pieces-fit).
+struct RoundSide {
+  bool tangent = false;              // hold the round tangent to this line
+  std::vector<glm::dvec2> pts;       // in the chain's order: before the round
+                                     // ending at it, after it starting at it
+  glm::dvec2 p0{0.0}, dir{1.0, 0.0}; // the line as fitted on its own
+};
+struct RoundFit {
+  bool ok = false;
+  glm::dvec2 centre{0.0};
+  double radius = 0.0;
+  glm::dvec2 centreSigmaMm{0.0};
+  double radiusSigmaMm = 0.0;
+  double inflation = 1.0;
+  int tangentEnds = 0;
+  // What holding the tangencies costs against the round and the lines
+  // fitted free over the same points, in their own sigmas: the square root
+  // of the chi-square (one degree of freedom per tangent end).
+  double tangentSigmas = 0.0;
+};
+RoundFit FitTangentRound(const std::vector<glm::dvec2>& arcPts,
+                         const glm::dvec2& centre, double radius,
+                         const RoundSide& before, const RoundSide& after,
+                         double floorSigma);
 
 // The chain with every step past kEvenSteps times its median step filled
 // in at the median, as the fit sees it.

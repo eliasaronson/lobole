@@ -18,6 +18,7 @@
 #include "ui/FileDialogs.h"
 #include "ui/ImportActions.h"
 #include "ui/PreviewFeature.h"
+#include "ui/ScanRelations.h"
 #include "ui/SketchInteraction.h"
 #include "ui/Theme.h" // DrivenDimensionColor
 
@@ -418,6 +419,13 @@ void DrawSketchToolWindow(AppState& state) {
       edit.tool == SketchTool::Dimension || edit.tool == SketchTool::Image ||
       edit.tool == SketchTool::Text;
   if (!hasSession) {
+    // The Scan relations session takes the window while no drawing tool
+    // has one (ui/ScanRelations.h).
+    if (edit.relationsOpen && !sketch->traced.empty()) {
+      DrawScanRelationsSession(state, *sketch);
+      return;
+    }
+    edit.litEntities.clear();
     // A Hole session gets a window of its own while placing centres — but
     // only when no per-tool session owns the window, so switching to e.g.
     // Pattern (to array the centres) still shows Pattern's options.
@@ -465,6 +473,7 @@ void DrawSketchToolWindow(AppState& state) {
       ImGui::Text("%zu selected", edit.selected.size());
   };
 
+  edit.litEntities.clear();
   switch (edit.tool) {
   case SketchTool::Mirror: {
     BeginToolWindowFrame(state, "Mirror");

@@ -135,6 +135,9 @@ TEST_CASE("the shipped defaults have no conflicts", "[keymap]") {
 // a toolbar button without a chord fails instead of passing quietly.
 TEST_CASE("every command ships bound, or is on the list", "[keymap]") {
   static const std::set<std::string> kUnboundByDesign = {
+      // A session for a sketch with traced geometry only, opened by Trace
+      // itself; its toolbar button shows only then.
+      "sketch.scan_relations",
       // Menu-only.
       "file.export",
       // File > Open File...: the file chooser beside Open Project's (Ctrl+O)

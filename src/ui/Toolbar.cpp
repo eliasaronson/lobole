@@ -26,6 +26,7 @@
 #include "ui/PreviewFeature.h"
 #include "ui/RendererSync.h"
 #include "ui/ScanCompareTool.h" // ScanCompareRefusal
+#include "ui/ScanRelations.h"
 #include "ui/SketchInteraction.h"
 #include "ui/SketchToolbar.h" // BeginSketchExtrude/Revolve (U8a)
 #include "ui/Theme.h"         // AccentColor (the modes dot)
@@ -968,6 +969,11 @@ void DrawSketchModeToolbar(AppState& state) {
   // to Project: both bring something from outside the sketch into it.
   CommandButton(state, "###tb_sk_image", "sketch.image",
                 "Insert reference image\xe2\x80\xa6");
+  // Only for a sketch traced over a section: what the scan supports.
+  if (SketchHasTraced(state))
+    CommandButton(state, "###tb_sk_scan_relations", "sketch.scan_relations",
+                  "Relations the scan supports: what the traced lines and "
+                  "arcs nearly are, with the evidence");
   Divider();
 
   // Constraints act on the current selection (validated in

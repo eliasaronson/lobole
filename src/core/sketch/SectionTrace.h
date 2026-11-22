@@ -40,6 +40,21 @@ struct TracedMiss {
   double noiseMm = 0.0; // its chain's own scatter
 };
 
+// The points of the current cut that count for each traced entity (as
+// SectionFitReport assigns them, in the chain's order), its chain's noise,
+// the noise floor of its section and the section's detail; every traced
+// entity whose entity and section still exist, in `traced` order. `cut`
+// false: no point of the cut lies along it.
+struct TracedSpan {
+  TracedFrom from;
+  bool cut = false;
+  std::vector<glm::dvec2> pts;
+  ChainNoise noise;
+  double floorMm = 0.0;
+  double detail = 0.5;
+};
+std::vector<TracedSpan> TracedSpans(const SketchFeature& sk);
+
 // Every traced entity whose entity and section still exist, in `traced`
 // order. A cut point counts for the traced entity nearest it whose span it
 // falls within, on the chain nearest that entity.

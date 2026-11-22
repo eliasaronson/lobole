@@ -243,6 +243,15 @@ struct SketchEditState {
   bool hasFilletPreview = false;
   sketch::Arc filletPreviewArc{};
   uint32_t filletPreviewCurves[2] = {0, 0};
+  // The Scan relations session (ui/ScanRelations.h): open, its sigma
+  // limit, the rows unticked (by candidate key), what the last Apply added
+  // and left (with why), and the entities the hovered row lights.
+  bool relationsOpen = false;
+  double relationsMaxSigmas = 3.0;
+  std::vector<std::string> relationsUnticked;
+  std::vector<std::string> relationsLeft;
+  size_t relationsApplied = 0;
+  std::vector<uint32_t> litEntities;
   // The Split tool (docs/sketching/README.md#split). A circle or an ellipse
   // takes two cuts: the first is held here (0 = none) until the second
   // click.

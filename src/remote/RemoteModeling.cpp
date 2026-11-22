@@ -36,6 +36,7 @@
 #include "core/io/RecognitionJson.h"
 #include "core/io/Serialization.h"
 #include "core/sketch/SectionTrace.h"
+#include "core/sketch/SketchCandidates.h"
 #include "core/sketch/SketchOrientation.h"
 #include "core/sketch/SketchSection.h"
 #include "core/sketch/SketchSolver.h"
@@ -946,6 +947,44 @@ static constexpr MethodDoc ModelingMethods[] = {
      "still pass)}. A traced entity whose section was removed is not "
      "listed. Read-only. Refused for a sketch with no section.",
      "sketch_id:int>=1", remote::NeedsPart, "entities:object[]"},
+    {"sketch_candidates",
+     "What the geometry traced over a sketch's section nearly is "
+     "(docs/sketching/README.md#relations-the-scan-supports): each traced "
+     "entity refitted on the CURRENT cut, and every relation (horizontal, "
+     "vertical, parallel, perpendicular, collinear, on_axis, equal_length, "
+     "equal_radius, concentric, at_origin, tangent, symmetric) and round "
+     "size (length, distance, radius, diameter, angle: 0.5 mm below 10 mm "
+     "and 1 mm above, radii to 0.5 mm, angles to 5 deg; an inch document "
+     "in 32nds below an inch and 16ths above) it comes within `max_sigmas` "
+     "(default 3) of its own uncertainty. Tangent, equal and an angle only "
+     "between neighbours: pieces that meet, are one piece apart, or face "
+     "each other. Rows fewest sigmas first: {key (accept_candidates' "
+     "`only`), kind, entities, datum? (x_axis | y_axis | origin), off_mm or "
+     "off_deg (how far the fit is from it), sigma_mm or sigma_deg (the "
+     "fit's uncertainty of that), sigmas, and for a size measured_mm/_deg "
+     "and nominal_mm/_deg}. A relation the sketch already holds is not "
+     "listed. Read-only. Refused for a sketch with no section, or nothing "
+     "traced over it (trace_section).",
+     "sketch_id:int>=1, max_sigmas?:number>0", remote::NeedsPart,
+     "candidates:object[]"},
+    {"accept_candidates",
+     "Add sketch_candidates' rows as ordinary constraints and driving "
+     "dimensions (each at its nominal), fewest sigmas first, solving after "
+     "each (docs/sketching/README.md#accepting-them): one the solver cannot "
+     "meet or reads as redundant is taken back, and so is one that moves a "
+     "traced entity further off its section points than `max_move_mm` "
+     "(default three times that entity's own sigma; measured on the curve "
+     "at its points). `only`: the keys to try (default every row within "
+     "`max_sigmas`, default 3); a key no candidate has refuses the call. "
+     "One undo step. Returns {accepted, left (each a candidate row with "
+     "move_mm, the largest move it caused, and for a left one its "
+     "`reason`), section_fit (as section_fit's entities, after), regen, "
+     "digest}.",
+     "sketch_id:int>=1, max_sigmas?:number>0, max_move_mm?:number>0, "
+     "only?:string[]",
+     remote::NeedsPart,
+     "accepted:object[], left:object[], section_fit:object[], regen:object, "
+     "digest:object"},
     {"add_reference_image",
      "Attach an image underlay to a sketch from an image file (`path`: PNG, "
      "JPEG or BMP, up to 16384 px a side; anything else is refused). "
@@ -1154,6 +1193,102 @@ double SectionDetail(const json& d, const std::string& method) {
   return d.get<double>();
 }
 
+// section_fit's rows: how far the current cut stands from each traced
+// entity (docs/sketching/README.md#tracing-a-section).
+json SectionFitJson(const SketchFeature& sk) {
+  json rows = json::array();
+  for (const sketch::TracedMiss& t : sketch::SectionFitReport(sk)) {
+    const size_t idx = sk.IndexOfEntity(t.from.entity);
+    const sketch::Entity& e = sk.entities[idx];
+    json r = {{"id", t.from.entity},
+              {"kind", std::holds_alternative<sketch::Line>(e)     ? "line"
+                       : std::holds_alternative<sketch::Circle>(e) ? "circle"
+                                                                   : "arc"},
+              {"section", t.from.section},
+              {"chain", t.from.chain},
+              {"from", t.from.from},
+              {"to", t.from.to},
+              {"cut", t.cut},
+              {"noise_mm", t.noiseMm}};
+    if (t.cut) {
+      r["points"] = t.miss.points;
+      r["sigma_mm"] = t.miss.sigmaMm;
+      r["mean_mm"] = t.miss.meanMm;
+      r["stretch_mm"] = t.miss.stretchMm;
+      r["stretch_at"] = {t.miss.stretchAt.x, t.miss.stretchAt.y};
+      r["on_cut"] = t.miss.explained;
+    } else {
+      r["on_cut"] = false;
+    }
+    rows.push_back(std::move(r));
+  }
+  return rows;
+}
+
+// The sketch a sketch_candidates / accept_candidates call names: one with
+// a section and geometry traced over it, else refused naming what is
+// missing.
+SketchFeature* TracedSketch(Document& doc, uint64_t sketchId,
+                            const std::string& m, size_t* index) {
+  size_t at = 0;
+  auto* sk = dynamic_cast<SketchFeature*>(doc.FindFeatureById(sketchId, &at));
+  if (!sk)
+    throw std::runtime_error(
+        "no sketch with id " + std::to_string(sketchId) +
+        ". Sketches here: " + FeatureCandidates(doc, true) +
+        " (ids come from add_feature results / get_state)");
+  bool sections = false;
+  for (const sketch::ExternalGeom& e : sk->external)
+    sections |= e.kind == sketch::ExternalKind::Section;
+  if (!sections)
+    throw std::runtime_error(m + ": sketch " + std::to_string(sketchId) +
+                             " has no section (project_section draws one)");
+  if (sk->traced.empty())
+    throw std::runtime_error(m + ": nothing is traced over sketch " +
+                             std::to_string(sketchId) +
+                             "'s section (trace_section draws it)");
+  if (index != nullptr)
+    *index = at;
+  return sk;
+}
+
+// A number above 0, else refused naming it.
+double PositiveParam(const json& v, const std::string& m, const char* key) {
+  if (!v.is_number() || !(v.get<double>() > 0.0))
+    throw std::runtime_error(m + ": " + key + " is a number above 0; got " +
+                             v.dump());
+  return v.get<double>();
+}
+
+// One candidate as sketch_candidates and accept_candidates list it
+// (docs/sketching/README.md#relations-the-scan-supports): its quantity's
+// unit is in each key, a datum it names by name.
+json CandidateJson(const sketch::Candidate& c) {
+  const char* u = c.degrees ? "_deg" : "_mm";
+  json ents = json::array();
+  json row = {{"key", c.key}, {"kind", sketch::ToString(c.kind)}};
+  for (uint32_t id : c.entities) {
+    if (id == sketch::kAxisX)
+      row["datum"] = "x_axis";
+    else if (id == sketch::kAxisY)
+      row["datum"] = "y_axis";
+    else if (id == sketch::kOrigin)
+      row["datum"] = "origin";
+    else
+      ents.push_back(id);
+  }
+  row["entities"] = std::move(ents);
+  row[std::string("off") + u] = c.off;
+  row[std::string("sigma") + u] =
+      std::isfinite(c.sigma) ? json(c.sigma) : json(nullptr);
+  row["sigmas"] = c.sigmas;
+  if (sketch::IsSize(c.kind)) {
+    row[std::string("measured") + u] = c.measured;
+    row[std::string("nominal") + u] = c.nominal;
+  }
+  return row;
+}
+
 // One piece of a pieces fit, drawn as entity `id` of `sk`
 // (docs/sketching/README.md#the-pieces-fit).
 json PieceJson(const SketchFeature& sk, uint32_t id,
@@ -1184,6 +1319,8 @@ json PieceJson(const SketchFeature& sk, uint32_t id,
       }
     }
     j["radius_sigma_mm"] = finite(p.radiusSigmaMm);
+    if (p.heldTangent != 0)
+      j["held_tangent"] = p.heldTangent;
     j["centre_sigma_mm"] = {finite(p.centreSigmaMm.x),
                             finite(p.centreSigmaMm.y)};
   } else {
@@ -2937,33 +3074,94 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
     if (sections.empty())
       throw std::runtime_error(m + ": sketch " + std::to_string(sketchId) +
                                " has no section (project_section draws one)");
-    json rows = json::array();
-    for (const sketch::TracedMiss& t : sketch::SectionFitReport(*sk)) {
-      const size_t idx = sk->IndexOfEntity(t.from.entity);
-      const sketch::Entity& e = sk->entities[idx];
-      json r = {{"id", t.from.entity},
-                {"kind", std::holds_alternative<sketch::Line>(e)     ? "line"
-                         : std::holds_alternative<sketch::Circle>(e) ? "circle"
-                                                                     : "arc"},
-                {"section", t.from.section},
-                {"chain", t.from.chain},
-                {"from", t.from.from},
-                {"to", t.from.to},
-                {"cut", t.cut},
-                {"noise_mm", t.noiseMm}};
-      if (t.cut) {
-        r["points"] = t.miss.points;
-        r["sigma_mm"] = t.miss.sigmaMm;
-        r["mean_mm"] = t.miss.meanMm;
-        r["stretch_mm"] = t.miss.stretchMm;
-        r["stretch_at"] = {t.miss.stretchAt.x, t.miss.stretchAt.y};
-        r["on_cut"] = t.miss.explained;
-      } else {
-        r["on_cut"] = false;
-      }
-      rows.push_back(std::move(r));
-    }
+    json rows = SectionFitJson(*sk);
     return json{{"entities", std::move(rows)}};
+  }
+  if (m == "sketch_candidates") {
+    // What the traced geometry nearly is
+    // (docs/sketching/README.md#relations-the-scan-supports). Read-only.
+    SketchFeature* sk =
+        TracedSketch(*doc, p.at("sketch_id").get<uint64_t>(), m, nullptr);
+    double maxSigmas = 3.0;
+    if (p.contains("max_sigmas"))
+      maxSigmas = PositiveParam(p.at("max_sigmas"), m, "max_sigmas");
+    json rows = json::array();
+    for (const sketch::Candidate& c :
+         sketch::FindCandidates(*sk, {maxSigmas, doc->Units().length}))
+      rows.push_back(CandidateJson(c));
+    return json{{"candidates", std::move(rows)}};
+  }
+  if (m == "accept_candidates") {
+    // Accepting them (docs/sketching/README.md#accepting-them). Every
+    // parameter is read and checked before the sketch is touched.
+    size_t index = 0;
+    SketchFeature* sk =
+        TracedSketch(*doc, p.at("sketch_id").get<uint64_t>(), m, &index);
+    sketch::AcceptOptions o;
+    o.unit = doc->Units().length;
+    if (p.contains("max_sigmas"))
+      o.maxSigmas = PositiveParam(p.at("max_sigmas"), m, "max_sigmas");
+    if (p.contains("max_move_mm"))
+      o.maxMoveMm = PositiveParam(p.at("max_move_mm"), m, "max_move_mm");
+    if (p.contains("only")) {
+      const json& only = p.at("only");
+      if (!only.is_array())
+        throw std::runtime_error(m +
+                                 ": only is a list of candidate keys "
+                                 "(sketch_candidates' `key`); got " +
+                                 only.dump());
+      for (const json& k : only) {
+        if (!k.is_string())
+          throw std::runtime_error(m +
+                                   ": only is a list of candidate keys "
+                                   "(strings); got " +
+                                   k.dump());
+        o.only.push_back(k.get<std::string>());
+      }
+    }
+    json before = DocumentIO::FeatureToJson(*sk);
+    // On a copy: a refused call leaves the sketch as it was.
+    SketchFeature work = *sk;
+    const sketch::AcceptResult res = sketch::AcceptCandidates(work, o);
+    if (!res.unknown.empty()) {
+      std::string have;
+      for (const sketch::Candidate& c :
+           sketch::FindCandidates(*sk, {o.maxSigmas, o.unit}))
+        have += (have.empty() ? "" : ", ") + c.key;
+      std::string bad;
+      for (const std::string& k : res.unknown)
+        bad += (bad.empty() ? "" : ", ") + k;
+      throw std::runtime_error(
+          m + ": no candidate " + bad + " within " +
+          std::to_string(o.maxSigmas) + " sigmas (the candidates: " +
+          (have.empty() ? std::string("none") : have) + ")");
+    }
+    sk->entities = work.entities;
+    sk->constraints = work.constraints;
+    sk->RegenerateDerived();
+    doc->Regenerate();
+    const auto outcome = [](const sketch::CandidateOutcome& oc) {
+      json r = CandidateJson(oc.candidate);
+      r["move_mm"] = oc.moveMm;
+      if (!oc.reason.empty())
+        r["reason"] = oc.reason;
+      return r;
+    };
+    json acc = json::array(), left = json::array();
+    for (const auto& oc : res.accepted)
+      acc.push_back(outcome(oc));
+    for (const auto& oc : res.left)
+      left.push_back(outcome(oc));
+    json resp = {{"accepted", std::move(acc)},
+                 {"left", std::move(left)},
+                 {"section_fit", SectionFitJson(*sk)}};
+    json after = DocumentIO::FeatureToJson(*sk);
+    const json preDigest = BodyDigestJson(*doc);
+    state.commands->Execute(
+        std::make_unique<ModifyFeatureCommand>(index, before, after), *doc);
+    resp["regen"] = RegenSummaryJson(*doc);
+    resp["digest"] = DigestJson(preDigest, *doc);
+    return resp;
   }
   if (m == "trace_section") {
     // Real geometry over a section, and how far the cut stands from it

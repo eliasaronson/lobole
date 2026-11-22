@@ -136,6 +136,16 @@ std::vector<SketchPick> PickSketchCandidates(AppState& state,
   using Ranked = std::pair<float, SketchPick>;
   std::vector<Ranked> points, bodies, axes;
 
+  // Real geometry first: construction (a projection's, a section's, or
+  // drawn so) ranks as if this much further away, so a line traced over a
+  // section's construction line -- lying exactly under it -- is the first
+  // click and the construction one the second. Only what lies within this
+  // of real geometry is reordered; a construction line clearly nearer the
+  // cursor still wins.
+  constexpr float kRealFirstPx = 4.0f;
+  const auto rank = [&](const sketch::Entity& e, float d) {
+    return sketch::IsConstruction(e) ? d + kRealFirstPx : d;
+  };
   // Endpoints, within a slightly LARGER tolerance than bodies so a point is
   // never shadowed by the line it terminates.
   const float pointTolPx = tolPx + 4.0f;
@@ -145,7 +155,8 @@ std::vector<SketchPick> PickSketchCandidates(AppState& state,
       const float d =
           glm::length(SketchUVToScreen(state, sketch.plane, uv) - mousePos);
       if (d < pointTolPx)
-        points.push_back({d, SketchPick{true, false, {id, which}}});
+        points.push_back({rank(sketch.entities[i], d),
+                          SketchPick{true, false, {id, which}}});
     }
   }
 
@@ -186,7 +197,8 @@ std::vector<SketchPick> PickSketchCandidates(AppState& state,
                      SketchUVToScreen(state, sketch.plane, uv[k + 1])));
     }
     if (d < tolPx)
-      bodies.push_back({d, SketchPick{true, true, {id, sketch::kWholeEntity}}});
+      bodies.push_back(
+          {rank(e, d), SketchPick{true, true, {id, sketch::kWholeEntity}}});
   }
 
   // Datum axes are pickable (e.g. as a mirror axis) but rank below real

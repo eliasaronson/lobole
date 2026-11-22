@@ -377,7 +377,9 @@ the feature editor still edits one that a file brought in.
 
 The sketcher's tool sessions use the same tool window: Mirror, Sketch Fillet,
 Sketch Pattern, Offset, Linked Copy, Reference Image, Calibrate Image,
-Dimension and the Hole's point sketch. Select and the drawing tools need no
+Dimension, the Hole's point sketch and Scan relations (a traced section's
+candidates, [sketching](../sketching/README.md#relations-the-scan-supports);
+it holds the window while no drawing tool does). Select and the drawing tools need no
 window; the prompt pill is enough. There is no Sketch panel: its toggles
 (auto-constrain, constraint glyphs) are in the sketch toolbar's modes flyout
 ([the toolbar](../sketching/README.md#the-toolbar)), Extrude,
