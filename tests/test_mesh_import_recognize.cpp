@@ -11,7 +11,9 @@
 #include "core/Document.h"
 #include "core/Feature.h"
 #include "core/Measure.h"
+#include "core/features/HoleFeature.h"
 #include "core/features/OffsetFaceFeature.h"
+#include "core/features/SketchFeature.h"
 #include "core/io/MeshImportCost.h"
 #include "core/io/Serialization.h"
 
@@ -212,11 +214,53 @@ TEST_CASE("Recognition lists the polygons it left flat, and min_sides "
     const mesh::Recognition& r = imp->RecognizedBodies().at(0).recognition;
     CHECK(r.fellBack.empty());
     CHECK(r.polygonal.size() == (minSides == 12 ? 3u : 1u));
-    // The countersink's cone is put back as flats: no mesher tessellates
-    // the face it rebuilds as (test_mesh_rebuild.cpp).
-    CHECK(r.Count(mesh::Kind::Cone) == 0);
-    CHECK(r.demoted == 1);
+    // The countersink is its cone, and it meshes (test_mesh_rebuild.cpp).
+    CHECK(r.Count(mesh::Kind::Cone) == 1);
+    CHECK(r.demoted == 0);
   }
+  std::filesystem::remove(stl);
+}
+
+TEST_CASE("A countersunk Hole's STL comes back with its cone, which meshes",
+          "[mesh_recognition][hole]") {
+  // Through the real feature: a Hole with a countersink drilled in a block,
+  // written as an STL and recognised, keeps its cone. The bracket fixture's
+  // countersink (test_mesh_rebuild.cpp) is the one whose seam came out
+  // leaning and went back to flats; this one's did not, at six positions
+  // tried, and it holds the user's path to the same answer.
+  Document part;
+  part.AddFeature(
+      std::make_unique<BoxFeature>("Block", glm::vec3(0), 40, 30, 10));
+  SketchPlane plane(glm::dvec3(0, 0, 10), glm::dvec3(0, 0, 1),
+                    glm::dvec3(1, 0, 0));
+  auto sk = std::make_unique<SketchFeature>("Centre", plane);
+  sk->AddEntity(sketch::Point{glm::dvec2(20, 15)});
+  part.AddFeature(std::move(sk));
+  auto hole =
+      std::make_unique<HoleFeature>("Countersunk", part.GetFeature(1)->GetId(),
+                                    HoleKind::Countersink, 6.6, 10.0);
+  hole->through = true;
+  hole->csDiameter = 13.0;
+  hole->csDepth = 3.2;
+  part.AddFeature(std::move(hole));
+  REQUIRE(part.GetFeature(2)->GetError().empty());
+  REQUIRE(part.GetBodies().size() == 1);
+  fixtures::Part drilled;
+  drilled.name = "countersunk";
+  drilled.shape = part.GetBodies()[0].shape;
+  drilled.volume = drilled.shape.Volume();
+  const auto stl = fixtures::WriteStl(drilled, 0.01, 0.2, "countersunk");
+  Document doc;
+  doc.AddFeature(Recognize(stl));
+  REQUIRE(doc.GetBodies().size() == 1);
+  const auto* imp = dynamic_cast<const ImportFeature*>(doc.GetFeature(0));
+  const mesh::Recognition& r = imp->RecognizedBodies().at(0).recognition;
+  INFO(r.fellBack);
+  CHECK(r.fellBack.empty());
+  CHECK(r.Count(mesh::Kind::Cone) == 1);
+  CHECK(r.demoted == 0);
+  CHECK_THAT(doc.GetBodies()[0].shape.Volume(),
+             WithinRel(drilled.volume, 1e-4));
   std::filesystem::remove(stl);
 }
 

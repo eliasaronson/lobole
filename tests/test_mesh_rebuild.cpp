@@ -22,6 +22,7 @@
 #include <TopExp_Explorer.hxx>
 #include <TopoDS.hxx>
 
+#include <algorithm>
 #include <cmath>
 
 namespace {
@@ -102,33 +103,34 @@ TEST_CASE("Rebuild: the plate is its 30 faces, 24 of them cylinders",
   }
 }
 
-TEST_CASE("Rebuild: the bracket's bores and flats, its countersink's cone "
-          "put back as flats",
+TEST_CASE("Rebuild: the bracket's bores, flats and countersink cone, and "
+          "every face meshes",
           "[mesh_recognition]") {
-  // The countersink rebuilds as a valid full-turn cone with the right
-  // volume, and no mesher tessellates it (BRepMesh fails on the face at any
-  // deflection): a hole in every picture of the part. Checked on the
-  // distance a scan is compared with its model by, the rebuild names the
-  // face and its region goes back to flats.
+  // The countersink's full-turn cone used to rebuild valid, with the right
+  // volume, and BRepMesh failed on it at any deflection: its seam's two
+  // p-curves, one projected exactly onto u = 2 pi and the other leaning
+  // 1.6e-8 off u = 0, were not a period apart, and the region was demoted
+  // to flats. The seam is laid on one ruling now (StraightenSeams), and the
+  // rebuild's own check -- every face tessellates -- passes.
   const fixtures::Part bracket = fixtures::Bracket();
   const mesh::TriMesh m = fixtures::MeshOf(bracket, 0.01, 0.2);
-  mesh::Segmentation seg = mesh::SegmentAll(m, {});
-  const cad::Rebuilt first = cad::RebuildFromRegions(m, seg);
-  INFO(first.failed);
-  CHECK(first.failed.find("no mesher tessellates") != std::string::npos);
-  CHECK(first.failed.find("a cone") != std::string::npos);
-  CHECK(first.badRegions.size() == 1);
+  mesh::Segmentation seg;
+  const cad::Rebuilt r = Rebuild(m, seg);
+  const Counts c = Count(r.shape);
+  CHECK(c.cylinders == static_cast<int>(bracket.cylinders.size()));
+  CHECK(c.cones == static_cast<int>(bracket.cones.size()));
+  CHECK(c.other == 0);
+  const CADShape::Mesh cm = r.shape.GenerateMeshDetached(0.05);
+  std::vector<bool> meshed(c.faces, false);
+  for (uint32_t f : cm.triangleFaces)
+    if (f < meshed.size())
+      meshed[f] = true;
+  CHECK(std::count(meshed.begin(), meshed.end(), false) == 0);
+  CHECK_THAT(Volume(r.shape), Catch::Matchers::WithinRel(bracket.volume, 1e-6));
   CADShape shape;
   mesh::Recognition report;
   REQUIRE(cad::RebuildRecognized(m, seg, 12, shape, report, nullptr));
-  CHECK(report.demoted == 1);
-  REQUIRE(BRepCheck_Analyzer(shape.GetShape()).IsValid());
-  const Counts c = Count(shape);
-  CHECK(c.cylinders == static_cast<int>(bracket.cylinders.size()));
-  CHECK(c.cones == 0);
-  CHECK(c.other == 0);
-  // The countersink's facets in place of its cone: what they cut off it.
-  CHECK_THAT(Volume(shape), Catch::Matchers::WithinRel(bracket.volume, 1e-3));
+  CHECK(report.demoted == 0);
 }
 
 TEST_CASE("Rebuild: a fillet tangent to its planes, an oblique hole, a dome",

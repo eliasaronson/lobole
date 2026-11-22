@@ -826,10 +826,14 @@ code involved.
   surface over no facet facing its way, and none of it turned against the
   mesh (an inside-out solid has the distances and the wrong side). A face
   no mesher tessellates is a hole in every picture of the part however
-  right its volume, and its region is demoted: the bracket fixture's
-  countersink rebuilds as a valid 90° cone that BRepMesh fails on at any
-  deflection, so it now comes back as flats (`demoted` 1), where the
-  volume check passed it.
+  right its volume, and its region is demoted. A full-turn cylinder's or
+  cone's seam is the straight edge between two mesh vertices, which sit on
+  the fit to its noise rather than on one ruling, so its two p-curves came
+  out one on u = 2 pi and one leaning off u = 0 -- not a period apart, which
+  BRepMesh fails on at any deflection (the bracket fixture's countersink
+  cone, demoted to flats for it). Each use of the seam is laid on its
+  ruling after the face is fixed (`StraightenSeams` in
+  `cad/MeshRebuild.cpp`), and the cone comes back as a cone that meshes.
   - Every face is checked on its own first, in one parallel `BRepCheck`
     of them all, before any shell is made. A curved face that will not
     build, that is faulted, or that leaves the shell open is demoted to its
