@@ -360,6 +360,7 @@ here; the golden corpus and git history cover them.
 | 231 | A `DatumAxis` `from_fit`'s `fit` may be of `kind` `torus`: the axis of the torus refitted round the point, through its centre, its sense with its largest component positive ([datums on a scan](../modeling/README.md#datums-on-a-scan)). A `radius_mm` hint on it is refused, as on a cone (a torus has two radii). Golden `v231-datum-fit-torus` |
 | 232 | A sketch `spline` may carry `knots`: its full knot vector, poles + degree + 1 numbers (the EFFECTIVE degree, poles − 1 for a short spline), non-decreasing, clamped (the first and last degree + 1 each equal) and no interior value more than the degree times ([representation](../sketching/README.md#representation)). Written only when it is not the clamped-uniform vector an absent `knots` means, so every older spline writes as it did; a written clamped-uniform one reads as none. A wrong count, a decrease, an unclamped end, an interior knot repeated past the degree, a non-number and a vector spanning nothing are refused by name. Golden `v232-spline-knots` |
 | 233 | A sketch constraint may be of `kind` `smooth` (`SplineJoint`): `a` and `b` the meeting ends of two splines of one degree joined by a coincident, whose first and (from degree 3) second derivatives agree there ([smooth](../sketching/README.md#smooth)). Split now cuts a spline into two pieces on its own knots joined coincident + `smooth`, where it made up to four joined `curvature`. Golden `v233-spline-smooth` |
+| 234 | A sketch section's `fit` may be `pieces`, the lines and arcs the cut is made of, with `detail` (0 to 1, written only for that fit) ([the pieces fit](../sketching/README.md#the-pieces-fit)); a sketch takes `traced`, a list of {`entity`, `section`, `chain`, `from`, `to`}: an entity traced over a section and where from ([tracing a section](../sketching/README.md#tracing-a-section)), written only when there is one. A detail on another fit or outside 0 to 1, a traced record naming an entity the sketch does not have or an `external` that is not a section, a value that is not a whole number, and an unknown key are refused. Golden `v234-section-pieces` |
 
 ## Pending changes
 
@@ -369,7 +370,6 @@ into the history above, numbered, when the branch lands
 
 | v | Change |
 |---|--------|
-| vNEXT | A sketch section's `fit` may be `pieces`, the lines and arcs the cut is made of, with `detail` (0 to 1, written only for that fit) ([the pieces fit](../sketching/README.md#the-pieces-fit)); a sketch takes `traced`, a list of {`entity`, `section`, `chain`, `from`, `to`}: an entity traced over a section and where from ([tracing a section](../sketching/README.md#tracing-a-section)), written only when there is one. A detail on another fit or outside 0 to 1, a traced record naming an entity the sketch does not have or an `external` that is not a section, a value that is not a whole number, and an unknown key are refused. Golden `vNEXT-section-pieces` |
 
 ## Paths in a project
 

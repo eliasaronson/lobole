@@ -1333,7 +1333,7 @@ json FeatureToJson(const Feature& feature) {
             ej["bodies"] = e.sectionBodies;
           if (e.toleranceMm > 0.0)
             ej["tolerance_mm"] = e.toleranceMm;
-          if (e.fit == sketch::SectionFit::Pieces) // vNEXT
+          if (e.fit == sketch::SectionFit::Pieces) // v234
             ej["detail"] = e.detail;
           j["external"].push_back(std::move(ej));
           continue;
@@ -1379,7 +1379,7 @@ json FeatureToJson(const Feature& feature) {
       }
       j["next_image_id"] = sk->nextImageId;
     }
-    // vNEXT: entities traced over a section, and where from. A record of a
+    // v234: entities traced over a section, and where from. A record of a
     // gone entity or section is not written.
     json traced = json::array();
     for (const sketch::TracedFrom& t : sk->traced)
@@ -3269,7 +3269,7 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
                 t.dump().substr(0, 40));
           eg.toleranceMm = t.get<double>();
         }
-        if (ej.contains("detail")) { // vNEXT: the pieces fit's
+        if (ej.contains("detail")) { // v234: the pieces fit's
           const json& d = ej.at("detail");
           if (eg.fit != sketch::SectionFit::Pieces)
             throw std::runtime_error(
@@ -3362,7 +3362,7 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
       sk->nextImageId = std::max<uint32_t>(
           {maxImg + 1, j.value("next_image_id", uint32_t{0})});
     }
-    if (j.contains("traced")) { // vNEXT
+    if (j.contains("traced")) { // v234
       const json& tj = j.at("traced");
       if (!tj.is_array())
         throw std::runtime_error("sketch '" + name +

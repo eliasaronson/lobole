@@ -5055,7 +5055,7 @@
               "face:2/g1730128861":
                   "-face.delete -face.delete_feature face.draft face.extrude_add face.extrude_cut face.frame face.hole face.offset_in face.offset_out face.replace face.shell face.sketch"
             },
-            "golden/vNEXT-section-pieces": {
+            "golden/v234-section-pieces": {
               "body:1":
                   "body.mirror body.pattern_circular body.pattern_linear body.split",
               "edge:1/*;U*": "edge.chamfer*12 edge.fillet*12",

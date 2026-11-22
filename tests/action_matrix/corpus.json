@@ -1132,9 +1132,9 @@
       "source": "tests/golden/v233-spline-smooth.json"
     },
     {
-      "design": "golden/vNEXT-section-pieces",
+      "design": "golden/v234-section-pieces",
       "kind": "golden",
-      "source": "tests/golden/vNEXT-section-pieces.json"
+      "source": "tests/golden/v234-section-pieces.json"
     },
     {
       "design": "golden/v216-u-name-by-fewer-edges",

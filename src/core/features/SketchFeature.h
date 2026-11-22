@@ -990,7 +990,7 @@ struct DerivedOp {
 // lines and arcs, or B-splines (`fit`). It keeps no index into anything, so a
 // re-scan or an edit upstream draws the new cut. `ref` is unused.
 enum class ExternalKind { Face, Edge, Section };
-// `Pieces` (vNEXT): the cut as the lines and arcs it is made of, each with
+// `Pieces` (v234): the cut as the lines and arcs it is made of, each with
 // its own fit (docs/sketching/README.md#the-pieces-fit).
 enum class SectionFit { Polyline, Arcs, Spline, Pieces };
 // One chain of a section's cut, in the plane's UV. A closed one does not
@@ -1041,7 +1041,7 @@ struct ExternalGeom {
   // changed file renumbers, and the print is what the element under the name
   // is checked against (docs/sketching/README.md#projecting-an-imported-part).
   std::optional<ElementPrint> print;
-  // Section only, the pieces fit's detail (vNEXT): 0 fewer, longer pieces,
+  // Section only, the pieces fit's detail (v234): 0 fewer, longer pieces,
   // 1 more, shorter ones.
   double detail = 0.5;
   // What the last regeneration cut (not saved), and for the pieces fit each
@@ -1050,7 +1050,7 @@ struct ExternalGeom {
   std::vector<PieceFit> pieces;
 };
 
-// A traced entity's origin (vNEXT, docs/sketching/README.md#tracing-a-section):
+// A traced entity's origin (v234, docs/sketching/README.md#tracing-a-section):
 // ordinary geometry drawn over span [from, to] of chain `chain` of the
 // section `external[section]`, as cut when it was traced. A record and
 // nothing more: the entity does not follow the section.
@@ -1429,7 +1429,7 @@ public:
   // not silently duplicate driving expressions, and the aggregate entity
   // structs (and every brace-init of them) stay untouched.
   std::map<uint32_t, std::map<std::string, std::string>> entityExprs;
-  // Entities traced over a section, and where from (vNEXT).
+  // Entities traced over a section, and where from (v234).
   std::vector<sketch::TracedFrom> traced;
 
   // An id no other entity in this sketch has, and that a sketch edited

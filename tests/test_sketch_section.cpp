@@ -338,12 +338,12 @@ TEST_CASE("A pieces section is saved with its detail, and refused without "
       DocumentIO::FeatureToJson(arcs).at("external").at(0).contains("detail"));
 }
 
-TEST_CASE("The vNEXT pieces golden's section is drawn on load",
+TEST_CASE("The v234 pieces golden's section is drawn on load",
           "[sketch][golden]") {
-  // tests/golden/vNEXT-section-pieces.json: the v214 box's section as
+  // tests/golden/v234-section-pieces.json: the v214 box's section as
   // pieces at detail 0.3 -- its four sides, each with its own fit.
   auto doc = testio::Load(std::string(TestSourceDir()) +
-                          "/tests/golden/vNEXT-section-pieces.json");
+                          "/tests/golden/v234-section-pieces.json");
   REQUIRE(doc != nullptr);
   auto& s = *dynamic_cast<SketchFeature*>(doc->GetFeature(1));
   INFO(s.GetError());

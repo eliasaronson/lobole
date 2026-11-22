@@ -756,7 +756,7 @@ stable ids, as any projection's is.
 
 Saved as `{kind: "section", fit, bodies?, tolerance_mm?, gen_ids,
 detail?}` in the sketch's `external` (format v214; `detail`, the pieces
-fit's, vNEXT); `bodies` and `tolerance_mm` are written only when given,
+fit's, v234); `bodies` and `tolerance_mm` are written only when given,
 `detail` only for `pieces` (a detail on another fit, or outside 0 to 1, is
 refused).
 
@@ -872,7 +872,7 @@ non-construction, free in the solve, coincident where consecutive pieces
 meet (round a closed chain too), and solved once. The section stays as it
 is underneath. A traced entity is ordinary geometry -- Split, Trim, Fillet
 and the dimension tools take it, a drag moves it -- and the sketch records
-where it came from, `traced {entity, section, chain, from, to}` (vNEXT):
+where it came from, `traced {entity, section, chain, from, to}` (v234):
 the section's index in `external`, the chain, and the span of the chain's
 points as cut when it was traced. Nothing more: the record does not move
 the entity. It is dropped with its entity, and with its section (whose
