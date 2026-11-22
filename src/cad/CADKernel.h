@@ -435,6 +435,10 @@ public:
     // import job's worker does, so the feature does not measure a
     // 100k-face mesh again on the main thread. A rigid placement keeps it.
     std::optional<double> volume;
+    // What the import's check found wrong with its solid ("" for nothing;
+    // interchange::CheckImportedSolid), when the reader's caller checked it
+    // already: the import job's worker does, off the frame.
+    std::optional<std::string> problem;
     // What a recognised mesh was found to be, in the file's coordinates
     // (docs/interchange/README.md#recognising-a-faceted-mesh).
     std::optional<mesh::Recognition> recognition;

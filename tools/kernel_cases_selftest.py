@@ -51,6 +51,19 @@ class Fake:
                     "matches": [match] * count}
         if method == "list_elements":
             return {"bodies": []}
+        if method == "new_project":
+            self.bodies = []
+            return {}
+        if method == "export_step":
+            return {}
+        if method == "import_step":
+            fid, self.next = self.next, self.next + 1
+            self.bodies.append(fid)
+            return {"bodies": 1, "regen": {"ok": True, "failed": []},
+                    "digest": {"bodies": [
+                        {"created_by": b, "solids": 1, "volume_mm3": 1.0,
+                         "bbox_min": [0, 0, 0], "bbox_max": [1, 1, 1]}
+                        for b in self.bodies]}}
         if method != "add_feature":
             raise AssertionError(f"the translator called {method}")
         f = params["feature"]
@@ -74,13 +87,14 @@ class Fake:
 
 def translate(commands, ambiguous=()):
     """The features a recipe becomes, or the Untranslated reason."""
-    tr = kt.Translator(Fake(ambiguous))
+    tr = kt.Translator(Fake(ambiguous), "/CASE", "/OUT")
     try:
         for c in commands:
             tr.command(c)
     except kt.Untranslated as e:
         return f"untranslated: {e}"
-    return [step["params"]["feature"] for step in tr.log]
+    return [step["params"]["feature"] if step["method"] == "add_feature"
+            else step for step in tr.log]
 
 
 def stated(text):

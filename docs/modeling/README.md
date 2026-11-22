@@ -2155,6 +2155,7 @@ into the steps [the reference parts](reference-parts.md) run, with its
 | `solid.revolve`, `solid.loft`, `solid.sweep`, `solid.thread` | Revolve (its axis pointed so a part turn goes toward the sketch's normal, as SolidCraft's does), Loft, Sweep, Thread |
 | `solid.pattern.*`, `solid.mirror`, `solid.split_body` | Pattern (a total `angle` divided into the step between copies), Split |
 | `parameters.add`, `construct.plane.offset` | nothing sent: an expression is evaluated, a plane kept as a frame |
+| `file.insert_step`, `file.export` (STEP), `file.export_step`, `file.new` | `import_step` with `keep_origin` (a STEP or an IGES), `export_step`, `new_project`; `$CASE/` is the case's directory and `$OUT/` the run's scratch, and a body named before a `file.new` is the re-import's when it brings one body |
 
 A command or a parameter with no counterpart is not approximated: the case
 is `untranslated`, naming it (a second radius or a setback on a fillet, a
@@ -2166,9 +2167,8 @@ exception is SolidCraft's own rule, that a seam or a tangent join passing
 through the point gives way to the real edge there. A body a later command
 names that has no `created_by` of its own (a split's piece, a pattern's
 copy, a lump) is untranslated too. `inspect.measure` and `document.inspect`
-build nothing and are skipped. The import and export commands
-(`file.insert_step`, `file.export`, `file.new`) are not translated yet, so
-the `import` area is vendored and waits.
+build nothing and are skipped. A mesh's import and conversion (`file.insert_mesh`, `mesh.convert`) and
+the exports to other formats are not translated.
 
 **What a case is held to.**
 
@@ -2566,6 +2566,9 @@ reference case.
     tangent neighbour without it ([Offset Face](#offset-face));
   - a Sweep along a closed path, a Pattern of a Loft or a Sweep that adds
     to a body, and a Loft to a section the first cannot see whole (a comb);
+  - an Import of a lone surface (a trimmed patch, a face with a hole):
+    a body is a solid, and a placed shape with no volume is skipped,
+    named ([interchange](../interchange/README.md#importing-into-a-part));
   - a thread outside the tables: a metric size with a pitch of its own
     (M44x1), trapezoidal (Tr20x4) and pipe threads (Rp, Rc, NPT), on a
     Thread and on a tapped Hole; a modelled thread in a hole as wide as

@@ -1234,10 +1234,12 @@ TEST_CASE("FacePlane's normal points out of the solid on a revolve's ends",
 #include "core/Measure.h"
 #include "core/features/ExtrudeFeature.h"
 #include "core/features/SketchFeature.h"
+#include "core/io/ImportCheck.h"
 #include "core/io/ImportUpAxis.h"
 
 #include <BRepBuilderAPI_Sewing.hxx>
 #include <BRepPrimAPI_MakeBox.hxx>
+#include <BRep_Builder.hxx>
 #include <IGESCAFControl_Writer.hxx>
 #include <IGESControl_Controller.hxx>
 #include <IGESControl_Writer.hxx>
@@ -1245,6 +1247,7 @@ TEST_CASE("FacePlane's normal points out of the solid on a revolve's ends",
 #include <TDataStd_Name.hxx>
 #include <TopExp_Explorer.hxx>
 #include <TopoDS.hxx>
+#include <TopoDS_Compound.hxx>
 #include <XCAFApp_Application.hxx>
 #include <XCAFDoc_ColorTool.hxx>
 #include <XCAFDoc_DocumentTool.hxx>
@@ -1604,6 +1607,62 @@ TEST_CASE("IGES reads names and colours as STEP does, and sews surfaces",
   CHECK(why.find("skipped 1 of 1") != std::string::npos);
   CHECK(why.find("a surface, not a solid") != std::string::npos);
   std::filesystem::remove(lone);
+
+  // Each face an entity of its own, unnamed: six products in XCAF, one
+  // quilt sewn shut into the box (MergeLooseSurfaces), not six open faces.
+  const auto six = std::filesystem::temp_directory_path() / "lobole_six.igs";
+  {
+    IGESControl_Controller::Init();
+    IGESControl_Writer writer("MM", 0);
+    for (TopExp_Explorer ex(BRepPrimAPI_MakeBox(10.0, 20.0, 30.0).Shape(),
+                            TopAbs_FACE);
+         ex.More(); ex.Next())
+      writer.AddShape(ex.Current());
+    writer.ComputeModel();
+    REQUIRE(writer.Write(six.string().c_str()));
+  }
+  CADKernel::ImportedModel faces;
+  REQUIRE(k.LoadIGESStructured(six.string(), faces));
+  REQUIRE(faces.instances.size() == 1);
+  const CADShape& box = faces.products[faces.instances[0].product].shape;
+  CHECK(box.SolidCount() == 1);
+  CHECK_THAT(box.Volume(), WithinRel(6000.0, 1e-6));
+  std::filesystem::remove(six);
+}
+
+TEST_CASE("an imported solid that is open or inside out comes in, named",
+          "[kernel][import]") {
+  // The box with one face taken out of its shell by hand
+  // (make_fixtures.py's open_box): it still comes in, since the geometry
+  // is what the user wanted, and the warning names it and why.
+  const auto open = ImportOne(ImportFixture("box-open.step"));
+  REQUIRE(open->GetBodies().size() == 1);
+  const std::string said = open->GetFeature(0)->GetWarning();
+  INFO(said);
+  CHECK(said.find("came in open: 4 free edges") != std::string::npos);
+  // The same box whole says nothing.
+  const auto whole = ImportOne(ImportFixture("box-lobole.step"));
+  REQUIRE(whole->GetBodies().size() == 1);
+  CHECK(whole->GetFeature(0)->GetWarning().find("came in") ==
+        std::string::npos);
+
+  // Inside out: a solid whose shell faces in measures a negative volume.
+  const CADShape box(BRepPrimAPI_MakeBox(2.0, 3.0, 4.0).Shape());
+  CHECK(interchange::CheckImportedSolid(box).empty());
+  const CADShape inverted(
+      BRepPrimAPI_MakeBox(2.0, 3.0, 4.0).Shape().Reversed());
+  CHECK(interchange::CheckImportedSolid(inverted).find("inside out") !=
+        std::string::npos);
+  // Past the face budget it is named as not checked, not passed.
+  TopoDS_Compound many;
+  BRep_Builder bb;
+  bb.MakeCompound(many);
+  for (size_t i = 0; i * 6 <= interchange::kImportCheckFaceLimit; i++)
+    bb.Add(many,
+           BRepPrimAPI_MakeBox(gp_Pnt(3.0 * double(i), 0.0, 0.0), 1.0, 1.0, 1.0)
+               .Shape());
+  CHECK(interchange::CheckImportedSolid(CADShape(many), 1.0)
+            .find("was not checked") != std::string::npos);
 }
 
 TEST_CASE("an IGES import refuses `units`, which the file declares",

@@ -637,7 +637,7 @@ def run_case(d, case, scratch):
         return Outcome(f"untranslated: graded by `{k}`, a SolidCraft "
                        "command's own answer")
     d.call("new_project")
-    tr = kt.Translator(d)
+    tr = kt.Translator(d, os.path.join(CORPUS, case), scratch)
     run = {"refusal": None}
     try:
         for i, command in enumerate(commands, 1):

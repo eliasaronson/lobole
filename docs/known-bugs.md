@@ -209,6 +209,27 @@ the heading if it is not here yet.
   `17439-cylinder-cavity-along-x-touching-the-floor`,
   `17439-cylinder-cavity-touching-two-walls-along-lines`.
 
+## Interchange
+
+### An IGES box whose faces miss by more than 1/10000 of its size comes in open
+
+- **Symptom:** a box of six trimmed planes whose edge stops 0.01 mm short
+  of its corner in both faces that use it comes in as a shell with free
+  edges (named by the import's check), not the closed 6000 mm³ box; an
+  IGES surface of revolution trimmed at its rim over a flat disc (a dome)
+  comes in with one free edge and is skipped as a surface.
+- **Cause:** the faces are sewn at the file's resolution and then at
+  1/10000 of the part's diagonal (`SewProduct`); a 0.01 mm gap on a 37 mm
+  box is past both. The dome's one free edge is not traced yet: its rim
+  and the disc's circle are not sewn into one, or the revolved face's seam
+  is used once.
+- **Where:** `SewProduct`, `src/cad/CADKernel.cpp`.
+- **Likely fix:** a third sewing at the gap the open shell's free edges
+  actually leave, when every free edge can close at it and that is still
+  small against the part; the dome first needs its free edge named.
+- **Cases:** `solidcraft/import/3845-iges-trim-pieces-miss-by-a-gap`,
+  `solidcraft/import/3806-iges-revolved-arc-spherical-cap-dome`.
+
 ## Sketching
 
 ### A huge length edit refuses a shape that rides the line's end

@@ -93,6 +93,18 @@ def step_boxes(d):
                          count=1, flags=re.S)
         with open(out(name), "w") as fh:
             fh.write(swapped)
+    with open(out("box-open.step"), "w") as fh:
+        fh.write(open_box(text))
+
+
+def open_box(text):
+    """The box with one face taken out of its shell by hand, as a
+    careless exporter leaves it: the solid comes in open, its four edges
+    round the hole used by one face each
+    (docs/interchange/README.md#an-imported-body-is-checked)."""
+    m = re.search(r"CLOSED_SHELL\('',\(([^)]*)\)\)", text)
+    faces = m.group(1).split(",")
+    return text[:m.start(1)] + ",".join(faces[:-1]) + text[m.end(1):]
 
 
 def flat_pattern(d):

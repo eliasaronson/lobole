@@ -5,6 +5,7 @@
 
 #include "cad/MeshRebuild.h"
 #include "core/ModelSpace.h"
+#include "core/io/ImportCheck.h"
 #include "core/io/ImportFormats.h"
 #include "core/io/MeshImportCost.h"
 #include "core/mesh/MeshReaders.h"
@@ -12,6 +13,7 @@
 #include <mutex>
 
 #include <algorithm>
+#include <cmath>
 
 #include "cad/CADMaterials.h"
 #include "core/AxisRef.h"
@@ -748,6 +750,7 @@ bool ImportFeature::Execute(RegenContext& ctx) {
   std::vector<Placed> placed;
   std::vector<std::string> skipped;
   std::vector<std::string> openNotes;
+  std::vector<size_t> checkedNotes; // products whose problem is said
   for (const auto& inst : model.instances) {
     // A mesh body: kept whether or not it closes. An open scan is the
     // normal case (the table it stood on), so it is reported, not skipped.
@@ -794,10 +797,22 @@ bool ImportFeature::Execute(RegenContext& ctx) {
     }
     // Measured by the import job's worker when it read the file: a rigid
     // placement keeps a volume, and a 100k-face mesh is seconds to measure.
-    const std::optional<double>& known = model.products[inst.product].volume;
-    if ((known ? *known : moved.Volume()) <= 1e-6) {
+    CADKernel::ImportedShape& product = model.products[inst.product];
+    const double volume = product.volume ? *product.volume : moved.Volume();
+    if (std::abs(volume) <= 1e-6) {
       skipped.push_back(who + " (a surface, not a solid)");
       continue;
+    }
+    // Checked once a product, where it is made: an open, invalid or
+    // inside-out solid still comes in, and the warning says which and why
+    // (docs/interchange/README.md#an-imported-body-is-checked).
+    if (!product.problem)
+      product.problem = interchange::CheckImportedSolid(src, volume);
+    if (!product.problem->empty() &&
+        std::find(checkedNotes.begin(), checkedNotes.end(), inst.product) ==
+            checkedNotes.end()) {
+      checkedNotes.push_back(inst.product);
+      openNotes.push_back("body " + who + " " + *product.problem);
     }
     placed.push_back(
         {std::move(moved), inst.product, inst.name, turn * inst.transform});

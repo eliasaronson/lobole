@@ -2004,6 +2004,11 @@ GeometryReport CheckGeometry(const CADShape& shape) {
   // passes it: check_print's shells failed a solid check_geometry verified.
   for (TopExp_Explorer so(s, TopAbs_SOLID); so.More(); so.Next())
     out.freeEdges += CountFreeEdges(so.Current());
+  // A shell outside any solid is a body too (a STEP whose closed shell lost
+  // a face comes in as one, with a volume), and its free edges are an
+  // opening as a solid's are: unseen here, it passed as valid.
+  for (TopExp_Explorer sh(s, TopAbs_SHELL, TopAbs_SOLID); sh.More(); sh.Next())
+    out.freeEdges += CountFreeEdges(sh.Current());
   if (out.valid && !escapes && out.freeEdges == 0)
     return out;
   out.valid = false;

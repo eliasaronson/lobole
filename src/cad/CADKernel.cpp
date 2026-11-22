@@ -2059,6 +2059,53 @@ Sewn SewAt(const TopoDS_Shape& faces, double tolerance,
   return out;
 }
 
+// An IGES of trimmed surfaces often writes each face as an entity of its
+// own, with no name and no structure: XCAF makes each a product, and sewn
+// one by one each stays an open face where the file meant a box. The unnamed
+// products that hold faces and no solid are one quilt, placed as their
+// instances place them, sewn together after this
+// (docs/interchange/README.md#iges). A named one stays a product of its own.
+void MergeLooseSurfaces(CADKernel::ImportedModel& out) {
+  std::vector<bool> loose(out.products.size(), false);
+  int count = 0;
+  for (size_t i = 0; i < out.products.size(); i++) {
+    const TopoDS_Shape& s = out.products[i].shape.GetShape();
+    if (out.products[i].name.empty() && !s.IsNull() &&
+        !TopExp_Explorer(s, TopAbs_SOLID).More() &&
+        TopExp_Explorer(s, TopAbs_FACE).More()) {
+      loose[i] = true;
+      count++;
+    }
+  }
+  if (count < 2)
+    return;
+  BRep_Builder bb;
+  TopoDS_Compound quilt;
+  bb.MakeCompound(quilt);
+  std::vector<CADKernel::ImportedInstance> kept;
+  for (const CADKernel::ImportedInstance& inst : out.instances) {
+    if (!loose[inst.product]) {
+      kept.push_back(inst);
+      continue;
+    }
+    const CADShape placed =
+        out.products[inst.product].shape.Transformed(inst.transform);
+    for (TopExp_Explorer ex(placed.GetShape(), TopAbs_FACE); ex.More();
+         ex.Next())
+      bb.Add(quilt, ex.Current());
+  }
+  // The others keep their indices: the quilt goes at the end, and the
+  // products it took are left empty (an instance names none of them).
+  for (size_t i = 0; i < out.products.size(); i++)
+    if (loose[i])
+      out.products[i].shape = CADShape();
+  CADKernel::ImportedShape merged;
+  merged.shape = CADShape(quilt);
+  out.products.push_back(std::move(merged));
+  kept.push_back({out.products.size() - 1, glm::dmat4(1.0), ""});
+  out.instances = std::move(kept);
+}
+
 // Surfaces become bodies, or are counted (docs/interchange/README.md#iges):
 // a product with faces but no solid is sewn at `resolution`, the tolerance
 // the file itself declares. When that leaves it open, it is sewn again at a
@@ -2170,8 +2217,10 @@ bool CADKernel::LoadIGESStructured(const std::string& filename,
     for (const char* t : kTypeNames)
       if (product.name == t)
         product.name.clear();
-    SewProduct(product, resolution, out.notes);
   }
+  MergeLooseSurfaces(out);
+  for (ImportedShape& product : out.products)
+    SewProduct(product, resolution, out.notes);
   return !out.instances.empty();
 }
 

@@ -66,6 +66,8 @@ the recipe, and each regeneration reads it.
   surface) cannot be a body; the feature's warning names each one ("skipped
   1 of 3: \"Lid\" (a surface, not a solid)"), and when nothing is left the
   error does. It used to vanish without a word.
+- **An imported body is checked** where it is made, and what it fails is
+  named: [an imported body is checked](#an-imported-body-is-checked).
 - **The extension decides the reader**, case-blind; any other is refused,
   naming `.step/.stp, .igs/.iges, .brep, .stl, .obj, .ply, .glb/.gltf`
   (`interchange::kImportExtensions`, `src/core/io/ImportFormats.h`, the one
@@ -111,6 +113,24 @@ the recipe, and each regeneration reads it.
   feature (`SeedGeometry`) and consumed by its first regeneration. It is not
   serialized and not sticky: later regenerations re-read the path, so editing
   the source file still updates the part.
+
+### An imported body is checked
+
+A file another program wrote can hold a solid that is open (a face left out
+of its shell), crosses itself, or faces inward, and every feature after the
+import inherits it. Each solid an Import brings in is checked once, where it
+is made (`interchange::CheckImportedSolid`, `src/core/io/ImportCheck.cpp`):
+`check_geometry`'s test (`Measure::CheckGeometry`: BRepCheck, free edges, a
+cavity reaching outside) and a positive volume. A solid that fails still
+comes in, since the geometry is what the user wanted, and the feature's
+warning names it and why, as a skipped surface is named:
+"body \"Housing\" came in open: 3 free edges", "came in invalid:
+self-intersecting wire", "came in inside out (its volume is negative)".
+The GUI's import job checks on its worker, beside the volume it already
+measures there, so the frame does not wait on BRepCheck; an `import_step`
+checks in the feature. A solid of more than 20,000 faces
+(`kImportCheckFaceLimit`) is not checked, and the warning says so with its
+count, rather than passing it unseen.
 
 ## Editing a downloaded part
 
@@ -437,7 +457,12 @@ closed shell becomes a solid, as in `LoadSTL`; an open one stays a shell.
 The feature's warning says when the tolerance was widened or a shell stayed
 open, with how many free edges; a product that sewed shut at the file's own
 resolution says nothing. OpenCASCADE's translator names an unnamed entity by
-its shape type ("COMPOUND"); that is not taken as a name.
+its shape type ("COMPOUND"); that is not taken as a name. A file that writes
+each trimmed face as an entity of its own, unnamed (a box of six patches),
+gives XCAF six products; those unnamed products of faces and no solid are
+one quilt, placed as their instances place them and sewn together
+(`MergeLooseSurfaces`), so the box closes, and two boxes in one file close
+as two solids. A named product stays one of its own.
 
 Units come from the global section, so `units` is refused on IGES. The up
 axis reads the global section as above. `.igs`/`.iges` go through
@@ -1183,6 +1208,21 @@ writes once its views have landed
 ([drawings](../drawings/README.md#projection-off-the-frame)). STL and BREP
 on an assembly tab, and unknown extensions, are refused by name.
 
+## The STEP bake-off
+
+`tools/step-bakeoff.py` measures the reader on files other programs wrote:
+an occasional audit like `bench.py`, how an OpenCASCADE upgrade or a reader
+patch is judged. `fetch MANIFEST` downloads a pinned corpus (each file's
+URL and SHA-256, and a reference volume where one is known) into
+`~/.cache/lobole/step-bakeoff/`, never the repository, since some corpora
+are not ours to pass on, and refuses a file whose bytes are not the pinned
+ones. `run BINARY MANIFEST` imports each file with `keep_origin` in a
+headless instance of its own and prints per file whether it opened, the
+import's warning, whether it is valid and closed (`check_geometry`), its
+volume against the reference, and the seconds; `--dir DIR` runs a local
+directory with no reference, `--json OUT` keeps the rows. No manifest is
+committed yet: which public corpora to pin is still to choose.
+
 ## RPCs
 
 | RPC | module | does |
@@ -1203,8 +1243,8 @@ on an assembly tab, and unknown extensions, are refused by name.
 | where | covers |
 |---|---|
 | `tests/test_step_export.cpp` | an assembly exports as its tree (each part once per configuration and material, placed by reference, sub-assemblies nested, hidden occurrences left out); a part is one named product of its bodies; a one-solid compound keeps its name and colour; a face painted apart is a colour on that face in the STEP and its own primitive and material in glTF; visual export colours every occurrence as the screen does; an assembly tab writes STEP and refuses STL by name |
-| `tests/test_cadkernel.cpp` `[kernel]` | structured STEP import (names, colours, instances); our own glTF and PLY read back where they were written; STL units; the assembly import plan (centred parts, placed occurrences); no XCAF document left open; each `auto` decision and its reason; each axis puts the 30 mm along Z and SolidWorks' front on −Y; a sketch on an imported face follows an axis change; R·P·R⁻¹; an older Import reloads unmoved; IGES names and colours as STEP's, surfaces sewn, a skipped one named; OBJ objects, colours and units; our STEP names Loböle |
-| `tests/fixtures/import/` | the fixtures and `make_fixtures.py` / `make_iges.cpp`, which wrote them: our box under real SolidWorks 2024 and Autodesk headers, IGES as a solid, as surfaces and with a SolidWorks system ID, ezdxf DXFs, SVGs, an OBJ |
+| `tests/test_cadkernel.cpp` `[kernel]` | structured STEP import (names, colours, instances); our own glTF and PLY read back where they were written; STL units; the assembly import plan (centred parts, placed occurrences); no XCAF document left open; each `auto` decision and its reason; each axis puts the 30 mm along Z and SolidWorks' front on −Y; a sketch on an imported face follows an axis change; R·P·R⁻¹; an older Import reloads unmoved; IGES names and colours as STEP's, surfaces sewn, a skipped one named; an open, an inside-out and a too-large imported solid named by the check; OBJ objects, colours and units; our STEP names Loböle |
+| `tests/fixtures/import/` | the fixtures and `make_fixtures.py` / `make_iges.cpp`, which wrote them: our box under real SolidWorks 2024 and Autodesk headers, the box with a face taken out of its shell (`box-open.step`), IGES as a solid, as surfaces and with a SolidWorks system ID, ezdxf DXFs, SVGs, an OBJ |
 | `tests/golden/v190-import-up-axis.json` | `up_axis` and `turn_deg` round-trip; v97 and v103 reload as `none` |
 | `tests/test_import_align.cpp` `[align]` | a placement's angles read back; composing an alignment is the matrix product; a mesh body and a B-Rep placed (moved vertices, volume, face names kept); the keys written, read and refused; floor on a tilted box as a mesh and as facets, then scaled by a known edge with the floor kept; three points; principal axes; the rim of an open scan on z = 0 with the figure standing; each refusal |
 | `tests/test_mesh_register.cpp` `[register]` | [laying a scan onto a body](#laying-a-scan-onto-a-body): a bracket, a near-cube with one blind hole, a scan of half the bracket and a thin plate, each tilted off the axes, laid back from six seeded random rigid motions to within 0.015 mm and 0.01° of the motion applied (the noise is 0.05 mm); the plate's closest other attitude is it on its back, scored several times worse; a box (its own half turn) says so in its `note` and lands on one of its symmetries; an exact copy of a coarse CAD mesh (few triangles, sharp edges) laid to 1e-6 mm; the scale never changes; three pairs, and in a line refused; a region; a cancel; a datum fitted before a re-scan refits after it, its seed unmoved; `[slow]` a 500k-triangle scan under its CPU budget |
@@ -1213,6 +1253,7 @@ on an assembly tab, and unknown extensions, are refused by name.
 | GUI `align/a_best_fit_runs_off_the_frame` | Best fit arms the onto pick with Accept disabled; a click on the other body runs the fit as an `align` job and lands a preview standing on it, saying the box is its own turn; Accept is one undo step and Undo puts it back |
 | `tests/scan_align_smoke.py` | a noisy scan of a modelled box, turned and moved, laid onto the box by `best_fit` through the RPC (its bounding box the box's, the note, the B-Rep's chord), a datum on it, the placement and the datum read back after save and reopen; `cancel_align`: the `align` job listed, cancelled from another connection, the call refused and the document unchanged |
 | `tests/test_assembly_flatten.cpp` | `Flatten`'s levels compose to exactly its world placement |
+| [the kernel cases](../modeling/README.md#kernel-cases) `import` area | exporters' quirks (B-spline edges over tiny knot spans, a vertex off its edge, a cylinder written as a near-zero cone, a void shell oriented `.F.`, IGES trims end to start or with gaps) and our own STEP round trips, each held to its hand-worked answer |
 | `tests/headless_smoke.py` | STEP / STL / BREP round trips, `keep_origin`, `as_assembly`; every import fixture through `import_step` / `import_sketch` with its reply read |
 | `tests/refused_calls_smoke.py` | an unknown `up_axis`, `units` on IGES, a drawing given to `import_step`, a scale of -1 and an unknown placement key; `align_import`'s unknown mode, a parameter of another mode, a point off the import, three points in a line, a missing distance; best_fit without `onto`, onto no feature or the import itself, with a `scale`, pairs in a line or two of them, a region of a third body or off the import, `onto` on a floor; each changing nothing |
 | GUI `import/solidworks_part_stands_up_and_lies_down` | the pill, the editor's axis combo, undo |

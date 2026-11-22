@@ -399,6 +399,7 @@ set(core_sources
     src/core/io/ImportAssembly.cpp
     src/core/io/ImportUpAxis.cpp
     src/core/io/MeshImportCost.cpp
+    src/core/io/ImportCheck.cpp
     src/core/io/ImportDxf.cpp
     src/core/io/ImportSvg.cpp
     src/core/io/SketchImport.cpp

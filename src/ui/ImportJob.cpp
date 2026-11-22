@@ -12,6 +12,7 @@
 #include "ui/ImportActions.h"
 
 #include "core/Feature.h"
+#include "core/io/ImportCheck.h"
 #include "core/io/ReadContext.h"
 
 #include "cad/CADKernel.h" // ArmOccSignalHandlers
@@ -20,6 +21,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <cstdlib>
 #include <ctime>
 #include <filesystem>
@@ -217,10 +219,15 @@ void Run(ImportJob* job, BackgroundJob* bg, int holdMs, bool holdDeaf) {
     if (!assembly) {
       job->kind = ImportJob::Kind::Feature;
       // Measured here rather than by the feature on the main thread: a
-      // 100k-face mesh's volume is seconds of Gauss integration.
+      // 100k-face mesh's volume is seconds of Gauss integration. The check
+      // every imported solid gets is BRepCheck's, as long: here too.
       for (CADKernel::ImportedShape& product : model.products)
-        if (product.shape.IsValid() && !bg->cancel.load())
+        if (product.shape.IsValid() && !bg->cancel.load()) {
           product.volume = product.shape.Volume();
+          if (std::abs(*product.volume) > 1e-6)
+            product.problem =
+                interchange::CheckImportedSolid(product.shape, product.volume);
+        }
       // Carried over rather than dropped: the feature would otherwise parse
       // the same file again on its first regen.
       job->model = std::move(model);

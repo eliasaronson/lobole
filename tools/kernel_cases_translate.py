@@ -340,8 +340,11 @@ SKIPPED = {
 
 
 class Translator:
-    def __init__(self, d):
+    def __init__(self, d, case_dir=None, out_dir=None):
         self.d = d
+        self.case_dir = case_dir   # what `$CASE/` in a recipe path names
+        self.out_dir = out_dir     # and `$OUT/`: the run's scratch
+        self.reimport = None       # body names before a file.new
         self.log = []          # every step sent, as written
         self.results = []      # their answers, for $ref
         self.digest = None     # the last mutating call's
@@ -1103,6 +1106,62 @@ class Translator:
                 spec, profile_id=self.emit_sketch(profile),
                 path_id=self.emit_sketch(path), mode=mode))
         self.note(p, self.solid(p, "solid.sweep", build))
+
+    # -- files --------------------------------------------------------------
+
+    def path(self, v, command):
+        """A recipe path: `$CASE/` is the case's own directory, `$OUT/` a
+        scratch directory of the run's. Any other path is not the case's."""
+        if not isinstance(v, str):
+            raise Untranslated(f"`{command}` with a path that is not a string")
+        for key, base in (("$CASE/", self.case_dir), ("$OUT/", self.out_dir)):
+            if v.startswith(key) and base:
+                return os.path.join(base, v[len(key):])
+        raise Untranslated(f"`{command}` with a path outside $CASE and $OUT")
+
+    def c_file_insert_step(self, p):
+        self.only(p, {"path"}, "file.insert_step")
+        names = self.reimport or []
+        self.reimport = None
+        before = set(self.live())
+        r = self.send("import_step", {"path": self.path(p["path"],
+                                                        "file.insert_step"),
+                                      "keep_origin": True})
+        made = [b for b in (self.digest or {}).get("bodies", [])
+                if b["created_by"] not in before]
+        if not made:
+            raise Refusal(r.get("warning") or "the import made no body")
+        fid = made[0]["created_by"]
+        # Every body of one import shares its created_by: a body a later
+        # command names is the import's only when there is one.
+        for name in names:
+            if len(made) == 1:
+                self.bodies[name] = fid
+        self.bodies[f"Import{len(self.log)}"] = fid
+
+    def c_file_new(self, p):
+        self.only(p, {"name"}, "file.new")
+        # What the recipe called its bodies, for a re-import of them.
+        self.reimport = list(self.bodies)
+        self.send("new_project", {})
+        self.digest = {"bodies": []}
+        self.bodies = {}
+        self.features = {}
+        self.sketches = {}
+        self.last_sketch = None
+
+    def _export(self, p, command):
+        self.send("export_step", {"path": self.path(p["path"], command)})
+
+    def c_file_export(self, p):
+        self.only(p, {"path", "format"}, "file.export")
+        if p.get("format", "step") not in ("step", "stp"):
+            raise Untranslated(f"`file.export` as {p.get('format')}")
+        self._export(p, "file.export")
+
+    def c_file_export_step(self, p):
+        self.only(p, {"path"}, "file.export_step")
+        self._export(p, "file.export_step")
 
     # -- booleans ----------------------------------------------------------
 

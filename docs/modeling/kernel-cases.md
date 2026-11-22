@@ -23,10 +23,10 @@ command or parameter Loböle has no counterpart for.
 | sweeps | 98 | 37 | 13 | 48 |
 | solids | 11 | 3 | 0 | 8 |
 | threads | 31 | 14 | 17 | 0 |
-| import | 35 | 0 | 0 | 35 |
+| import | 35 | 21 | 5 | 9 |
 | tessellation | 14 | 11 | 1 | 2 |
 | crashes | 12 | 3 | 0 | 9 |
-| **all** | 877 | 371 | 157 | 349 |
+| **all** | 877 | 392 | 162 | 323 |
 
 ## Known failures
 
@@ -134,6 +134,11 @@ command or parameter Loböle has no counterpart for.
 | solidcraft/fillets/every-l-bracket-inside-bend-r35-uses-both-faces | refused | [docs/modeling/README.md#not-built](README.md#not-built) |
 | solidcraft/fillets/every-l-bracket-outside-bend-r5 | refused | [docs/known-bugs.md#a-blend-beside-a-plane-an-add-left-in-two-pieces-is-refused-at-every-size](../known-bugs.md#a-blend-beside-a-plane-an-add-left-in-two-pieces-is-refused-at-every-size) |
 | solidcraft/fillets/every-pocket-rim-edges-r5-as-deep-as-pocket | refused | [docs/modeling/README.md#not-built](README.md#not-built) |
+| solidcraft/import/3352-vertex-off-its-edge-curve | refused | [docs/modeling/README.md#not-built](README.md#not-built) |
+| solidcraft/import/3806-iges-revolved-arc-spherical-cap-dome | refused | [docs/known-bugs.md#an-iges-box-whose-faces-miss-by-more-than-110000-of-its-size-comes-in-open](../known-bugs.md#an-iges-box-whose-faces-miss-by-more-than-110000-of-its-size-comes-in-open) |
+| solidcraft/import/3845-iges-trim-pieces-miss-by-a-gap | invalid | [docs/known-bugs.md#an-iges-box-whose-faces-miss-by-more-than-110000-of-its-size-comes-in-open](../known-bugs.md#an-iges-box-whose-faces-miss-by-more-than-110000-of-its-size-comes-in-open) |
+| solidcraft/import/3912-iges-hole-trim-first-piece-reversed | refused | [docs/modeling/README.md#not-built](README.md#not-built) |
+| solidcraft/import/3963-closed-spline-edge-vertex-past-start | refused | [docs/modeling/README.md#not-built](README.md#not-built) |
 | solidcraft/ladder/04-spline-profiles/004-sweep-square-along-bezier | volume | [docs/modeling/README.md#known-rows-that-are-not-kernel-defects](README.md#known-rows-that-are-not-kernel-defects) |
 | solidcraft/ladder/04-spline-profiles/008-loft-square-to-circle | volume | [docs/modeling/README.md#known-rows-that-are-not-kernel-defects](README.md#known-rows-that-are-not-kernel-defects) |
 | solidcraft/ladder/05-holes-and-taps/015-tapped-1-4-28-unf-blind | volume | [docs/modeling/README.md#known-rows-that-are-not-kernel-defects](README.md#known-rows-that-are-not-kernel-defects) |
@@ -195,7 +200,6 @@ command or parameter Loböle has no counterpart for.
 | what has no counterpart | cases |
 |---|---|
 | `sketch.project` | 31 |
-| `file.insert_step` | 21 |
 | `sketch.spline.fit_point` | 18 |
 | `solid.fillet` of type `curvature` | 15 |
 | `sheet.manage_rules` | 13 |
@@ -209,7 +213,6 @@ command or parameter Loböle has no counterpart for.
 | `solid.fillet` with `fit` | 6 |
 | `solid.thread` with `form` | 6 |
 | a loft section that is not a whole sketch | 6 |
-| `file.export` | 5 |
 | `solid.fillet` with `radius2` | 5 |
 | `solid.shell` outward | 4 |
 | `solid.split_face` | 4 |
@@ -232,7 +235,7 @@ command or parameter Loböle has no counterpart for.
 | `surface.loft` | 3 |
 | `surface.revolve` | 3 |
 | `construct.plane.along_path` | 2 |
-| `file.new` | 2 |
+| `document.units` | 2 |
 | `parameters.change` | 2 |
 | `sketch.options` | 2 |
 | `solid.bounding_solid` | 2 |
@@ -263,8 +266,8 @@ command or parameter Loböle has no counterpart for.
 | `construct.axis.two_points` | 1 |
 | `file.export_3mf` | 1 |
 | `file.export_obj` | 1 |
-| `file.export_step` | 1 |
 | `file.export_stl` | 1 |
+| `file.export` with `bodies` | 1 |
 | `file.insert_mesh` | 1 |
 | `plastic.snap_fit` | 1 |
 | `sketch.constraint.horizontal_vertical` | 1 |

@@ -245,5 +245,23 @@
     {"command": "inspect.measure", "params": {}}],
    "calls": [
     {"type": "Sketch", "name": "Sketch1", "plane": {"origin": [12.0, 0.0, 0.0], "normal": [1.0, 0.0, 0.0], "uAxis": [0.0, 1.0, 0.0]}, "entities": [{"type": "circle", "center": [0.0, 0.0], "radius": 5.0, "id": 1}, {"type": "point", "p": [1.0, 1.0], "id": 2}]},
-    {"type": "Extrude", "name": "Extrude", "distance": 5.0, "sketch_id": {"$ref": 1}, "mode": "new_body"}]}
+    {"type": "Extrude", "name": "Extrude", "distance": 5.0, "sketch_id": {"$ref": 1}, "mode": "new_body"}]},
+  {"row": "file.insert_step, file.new, file.export, file.export_step",
+   "recipe": [
+    {"command": "solid.box", "params": {"length": 10, "width": 10, "height": 10, "body_name": "Cube"}},
+    {"command": "file.export", "params": {"path": "$OUT/a.step", "format": "step"}},
+    {"command": "file.export_step", "params": {"path": "$OUT/b.step"}},
+    {"command": "file.new", "params": {"name": "Again"}},
+    {"command": "file.insert_step", "params": {"path": "$OUT/a.step"}},
+    {"command": "solid.fillet", "params": {"edges": [[0, 0, 5]], "radius": 1, "body": "Cube"}},
+    {"command": "file.insert_step", "params": {"path": "$CASE/input.step"}}],
+   "calls": [
+    {"type": "Sketch", "name": "Box", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "uAxis": [1.0, 0.0, 0.0]}, "entities": [{"type": "line", "id": 1, "a": [0.0, 0.0], "b": [10.0, 0.0]}, {"type": "line", "id": 2, "a": [10.0, 0.0], "b": [10.0, 10.0]}, {"type": "line", "id": 3, "a": [10.0, 10.0], "b": [0.0, 10.0]}, {"type": "line", "id": 4, "a": [0.0, 10.0], "b": [0.0, 0.0]}]},
+    {"type": "Extrude", "name": "Box", "sketch_id": {"$ref": 1}, "distance": 10.0, "mode": "new_body"},
+    {"method": "export_step", "params": {"path": "/OUT/a.step"}},
+    {"method": "export_step", "params": {"path": "/OUT/b.step"}},
+    {"method": "new_project", "params": {}},
+    {"method": "import_step", "params": {"path": "/OUT/a.step", "keep_origin": true}},
+    {"type": "Fillet", "name": "Fillet", "radius": 1.0, "edges": [{"$pick": "edge", "at": [0.0, 0.0, 5.0]}]},
+    {"method": "import_step", "params": {"path": "/CASE/input.step", "keep_origin": true}}]}
 ]}
