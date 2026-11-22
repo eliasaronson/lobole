@@ -3078,6 +3078,11 @@
    "face:2/cap1": "-face.delete -face.delete_feature face.draft face.extrude_add face.extrude_cut face.frame face.hole face.offset_in face.offset_out face.replace face.shell face.sketch",
    "face:2/g11": "curved.frame curved.thread -face.delete -face.delete_feature face.offset_in face.offset_out"
   },
+  "golden/vNEXT-datum-fit-torus": {
+   "body:2": "body.mirror body.pattern_circular body.pattern_linear body.split",
+   "edge:2/*;U*": "edge.frame*2",
+   "face:2/g11": "-face.delete -face.delete_feature"
+  },
   "golden/v216-u-name-by-fewer-edges": {
    "body:2": "-body.mirror -body.pattern_circular -body.pattern_linear body.split",
    "edge:2/*;U*": "edge.chamfer*13 edge.fillet*11 -edge.fillet*2 edge.frame*4",
