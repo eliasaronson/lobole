@@ -43,13 +43,17 @@ int Simplicity(mesh::Kind k) {
     return 2;
   case mesh::Kind::Cone:
     return 3;
+  case mesh::Kind::Torus:
+    return 4;
   }
-  return 4;
+  return 5;
 }
 
 } // namespace
 
-std::string AcceptedKinds() { return "plane, cylinder, cone, sphere, auto"; }
+std::string AcceptedKinds() {
+  return "plane, cylinder, cone, sphere, torus, auto";
+}
 
 std::string AcceptedClipSigma() { return "1, 2, 3 or \"all\""; }
 
@@ -184,7 +188,7 @@ bool KindFromString(const std::string& s, std::optional<mesh::Kind>& kind) {
     return true;
   }
   for (mesh::Kind k : {mesh::Kind::Plane, mesh::Kind::Cylinder,
-                       mesh::Kind::Cone, mesh::Kind::Sphere})
+                       mesh::Kind::Cone, mesh::Kind::Sphere, mesh::Kind::Torus})
     if (s == mesh::KindName(k)) {
       kind = k;
       return true;
@@ -207,11 +211,13 @@ void CheckRequest(const Request& r) {
       throw std::runtime_error(
           std::string(h) + " does not apply to a " + mesh::KindName(*r.kind) +
           (std::string(h) == "side"
-               ? ": side is for a curved kind (cylinder, cone, sphere); a "
-                 "plane faces the way its triangles do"
+               ? ": side is for a curved kind (cylinder, cone, sphere, "
+                 "torus); a plane faces the way its triangles do"
            : std::string(h) == "radius_mm"
-               ? ": radius_mm is for a cylinder or a sphere"
-               : ": axis is for a plane (its normal), a cylinder or a cone"));
+               ? ": radius_mm is for a cylinder or a sphere (a torus has "
+                 "two radii)"
+               : ": axis is for a plane (its normal), a cylinder, a cone or "
+                 "a torus"));
   if (!r.hints.Inside(r.pointMm))
     throw std::runtime_error("point_mm " + Point(r.pointMm) +
                              " is outside within: the region grows only "
@@ -230,7 +236,7 @@ std::vector<const Body*> BodiesOf(const std::vector<Body>& bodies,
 glm::dvec3 CanonicalAxis(const mesh::FitResult& f) {
   glm::dvec3 a = f.axis;
   if (f.kind == mesh::Kind::Cone)
-    return a;
+    return a; // into the cone
   int big = 0;
   for (int i = 1; i < 3; i++)
     if (std::abs(a[i]) > std::abs(a[big]))
@@ -289,8 +295,9 @@ bool Fit(const std::vector<const Body*>& bodies, const Request& r, Result& out,
   if (r.kind)
     kinds.push_back(*r.kind);
   else
-    for (mesh::Kind k : {mesh::Kind::Plane, mesh::Kind::Sphere,
-                         mesh::Kind::Cylinder, mesh::Kind::Cone})
+    for (mesh::Kind k :
+         {mesh::Kind::Plane, mesh::Kind::Sphere, mesh::Kind::Cylinder,
+          mesh::Kind::Cone, mesh::Kind::Torus})
       if (r.hints.NotFor(k) == nullptr) // auto tries what the hints allow
         kinds.push_back(k);
   // The seeds: the triangle at the point, and with hints every triangle
@@ -342,7 +349,6 @@ bool Fit(const std::vector<const Body*>& bodies, const Request& r, Result& out,
     size_t attempts = 0;
     std::vector<glm::dvec3> triedFacing;
     bool two = false;
-    double twoArea = 0.0;
     std::vector<uint32_t> twoTris;
     for (uint32_t seed : seeds) {
       if (seeds.size() > 1 && covered[seed])
@@ -372,8 +378,6 @@ bool Fit(const std::vector<const Body*>& bodies, const Request& r, Result& out,
         if (g.twoSurfaces) {
           two = true;
           twoTris = reached;
-          for (uint32_t t : reached)
-            twoArea += m.Area(t);
         }
       }
       if (seeds.size() == 1)
@@ -399,7 +403,6 @@ bool Fit(const std::vector<const Body*>& bodies, const Request& r, Result& out,
     c.rmsMm = g.fit.rms;
     c.why = why;
     c.twoSurfaces = !g.fit.ok && two;
-    c.twoAreaMm2 = twoArea;
     std::sort(twoTris.begin(), twoTris.end());
     twoOver.push_back(c.twoSurfaces ? std::move(twoTris)
                                     : std::vector<uint32_t>{});
@@ -456,7 +459,7 @@ bool Fit(const std::vector<const Body*>& bodies, const Request& r, Result& out,
     }
   }
   if (pick < 0) {
-    error = "no plane, sphere, cylinder or cone fits at point_mm " +
+    error = "no plane, sphere, cylinder, cone or torus fits at point_mm " +
             Point(r.pointMm) + " on '" + out.body + "' to " +
             Mm(out.toleranceMm) + " mm";
     return false;
@@ -489,6 +492,13 @@ nlohmann::json ResultJson(const Result& r) {
   case mesh::Kind::Sphere:
     j["centre_mm"] = Json(f.origin);
     j["radius_mm"] = f.radius;
+    break;
+  case mesh::Kind::Torus:
+    j["centre_mm"] = Json(f.origin);
+    j["axis"] = Json(CanonicalAxis(f));
+    j["major_radius_mm"] = f.radius;
+    j["minor_radius_mm"] = f.minor;
+    j["concave"] = r.region.concave;
     break;
   }
   j["rms_mm"] = f.rms;

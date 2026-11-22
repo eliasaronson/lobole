@@ -5,6 +5,7 @@
 // explain is.
 
 #include "core/mesh/Split.h"
+
 #include "core/Angles.h"
 
 #include <algorithm>
@@ -429,6 +430,70 @@ TwoSurfaces SplitTwo(const TriMesh& m, const std::vector<uint32_t>& region,
   out.two = out.shareA >= kSplitShare && out.shareB >= kSplitShare &&
             out.apart > kSplitApart * out.scatter &&
             out.smoothRms > kSplitSmooth * out.twoRms;
+  if (out.two && kind == Kind::Cylinder &&
+      std::abs(glm::dot(glm::normalize(a.axis), glm::normalize(b.axis))) <
+          std::cos(angles::ToRadians(kBentDeg))) {
+    // A tube bent round an axis -- a ring, a round turning a corner -- is
+    // one smooth surface too, which two cylinders side by side only
+    // approximate, their axes leaning apart: a torus over the region,
+    // robust, its rms over every point. Fitted only here, where the split
+    // would otherwise stand and the two do not share an axis (a step's
+    // do, to a tenth of a degree).
+    std::vector<glm::dvec3> centres, normals;
+    const size_t nt = region.size(), take = std::min<size_t>(nt, 4096);
+    for (size_t i = 0; i < take; i++) {
+      const uint32_t t = region[take == nt ? i : i * nt / take];
+      const glm::dvec3 an = m.AreaNormal(t);
+      if (!(glm::length(an) > 0.0))
+        continue;
+      centres.push_back((m.Corner(t, 0) + m.Corner(t, 1) + m.Corner(t, 2)) /
+                        3.0);
+      normals.push_back(glm::normalize(an));
+    }
+    // The two halves' axes are tangents of the bent tube's core: in the
+    // plane they span, the core's centre is where the lines square to each
+    // through its own axis point meet.
+    FitResult bent;
+    bent.kind = Kind::Torus;
+    {
+      const glm::dvec3 ua = glm::normalize(a.axis), ub = glm::normalize(b.axis);
+      const glm::dvec3 up = glm::normalize(glm::cross(ua, ub));
+      // Each axis's point nearest the region's middle.
+      glm::dvec3 mid(0.0);
+      for (const glm::dvec3& p : pts)
+        mid += p;
+      mid /= double(n);
+      const glm::dvec3 pa = a.origin + ua * glm::dot(mid - a.origin, ua);
+      const glm::dvec3 pb = b.origin + ub * glm::dot(mid - b.origin, ub);
+      const glm::dvec3 da = glm::cross(up, ua), db = glm::cross(up, ub);
+      // pa + s da = pb + t db, in the plane: least squares in s and t.
+      const double aa = glm::dot(da, da), ab = glm::dot(da, db),
+                   bb2 = glm::dot(db, db), ra = glm::dot(da, pb - pa),
+                   rb = glm::dot(db, pb - pa), det = aa * bb2 - ab * ab;
+      if (std::abs(det) > 1e-12) {
+        const double sa = (ra * bb2 - ab * rb) / det;
+        const double tb = (ab * ra - aa * rb) / det;
+        const glm::dvec3 centre = 0.5 * ((pa + sa * da) + (pb + tb * db));
+        bent.origin = centre + up * glm::dot(0.5 * (pa + pb) - centre, up);
+        bent.axis = up;
+        bent.radius = 0.5 * (glm::length(pa - bent.origin) +
+                             glm::length(pb - bent.origin));
+        bent.minor = 0.5 * (a.radius + b.radius);
+        bent.ok = bent.radius > 0.0 && std::isfinite(bent.radius);
+      }
+    }
+    const FitResult torus = FitRobust(Kind::Torus, pts, centres, normals,
+                                      noiseMm, nullptr, {}, &bent);
+    if (torus.ok) {
+      double sq = 0.0;
+      for (const glm::dvec3& p : pts) {
+        const double d = torus.Distance(p);
+        sq += d * d;
+      }
+      out.smoothRms = std::min(out.smoothRms, std::sqrt(sq / double(n)));
+      out.two = out.smoothRms > kSplitSmooth * out.twoRms;
+    }
+  }
 
   if (kind == Kind::Cylinder) {
     // Where they step: the cut along the axis that the fewest points of

@@ -632,7 +632,8 @@ void DrawModelToolbar(AppState& state) {
   btn("###tb_align", "part.align",
       "Align an import (floor, three points, principal axes, scale)");
   btn("###tb_fit_primitive", "part.fit",
-      "Fit a plane, cylinder, cone or sphere to a body from a point, kept "
+      "Fit a plane, cylinder, cone, sphere or torus to a body from a point, "
+      "kept "
       "as a datum (a scan's datums)");
   btn("###tb_mirror", "part.mirror", "Mirror a body");
   btn("###tb_pattern", "part.pattern", "Pattern (linear / circular)");

@@ -13,6 +13,7 @@
 #include <BRepBuilderAPI_Copy.hxx>
 #include <BRepBuilderAPI_MakeFace.hxx>
 #include <BRepBuilderAPI_MakePolygon.hxx>
+#include <BRepBuilderAPI_Transform.hxx>
 #include <BRepFilletAPI_MakeFillet.hxx>
 #include <BRepGProp.hxx>
 #include <BRepPrimAPI_MakeBox.hxx>
@@ -24,6 +25,7 @@
 #include <TopExp_Explorer.hxx>
 #include <TopoDS.hxx>
 #include <gp_Ax2.hxx>
+#include <gp_Trsf.hxx>
 
 #include <unistd.h>
 
@@ -199,6 +201,53 @@ Part RoundedPlate() {
     for (double y : {-13.0, 13.0})
       part.cylinders.push_back({{x, y, 0}, {0, 0, 1}, 7.0, 0});
   return Finish("rounded_plate", fillet.Shape(), part);
+}
+
+Part RoundedCorners() {
+  Part part;
+  TopoDS_Shape s = BRepPrimAPI_MakeBox(gp_Pnt(-25, -18, 0), 50, 36, 14).Shape();
+  const auto fillet = [&](double radius, auto&& pick) {
+    BRepFilletAPI_MakeFillet f(s);
+    for (TopExp_Explorer ex(s, TopAbs_EDGE); ex.More(); ex.Next()) {
+      BRepAdaptor_Curve c(TopoDS::Edge(ex.Current()));
+      if (pick(c.Value(c.FirstParameter()), c.Value(c.LastParameter())))
+        f.Add(radius, TopoDS::Edge(ex.Current()));
+    }
+    f.Build();
+    REQUIRE(f.IsDone());
+    s = f.Shape();
+  };
+  fillet(6.0, [](const gp_Pnt& a, const gp_Pnt& b) {
+    return std::abs(a.Z() - b.Z()) > 1.0;
+  });
+  fillet(2.0, [](const gp_Pnt& a, const gp_Pnt& b) {
+    return std::abs(a.Z() - 14) < 1e-6 && std::abs(b.Z() - 14) < 1e-6;
+  });
+  s = Fuse(
+      s, BRepPrimAPI_MakeCylinder(gp_Ax2(gp_Pnt(0, 0, 14), gp::DZ()), 5.0, 8.0)
+             .Shape());
+  fillet(1.5, [](const gp_Pnt& a, const gp_Pnt& b) {
+    return std::abs(a.Z() - 14) < 1e-6 && std::abs(b.Z() - 14) < 1e-6 &&
+           std::hypot(a.X(), a.Y()) < 5.0 + 1e-6;
+  });
+  // Turned 23 deg about (1, 2, 0.5) and moved: no answer on an axis.
+  gp_Trsf turn;
+  turn.SetRotation(gp_Ax1(gp::Origin(), gp_Dir(1, 2, 0.5)), 23.0 * kPi / 180);
+  gp_Trsf move;
+  move.SetTranslation(gp_Vec(5, -3, 2));
+  const gp_Trsf place = move * turn;
+  s = BRepBuilderAPI_Transform(s, place, true).Shape();
+  const auto point = [&](double x, double y, double z) {
+    const gp_Pnt p = gp_Pnt(x, y, z).Transformed(place);
+    return glm::dvec3(p.X(), p.Y(), p.Z());
+  };
+  const gp_Dir up = gp::DZ().Transformed(place);
+  const glm::dvec3 axis(up.X(), up.Y(), up.Z());
+  for (double x : {-19.0, 19.0})
+    for (double y : {-12.0, 12.0})
+      part.tori.push_back({point(x, y, 12), axis, 4.0, 0, 2.0});
+  part.tori.push_back({point(0, 0, 15.5), axis, 6.5, 0, 1.5});
+  return Finish("rounded_corners", s, part);
 }
 
 std::filesystem::path WriteStl(const Part& part, double deflection,

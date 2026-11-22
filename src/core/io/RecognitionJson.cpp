@@ -43,23 +43,31 @@ nlohmann::json RecognitionJson(const ImportFeature& imp, bool lists) {
       row["cylinders"] = r.Count(mesh::Kind::Cylinder);
       row["cones"] = r.Count(mesh::Kind::Cone);
       row["spheres"] = r.Count(mesh::Kind::Sphere);
+      row["tori"] = r.Count(mesh::Kind::Torus);
       row["polygonal"] = r.polygonal.size();
       bodies.push_back(std::move(row));
       continue;
     }
     json cylinders = json::array(), cones = json::array(),
-         spheres = json::array(), polygons = json::array();
+         spheres = json::array(), tori = json::array(),
+         polygons = json::array();
     for (const mesh::RecognizedRound& c : r.rounds) {
-      json one = {{"radius_mm", c.radius},
-                  {"centre_mm", Vec(c.centre)},
+      json one = {{"centre_mm", Vec(c.centre)},
                   {"sides", c.sides},
                   {"sagitta_mm", c.sagitta}};
+      if (c.kind == mesh::Kind::Torus) {
+        one["major_radius_mm"] = c.radius;
+        one["minor_radius_mm"] = c.minorRadius;
+      } else {
+        one["radius_mm"] = c.radius;
+      }
       if (c.kind != mesh::Kind::Sphere)
         one["axis"] = Vec(c.axis);
       if (c.kind == mesh::Kind::Cone)
         one["half_angle_deg"] = angles::ToDegrees(c.halfAngle);
       (c.kind == mesh::Kind::Cylinder ? cylinders
        : c.kind == mesh::Kind::Cone   ? cones
+       : c.kind == mesh::Kind::Torus  ? tori
                                       : spheres)
           .push_back(std::move(one));
     }
@@ -71,6 +79,7 @@ nlohmann::json RecognitionJson(const ImportFeature& imp, bool lists) {
     row["cylinders"] = std::move(cylinders);
     row["cones"] = std::move(cones);
     row["spheres"] = std::move(spheres);
+    row["tori"] = std::move(tori);
     row["polygonal"] = std::move(polygons);
     bodies.push_back(std::move(row));
   }

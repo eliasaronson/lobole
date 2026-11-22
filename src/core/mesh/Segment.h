@@ -5,7 +5,7 @@
 
 // A faceted mesh cut into the surfaces it was tessellated from
 // (docs/interchange/README.md#recognising-a-faceted-mesh): every triangle
-// ends in one region, a plane, cylinder, cone or sphere fitted to it.
+// ends in one region, a plane, cylinder, cone, sphere or torus fitted to it.
 //
 //  1. Flat patches: triangles coplanar to within the file's precision
 //     (k x quantum, as a vertex's distance from the patch's plane, never a
@@ -20,7 +20,7 @@
 //     region is taken only when no facet of it turns by more than
 //     360 / min_sides degrees. One that fits but turns more is a POLYGON,
 //     listed, and its flats stay planes -- a nut sits on them.
-//  4. What fits nothing (a torus corner, a freeform blend) stays as its
+//  4. What fits nothing (a freeform blend, a variable round) stays as its
 //     flat patches, counted as facets left.
 //
 // Growth is by the fitted surface's residual, not by a normal's deviation
@@ -69,6 +69,9 @@ struct Region {
   glm::dvec2 extent{0.0}; // a plane's, along its principal directions (mm)
   // A failed GrowFrom's: it was refused as two surfaces (mesh::SplitTwo).
   bool twoSurfaces = false;
+  // GrowFrom's torus: its triangles face its core circle (a concave round,
+  // a fillet at a boss's foot) rather than away from it (a ring).
+  bool concave = false;
 };
 
 // A ring of flats whose corners fit a circle but that turns too far a facet
@@ -107,11 +110,12 @@ void Demote(Segmentation& s, const TriMesh& mesh,
 // mesh's own coordinates until the caller places it.
 struct RecognizedRound {
   Kind kind = Kind::Cylinder;
-  double radius = 0.0;    // mm (a cone: at its widest)
+  double radius = 0.0;    // mm (a cone: at its widest; a torus: its core's)
   double halfAngle = 0.0; // a cone's, rad
+  double minorRadius = 0.0; // a torus's tube (mm)
   glm::dvec3 axis{0.0, 0.0, 1.0};
   glm::dvec3 centre{0.0}; // a cylinder's or cone's mid-length on its axis,
-                          // a sphere's centre
+                          // a sphere's or a torus's centre
   int sides = 0;          // a full turn's worth
   double sagitta = 0.0;   // mm the facets stood off it
 };
@@ -119,7 +123,7 @@ struct Recognition {
   int minSides = 12;
   size_t triangles = 0;
   size_t planes = 0;
-  std::vector<RecognizedRound> rounds; // cylinders, cones, spheres
+  std::vector<RecognizedRound> rounds; // cylinders, cones, spheres, tori
   std::vector<Polygon> polygonal;
   size_t facetsLeft = 0;
   double toleranceMm = 0.0;
@@ -197,7 +201,9 @@ struct GrowOptions {
 //     the noise is split in two (SplitTwo) and refused naming both when it
 //     is two surfaces -- unless a hint (side, radius_mm, axis) meets one of
 //     them alone, which is then fitted; a plane that is a strip along the
-//     crown of a round (BowOf) is refused naming the cylinder that fits.
+//     crown of a round (BowOf) is refused naming the round that fits there
+//     (a cylinder, a sphere or a torus, as fit_primitive's auto would
+//     choose among them).
 Region GrowFrom(const TriMesh& mesh, uint32_t seed, Kind kind,
                 double toleranceMm, std::string* why = nullptr,
                 const GrowOptions& options = {},

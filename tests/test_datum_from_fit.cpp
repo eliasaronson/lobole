@@ -29,6 +29,7 @@
 #include <glm/gtc/quaternion.hpp>
 
 #include <cmath>
+#include <cstdio>
 #include <filesystem>
 #include <memory>
 #include <stdexcept>
@@ -458,6 +459,67 @@ TEST_CASE("A datum from_fit keeps its hints and its clip, and refits by them",
   p["fit"]["clip_sigma"] = "all";
   const auto pb = DocumentIO::FeatureFromJson(p);
   CHECK(dynamic_cast<const DatumPlaneFeature&>(*pb).fit.clipSigma == 0);
+}
+
+TEST_CASE("A datum axis from_fit is a scanned ring's axis, through its "
+          "centre",
+          "[datum][fit][mesh_body]") {
+  const fixtures::Ring ring = fixtures::ScannedRing(20.0, 5.0, 0.5, 0.05);
+  const fs::path stl = fixtures::WriteStl(ring.organic.mesh, "datum-torus");
+  Document doc;
+  doc.AddFeature(ScanImport(stl));
+  const uint64_t importId = doc.GetFeature(0)->GetId();
+  auto axis =
+      std::make_unique<DatumAxisFeature>("Ring axis", DatumAxisKind::FromFit);
+  axis->fit = {importId, ring.At(120.0, 30.0), mesh::Kind::Torus, {}};
+  doc.AddFeature(std::move(axis));
+  REQUIRE(doc.Regenerate());
+  const auto& a = *dynamic_cast<const DatumAxisFeature*>(doc.GetFeature(1));
+  INFO(a.GetError());
+  REQUIRE(a.GetError().empty());
+  std::printf("ring datum: axis %.4f deg off, origin %.4f mm off the centre\n",
+              LineAngleDeg(a.Direction(), ring.axis),
+              glm::length(a.Origin() - ring.centre));
+  CHECK(LineAngleDeg(a.Direction(), ring.axis) < 0.1);
+  CHECK(glm::length(a.Origin() - ring.centre) < 0.05);
+  CHECK(glm::dot(a.Direction(), ring.axis) > 0.0); // largest component +
+  CHECK_THAT(a.FitReport().at("major_radius_mm").get<double>(),
+             WithinAbs(20.0, 0.05));
+  // It reads back as written; a radius_mm on it is refused.
+  nlohmann::json j = DocumentIO::FeatureToJson(a);
+  CHECK(j.at("fit").at("kind") == "torus");
+  CHECK(DocumentIO::FeatureToJson(*DocumentIO::FeatureFromJson(j)) == j);
+  j["fit"]["radius_mm"] = {4.0, 6.0};
+  try {
+    (void)DocumentIO::FeatureFromJson(j);
+    FAIL("accepted");
+  } catch (const std::exception& e) {
+    CHECK_THAT(std::string(e.what()),
+               ContainsSubstring("radius_mm does not apply to a torus"));
+  }
+  fs::remove(stl);
+}
+
+TEST_CASE("The vNEXT golden's ring axis is fitted to its torus",
+          "[datum][fit][golden]") {
+  // tests/golden/vNEXT-datum-fit-torus.json: a circle of radius 5 at 20
+  // from Z revolved about it, its axis fitted to its own tessellation as a
+  // torus, outside.
+  auto doc = testio::Load(std::string(TestSourceDir()) +
+                          "/tests/golden/vNEXT-datum-fit-torus.json");
+  REQUIRE(doc != nullptr);
+  const auto& axis = *dynamic_cast<const DatumAxisFeature*>(doc->GetFeature(2));
+  INFO(axis.GetError());
+  REQUIRE(axis.GetError().empty());
+  CHECK(axis.fit.kind == mesh::Kind::Torus);
+  CHECK(LineAngleDeg(axis.Direction(), {0, 0, 1}) < 1e-3);
+  CHECK(axis.Direction().z > 0.0);
+  CHECK(glm::length(axis.Origin()) < 1e-3);
+  CHECK_THAT(axis.FitReport().at("major_radius_mm").get<double>(),
+             WithinAbs(20.0, 0.01));
+  CHECK_THAT(axis.FitReport().at("minor_radius_mm").get<double>(),
+             WithinAbs(5.0, 0.01));
+  CHECK(axis.FitReport().at("concave") == false);
 }
 
 TEST_CASE("The v215 golden's datums are fitted on load",

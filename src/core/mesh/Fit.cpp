@@ -24,6 +24,8 @@ const char* KindName(Kind k) {
     return "cone";
   case Kind::Sphere:
     return "sphere";
+  case Kind::Torus:
+    return "torus";
   }
   return "plane";
 }
@@ -44,6 +46,12 @@ double FitResult::Distance(const glm::dvec3& p) const {
   }
   case Kind::Sphere:
     return glm::length(p - origin) - radius;
+  case Kind::Torus: {
+    const glm::dvec3 w = p - origin;
+    const double h = glm::dot(w, axis);
+    const double rho = glm::length(w - h * axis);
+    return std::hypot(rho - radius, h) - minor;
+  }
   }
   return 0.0;
 }
@@ -75,6 +83,18 @@ glm::dvec3 FitResult::Project(const glm::dvec3& p) const {
     const double len = glm::length(w);
     return len > 0.0 ? origin + w * (radius / len) : p;
   }
+  case Kind::Torus: {
+    // The core circle's nearest point, then out along the tube.
+    const glm::dvec3 w = p - origin;
+    const glm::dvec3 q = w - glm::dot(w, axis) * axis;
+    const double len = glm::length(q);
+    if (len == 0.0)
+      return p; // on the axis: every point of the core is as near
+    const glm::dvec3 core = origin + q * (radius / len);
+    const glm::dvec3 v = p - core;
+    const double l = glm::length(v);
+    return l > 0.0 ? core + v * (minor / l) : p;
+  }
   }
   return p;
 }
@@ -98,6 +118,16 @@ glm::dvec3 FitResult::Normal(const glm::dvec3& p) const {
     if (kind == Kind::Cylinder)
       return r / l;
     return std::cos(halfAngle) * (r / l) - std::sin(halfAngle) * axis;
+  }
+  case Kind::Torus: {
+    const glm::dvec3 w = p - origin;
+    const glm::dvec3 q = w - glm::dot(w, axis) * axis;
+    const double len = glm::length(q);
+    if (!(len > 0.0))
+      return glm::dvec3(0.0);
+    const glm::dvec3 v = p - (origin + q * (radius / len));
+    const double l = glm::length(v);
+    return l > 0.0 ? v / l : glm::dvec3(0.0);
   }
   }
   return glm::dvec3(0.0);
@@ -647,6 +677,141 @@ FitResult FitSphere(const std::vector<glm::dvec3>& points, double giveUpAbove) {
   return f;
 }
 
+FitResult FitTorus(const std::vector<glm::dvec3>& points,
+                   const FitResult& start, double giveUpAbove) {
+  FitResult f;
+  f.kind = Kind::Torus;
+  if (points.size() < 8 || start.kind != Kind::Torus || !(start.radius > 0.0) ||
+      !(start.minor > 0.0) || !(glm::length(start.axis) > 0.0))
+    return f;
+  const glm::dvec3 c0 = Centroid(points);
+  const double scale = Scale(points, c0);
+  std::vector<glm::dvec3> pts(points.size());
+  for (size_t i = 0; i < points.size(); i++)
+    pts[i] = (points[i] - c0) / scale;
+  glm::dvec3 a = glm::normalize(start.axis), e1, e2;
+  glm::dvec3 c = (start.origin - c0) / scale;
+  double R = start.radius / scale, r = start.minor / scale;
+  const auto distance = [](const glm::dvec3& p, const glm::dvec3& cp,
+                           const glm::dvec3& ap, double rp, double tube) {
+    const glm::dvec3 w = p - cp;
+    const double h = glm::dot(w, ap);
+    return std::hypot(glm::length(w - h * ap) - rp, h) - tube;
+  };
+  if (giveUpAbove > 0.0)
+    for (const glm::dvec3& p : pts)
+      if (std::abs(distance(p, c, a, R, r)) * scale > giveUpAbove)
+        return f;
+  Basis(a, e1, e2);
+  // Parameters: the axis tipped by (u, v), the centre moved by (x, y, z),
+  // the core's radius grown by dR and the tube's by dr.
+  const auto model = [&](const double* p, glm::dvec3& ap, glm::dvec3& cp,
+                         double& rp, double& tube) {
+    ap = glm::normalize(a + p[0] * e1 + p[1] * e2);
+    cp = c + glm::dvec3(p[2], p[3], p[4]);
+    rp = R + p[5];
+    tube = r + p[6];
+  };
+  const auto residuals = [&](const double* p, std::vector<double>& out) {
+    glm::dvec3 ap, cp;
+    double rp, tube;
+    model(p, ap, cp, rp, tube);
+    out.resize(pts.size());
+    for (size_t i = 0; i < pts.size(); i++)
+      out[i] = distance(pts[i], cp, ap, rp, tube);
+  };
+  const auto commit = [&](const double* p) {
+    model(p, a, c, R, r);
+    Basis(a, e1, e2);
+  };
+  Refine(7, std::vector<double>(7, 1e-7), residuals, commit);
+  f.axis = a;
+  f.origin = c0 + c * scale;
+  f.radius = R * scale;
+  f.minor = r * scale;
+  Residuals(f, points);
+  f.ok = f.ok && f.radius > 0.0 && f.minor > 0.0;
+  return f;
+}
+
+FitResult TorusAbout(const std::vector<glm::dvec3>& points,
+                     const glm::dvec3& axisPoint, const glm::dvec3& axis) {
+  FitResult f;
+  f.kind = Kind::Torus;
+  if (points.size() < 8 || !(glm::length(axis) > 0.0))
+    return f;
+  const glm::dvec3 a = glm::normalize(axis);
+  // Each point's distance from the axis against its height along it: on a
+  // torus, a circle about (core radius, centre height).
+  std::vector<glm::dvec2> flat(points.size());
+  glm::dvec2 mean(0.0);
+  for (size_t i = 0; i < points.size(); i++) {
+    const glm::dvec3 w = points[i] - axisPoint;
+    const double h = glm::dot(w, a);
+    flat[i] = {glm::length(w - h * a), h};
+    mean += flat[i];
+  }
+  mean /= double(points.size());
+  for (glm::dvec2& q : flat)
+    q -= mean;
+  glm::dvec2 centre;
+  double tube = 0.0;
+  if (!Circle2(flat, centre, tube))
+    return f;
+  centre += mean;
+  f.origin = axisPoint + a * centre.y;
+  f.axis = a;
+  f.radius = centre.x;
+  f.minor = tube;
+  Residuals(f, points);
+  f.ok = f.ok && f.radius > 0.0 && f.minor > 0.0;
+  return f;
+}
+
+FitResult TorusFromNormals(const std::vector<glm::dvec3>& points,
+                           const std::vector<glm::dvec3>& normals,
+                           const std::vector<glm::dvec3>& onLine) {
+  FitResult none;
+  none.kind = Kind::Torus;
+  if (normals.size() < 5 || onLine.size() != normals.size())
+    return none;
+  // A line along unit a with moment m meets the normal line (n, q = p x n)
+  // when n . m + q . a = 0. Least squares over every normal line, m
+  // eliminated: a is the least eigenvector of Q - C N^-1 C^T.
+  const glm::dvec3 c0 = Centroid(onLine);
+  const double scale = Scale(onLine, c0);
+  glm::dmat3 nn(0.0), qn(0.0), qq(0.0);
+  for (size_t i = 0; i < normals.size(); i++) {
+    const glm::dvec3 n = normals[i];
+    const glm::dvec3 q = glm::cross((onLine[i] - c0) / scale, n);
+    nn += glm::outerProduct(n, n);
+    qn += glm::outerProduct(q, n);
+    qq += glm::outerProduct(q, q);
+  }
+  const double trace = nn[0][0] + nn[1][1] + nn[2][2];
+  if (!(trace > 0.0))
+    return none;
+  // Normals all in one plane (a cylinder's) leave N singular: held off it
+  // by a hair, the axis they share still comes out.
+  if (!(std::abs(glm::determinant(nn)) > 1e-12 * trace * trace * trace))
+    nn += glm::dmat3(1e-9 * trace);
+  const glm::dmat3 ninv = glm::inverse(nn);
+  const glm::dmat3 schur = qq - qn * ninv * glm::transpose(qn);
+  glm::dvec3 values;
+  glm::dmat3 vectors;
+  SymmetricEigen3(schur, values, vectors);
+  // Two lines as good as each other: the normals meet at a point.
+  if (!(values[1] > 1e-9 * std::max(values[2], 1e-300)))
+    return none;
+  const glm::dvec3 a = glm::normalize(vectors[0]);
+  const glm::dvec3 m = -(ninv * (glm::transpose(qn) * a));
+  const glm::dvec3 onAxis = c0 + glm::cross(a, m) * scale;
+  if (!std::isfinite(onAxis.x) || !std::isfinite(onAxis.y) ||
+      !std::isfinite(onAxis.z))
+    return none;
+  return TorusAbout(points, onAxis, a);
+}
+
 namespace {
 
 // splitmix64: a generator whose sequence is the same on every platform,
@@ -683,6 +848,8 @@ int SampleSize(Kind k) {
   case Kind::Cylinder:
   case Kind::Sphere:
     return 2;
+  case Kind::Torus:
+    return 5;
   }
   return 3;
 }
@@ -786,8 +953,209 @@ FitResult Hypothesis(Kind kind, const glm::dvec3* p, const glm::dvec3* n) {
         std::isfinite(apex.x) && std::isfinite(apex.y) && std::isfinite(apex.z);
     return f;
   }
+  case Kind::Torus:
+    return f; // not from a minimal sample: TorusHypotheses
   }
   return f;
+}
+
+// The torus's hypotheses (FitRobust): one per tube radius on a log scale
+// from the tolerance to twice the points' span, either sign, and the axis
+// the normal lines meet.
+std::vector<FitResult> TorusHypotheses(const std::vector<glm::dvec3>& points,
+                                       const std::vector<glm::dvec3>& centres,
+                                       const std::vector<glm::dvec3>& normals,
+                                       double toleranceMm) {
+  std::vector<FitResult> out;
+  // At most so many of each, an even stride: a plane and a circle are
+  // known as well as they need to be from a thousand.
+  static constexpr size_t kMost = 1024;
+  const auto strided = [](const std::vector<glm::dvec3>& v) {
+    std::vector<size_t> idx;
+    const size_t take = std::min(v.size(), kMost);
+    for (size_t i = 0; i < take; i++)
+      idx.push_back(take == v.size() ? i : i * v.size() / take);
+    return idx;
+  };
+  const std::vector<size_t> at = strided(centres), pi = strided(points);
+  std::vector<glm::dvec3> pts, c, n;
+  for (size_t i : pi)
+    pts.push_back(points[i]);
+  for (size_t i : at) {
+    const double l = glm::length(normals[i]);
+    if (!(l > 0.0))
+      continue;
+    c.push_back(centres[i]);
+    n.push_back(normals[i] / l);
+  }
+  if (c.size() < 8 || pts.size() < 8)
+    return out;
+  glm::dvec3 lo(std::numeric_limits<double>::max()), hi(-lo);
+  for (const glm::dvec3& p : pts) {
+    lo = glm::min(lo, p);
+    hi = glm::max(hi, p);
+  }
+  const double span = glm::length(hi - lo);
+  if (!(span > 0.0))
+    return out;
+  out.push_back(TorusFromNormals(pts, n, c));
+  // A patch too small for its third order -- the first disk a region grows
+  // from -- fixes a torus only to the second: the tube's curvature and the
+  // other, each with its direction. Every torus through the patch's middle
+  // with those has its core a tube's radius in along the normal and its
+  // axis through where the normal meets it (Meusnier), at some tilt in the
+  // plane of the normal and the tube's direction: a fan of tilts, either
+  // curvature taken as the tube's, for the growth to choose between.
+  {
+    const FitResult plane = FitPlane(pts);
+    glm::dvec3 facing(0.0);
+    for (const glm::dvec3& v : n)
+      facing += v;
+    if (plane.ok) {
+      const glm::dvec3 nz =
+          glm::dot(plane.axis, facing) < 0.0 ? -plane.axis : plane.axis;
+      glm::dvec3 ex, ey;
+      Basis(nz, ex, ey);
+      // Heights over the plane, h = a x^2 + b xy + c y^2 + d x + e y + f:
+      // where the surface is over the middle.
+      std::vector<double> mm(36, 0.0), bb(6, 0.0);
+      for (const glm::dvec3& p : pts) {
+        const glm::dvec3 w = (p - plane.origin) / span;
+        const double x = glm::dot(w, ex), y = glm::dot(w, ey),
+                     h = glm::dot(w, nz);
+        const double row[6] = {x * x, x * y, y * y, x, y, 1.0};
+        for (int i = 0; i < 6; i++) {
+          for (int k = 0; k < 6; k++)
+            mm[i * 6 + k] += row[i] * row[k];
+          bb[i] += row[i] * h;
+        }
+      }
+      if (Solve(mm, bb, 6)) {
+        // The surface's curvatures, positive where it bends away from the
+        // way it faces (a boss), from how its normals turn across it: on a
+        // circle a normal's lean is exactly its distance along over the
+        // radius, where a parabola through the heights reads an arc's
+        // curvature high.
+        std::vector<double> ma(9, 0.0), bx(3, 0.0), by(3, 0.0);
+        for (size_t i = 0; i < c.size(); i++) {
+          const glm::dvec3 w = (c[i] - plane.origin) / span;
+          const double row[3] = {1.0, glm::dot(w, ex), glm::dot(w, ey)};
+          for (int r = 0; r < 3; r++) {
+            for (int q = 0; q < 3; q++)
+              ma[r * 3 + q] += row[r] * row[q];
+            bx[r] += row[r] * glm::dot(n[i], ex);
+            by[r] += row[r] * glm::dot(n[i], ey);
+          }
+        }
+        std::vector<double> ma2 = ma;
+        const bool turned = Solve(ma, bx, 3) && Solve(ma2, by, 3);
+        const double qa = bx[1] / span, qc = by[2] / span,
+                     qb = 0.5 * (bx[2] + by[1]) / span;
+        const double mean = 0.5 * (qa + qc),
+                     dev = std::hypot(0.5 * (qa - qc), qb);
+        const double k[2] = {mean + dev, mean - dev};
+        const double th = 0.5 * std::atan2(2.0 * qb, qa - qc);
+        const glm::dvec3 dir[2] = {std::cos(th) * ex + std::sin(th) * ey,
+                                   -std::sin(th) * ex + std::cos(th) * ey};
+        const glm::dvec3 at = plane.origin + nz * (bb[5] * span);
+        for (int t = 0; t < 2 && turned; t++) {
+          const double kt = k[t], kp = k[1 - t];
+          if (!(std::abs(kt) * span > 1e-3) || !(std::abs(kp) * span > 1e-6))
+            continue;
+          const double tube = 1.0 / std::abs(kt);
+          const glm::dvec3 core = at - nz / kt;
+          const glm::dvec3 meets = at - nz / kp;
+          for (int step = -5; step <= 5; step++) {
+            const double tilt = step * (M_PI / 12.0);
+            const glm::dvec3 axis =
+                glm::normalize(std::cos(tilt) * dir[t] + std::sin(tilt) * nz);
+            const glm::dvec3 foot = meets + axis * glm::dot(core - meets, axis);
+            FitResult h;
+            h.kind = Kind::Torus;
+            h.origin = foot;
+            h.axis = axis;
+            h.radius = glm::length(core - foot);
+            h.minor = tube;
+            h.ok = h.radius > 0.0 && std::isfinite(h.radius);
+            if (h.ok)
+              out.push_back(h);
+          }
+        }
+      }
+    }
+  }
+  // A plane and a circle through moved points, then again through those
+  // within three times their median distance of it (a neighbour's samples
+  // the region took in); the circle is the core.
+  std::vector<glm::dvec3> moved(c.size()), kept;
+  std::vector<double> d(c.size()), tube(pts.size());
+  const auto circle = [&](const std::vector<glm::dvec3>& q, glm::dvec3& centre,
+                          glm::dvec3& axis, double& radius) {
+    const FitResult plane = FitPlane(q);
+    if (!plane.ok)
+      return false;
+    axis = plane.axis;
+    glm::dvec3 e1, e2;
+    Basis(axis, e1, e2);
+    std::vector<glm::dvec2> flat(q.size());
+    for (size_t i = 0; i < q.size(); i++) {
+      const glm::dvec3 w = q[i] - plane.origin;
+      flat[i] = {glm::dot(w, e1), glm::dot(w, e2)};
+    }
+    glm::dvec2 c2;
+    if (!Circle2(flat, c2, radius))
+      return false;
+    centre = plane.origin + c2.x * e1 + c2.y * e2;
+    return true;
+  };
+  const auto fromCore = [](const glm::dvec3& p, const glm::dvec3& centre,
+                           const glm::dvec3& axis, double radius) {
+    const glm::dvec3 w = p - centre;
+    const double h = glm::dot(w, axis);
+    return std::hypot(glm::length(w - h * axis) - radius, h);
+  };
+  const double lowest = std::max(toleranceMm, 1e-6 * span);
+  for (const double sign : {1.0, -1.0})
+    for (double r = lowest; r <= 2.0 * span; r *= 1.12) {
+      for (size_t i = 0; i < c.size(); i++)
+        moved[i] = c[i] - (sign * r) * n[i];
+      glm::dvec3 centre, axis;
+      double radius = 0.0;
+      if (!circle(moved, centre, axis, radius))
+        continue;
+      bool ok = true;
+      for (int trim = 0; trim < 2 && ok; trim++) {
+        for (size_t i = 0; i < moved.size(); i++)
+          d[i] = fromCore(moved[i], centre, axis, radius);
+        std::vector<double> sorted = d;
+        std::nth_element(sorted.begin(), sorted.begin() + sorted.size() / 2,
+                         sorted.end());
+        const double cut = 3.0 * sorted[sorted.size() / 2];
+        kept.clear();
+        for (size_t i = 0; i < moved.size(); i++)
+          if (d[i] <= cut)
+            kept.push_back(moved[i]);
+        ok = kept.size() >= 8 && circle(kept, centre, axis, radius);
+      }
+      if (!ok || !(radius > 0.0))
+        continue;
+      for (size_t i = 0; i < pts.size(); i++)
+        tube[i] = fromCore(pts[i], centre, axis, radius);
+      std::nth_element(tube.begin(), tube.begin() + tube.size() / 2,
+                       tube.end());
+      FitResult h;
+      h.kind = Kind::Torus;
+      h.origin = centre;
+      h.axis = axis;
+      h.radius = radius;
+      h.minor = tube[tube.size() / 2];
+      h.ok = h.minor > 0.0 && std::isfinite(h.radius) &&
+             std::isfinite(h.minor) && std::isfinite(centre.x) &&
+             std::isfinite(centre.y) && std::isfinite(centre.z);
+      if (h.ok)
+        out.push_back(h);
+    }
+  return out;
 }
 
 } // namespace
@@ -809,6 +1177,8 @@ FitResult FitLeastSquares(Kind kind, const FitResult& start,
     return nrm.size() < 3 ? FitResult{} : FitCone(pts, nrm, at, start.axis);
   case Kind::Sphere:
     return FitSphere(pts);
+  case Kind::Torus:
+    return FitTorus(pts, start);
   }
   return {};
 }
@@ -817,7 +1187,7 @@ FitResult FitRobust(Kind kind, const std::vector<glm::dvec3>& points,
                     const std::vector<glm::dvec3>& facetCentres,
                     const std::vector<glm::dvec3>& facetNormals,
                     double toleranceMm, const glm::dvec3* through,
-                    const Admit& admit) {
+                    const Admit& admit, const FitResult* also) {
   FitResult none;
   none.kind = kind;
   const size_t n = points.size(), nf = facetCentres.size();
@@ -887,8 +1257,58 @@ FitResult FitRobust(Kind kind, const std::vector<glm::dvec3>& points,
   FitResult best;
   size_t bestIn = 0;
   double bestCost = std::numeric_limits<double>::max(), bestAgree = 0.0;
-  int needed = kMost;
+  int needed = kind == Kind::Torus ? 0 : kMost;
   const size_t pool = fromPoints ? n : nf;
+  if (kind == Kind::Torus) {
+    // Scored as the others are; then the few best each refined by least
+    // squares over the scored points they keep, and scored again: of a fan
+    // of hypotheses only a few degrees apart, the one nearest the surface
+    // is not always the one that scores best before refining.
+    std::vector<std::pair<double, FitResult>> ranked;
+    std::vector<FitResult> hypotheses =
+        TorusHypotheses(points, facetCentres, facetNormals, toleranceMm);
+    if (also != nullptr && also->ok && also->kind == kind)
+      hypotheses.push_back(*also);
+    for (const FitResult& h : hypotheses) {
+      if (!h.ok || !passes(h) || (admit && !admit(h)))
+        continue;
+      double agree = 0.0;
+      size_t in = 0;
+      ranked.emplace_back(score(h, agree, in), h);
+    }
+    constexpr size_t kPolished = 6;
+    const size_t polish = std::min(ranked.size(), kPolished);
+    std::partial_sort(
+        ranked.begin(), ranked.begin() + long(polish), ranked.end(),
+        [](const auto& x, const auto& y) { return x.first < y.first; });
+    const double tie = 1e-6 * tol2 * double(scored.size());
+    std::vector<glm::dvec3> kept;
+    for (size_t k = 0; k < ranked.size(); k++) {
+      std::vector<FitResult> tries{ranked[k].second};
+      if (k < polish) {
+        kept.clear();
+        for (size_t i : scored)
+          if (std::abs(ranked[k].second.Distance(points[i])) <= toleranceMm)
+            kept.push_back(points[i]);
+        if (FitResult f = FitTorus(kept, ranked[k].second); f.ok)
+          tries.push_back(f);
+      }
+      for (const FitResult& h : tries) {
+        if (!passes(h) || (admit && !admit(h)))
+          continue;
+        double agree = 0.0;
+        size_t in = 0;
+        const double cost = score(h, agree, in);
+        if (cost < bestCost - tie ||
+            (cost <= bestCost + tie && agree > bestAgree)) {
+          bestIn = in;
+          bestCost = cost;
+          bestAgree = agree;
+          best = h;
+        }
+      }
+    }
+  }
   for (int it = 0; it < needed && it < kMost; it++) {
     size_t pick[3] = {0, 0, 0};
     for (int k = 0; k < s; k++) {
@@ -932,6 +1352,18 @@ FitResult FitRobust(Kind kind, const std::vector<glm::dvec3>& points,
                    ? kLeast
                    : std::max(kLeast, static_cast<int>(std::ceil(
                                           std::log(1e-3) / std::log(miss))));
+    }
+  }
+  if (kind != Kind::Torus && also != nullptr && also->ok &&
+      also->kind == kind && passes(*also) && (!admit || admit(*also))) {
+    double agree = 0.0;
+    size_t in = 0;
+    const double cost = score(*also, agree, in);
+    if (cost < bestCost - 1e-6 * tol2 * double(scored.size())) {
+      bestIn = in;
+      bestCost = cost;
+      bestAgree = agree;
+      best = *also;
     }
   }
   if (!best.ok || bestIn < static_cast<size_t>(s))

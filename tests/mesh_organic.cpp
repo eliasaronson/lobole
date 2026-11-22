@@ -677,6 +677,104 @@ Cup ScannedCup(size_t triangles, double noise) {
   return c;
 }
 
+glm::dvec3 Ring::At(double turnDeg, double tubeDeg) const {
+  const glm::dvec3 ex = glm::normalize(glm::cross(glm::dvec3(0, 1, 0), axis));
+  const glm::dvec3 ey = glm::cross(axis, ex);
+  const double u = turnDeg * kPi / 180.0, v = tubeDeg * kPi / 180.0;
+  const glm::dvec3 radial = ex * std::cos(u) + ey * std::sin(u);
+  return centre + radial * (major + minor * std::cos(v)) +
+         axis * (minor * std::sin(v));
+}
+
+Ring ScannedRing(double major, double minor, double spacing, double noise) {
+  Ring g;
+  g.major = major;
+  g.minor = minor;
+  g.noise = noise;
+  g.axis = glm::normalize(glm::dvec3(0.35, -0.3, 1.0));
+  g.centre = {7.0, -4.0, 3.0};
+  const glm::dvec3 ex = glm::normalize(glm::cross(glm::dvec3(0, 1, 0), g.axis));
+  const glm::dvec3 ey = glm::cross(g.axis, ex);
+  const int nu =
+      std::max(12, int(std::lround(2.0 * kPi * (major + minor) / spacing)));
+  const int nv = std::max(8, int(std::lround(2.0 * kPi * minor / spacing)));
+  mesh::TriMesh& m = g.organic.mesh;
+  uint64_t key = 0x70a5;
+  for (int i = 0; i < nu; i++)
+    for (int j = 0; j < nv; j++) {
+      const double u = 2.0 * kPi * i / nu, v = 2.0 * kPi * j / nv;
+      const glm::dvec3 radial = ex * std::cos(u) + ey * std::sin(u);
+      const glm::dvec3 n = radial * std::cos(v) + g.axis * std::sin(v);
+      m.positions.push_back(g.centre + radial * major + n * minor +
+                            n * (noise * Noise(key++)));
+    }
+  const auto id = [&](int i, int j) {
+    return uint32_t((i % nu) * nv + (j % nv));
+  };
+  for (int i = 0; i < nu; i++)
+    for (int j = 0; j < nv; j++) {
+      m.triangles.push_back({id(i, j), id(i + 1, j), id(i + 1, j + 1)});
+      m.triangles.push_back({id(i, j), id(i + 1, j + 1), id(i, j + 1)});
+    }
+  mesh::BuildAdjacency(m);
+  if (m.Volume() < 0.0) {
+    for (auto& t : m.triangles)
+      std::swap(t[1], t[2]);
+    mesh::BuildAdjacency(m);
+  }
+  m.quantum = mesh::Float32Quantum(m.positions);
+  Organic& o = g.organic;
+  o.name = "ring";
+  o.area = 4.0 * kPi * kPi * major * minor;
+  o.volume = 2.0 * kPi * kPi * major * minor * minor;
+  m.Bounds(o.lo, o.hi);
+  return g;
+}
+
+glm::dvec3 Boss::RoundCentre() const { return base + axis * (plate + round); }
+
+Boss ScannedBoss(double spacing, double noise) {
+  Boss b;
+  b.noise = noise;
+  b.axis = glm::normalize(glm::dvec3(-0.3, 0.25, 1.0));
+  b.base = {4.0, 6.0, -2.0};
+  const double P = b.plateRadius, T = b.plate, Rb = b.bossRadius,
+               H = b.bossHeight, f = b.round;
+  // Round the axis at `spacing` across the round (finer at the boss's top,
+  // coarser at the plate's rim), and along the profile at `spacing`.
+  const double e = spacing;
+  const int nTheta =
+      std::max(12, int(std::lround(2.0 * kPi * (Rb + 0.5 * f) / spacing)));
+  std::vector<ProfileSample> prof;
+  Segment(prof, {0, 0}, {P, 0}, {0, -1}, e, false);
+  Segment(prof, {P, 0}, {P, T}, {1, 0}, e, false);
+  Segment(prof, {P, T}, {Rb + f, T}, {0, 1}, e, false);
+  // The round, from the plate (below its centre) to the boss (inside it),
+  // facing its centre; as fine along it as round it at the boss.
+  const glm::dvec2 c(Rb + f, T + f);
+  const int k = std::max(4, int(std::lround(0.5 * kPi * f / e)));
+  for (int i = 0; i < k; i++) {
+    const double phi = -0.5 * kPi - 0.5 * kPi * double(i) / k;
+    const glm::dvec2 out(std::cos(phi), std::sin(phi));
+    prof.push_back({c.x + f * out.x, c.y + f * out.y, -out});
+  }
+  Segment(prof, {Rb, T + f}, {Rb, T + H}, {1, 0}, e, false);
+  Segment(prof, {Rb, T + H}, {0, T + H}, {0, 1}, e, true);
+  Organic& o = b.organic;
+  o.name = "boss";
+  o.mesh = Revolve(prof, b.base, b.axis, nTheta, noise, 0xb055);
+  o.mesh.Bounds(o.lo, o.hi);
+  const glm::dvec3 ex = glm::normalize(glm::cross(glm::dvec3(0, 1, 0), b.axis));
+  const glm::dvec3 ey = glm::cross(b.axis, ex);
+  const glm::dvec3 radial = glm::normalize(ex * 0.6 + ey * 0.8);
+  const double phi = -0.75 * kPi;
+  b.onRound = b.base + radial * (c.x + f * std::cos(phi)) +
+              b.axis * (c.y + f * std::sin(phi));
+  b.onPlate = b.base + radial * (0.5 * (Rb + f + P)) + b.axis * T;
+  b.onBossSide = b.base + radial * Rb + b.axis * (T + f + 0.5 * (H - f));
+  return b;
+}
+
 Arc ScannedArc(double radius, double arcDeg, double length, double spacing,
                double noise, bool bore) {
   Arc a;

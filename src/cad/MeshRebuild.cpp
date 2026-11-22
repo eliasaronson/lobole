@@ -7,6 +7,7 @@
 
 #include <BRepAdaptor_Surface.hxx>
 #include <BRepBuilderAPI_MakeEdge.hxx>
+#include <BRepBuilderAPI_MakeFace.hxx>
 #include <BRepCheck_Analyzer.hxx>
 #include <BRepCheck_Shell.hxx>
 #include <BRepGProp.hxx>
@@ -24,6 +25,7 @@
 #include <Geom_Line.hxx>
 #include <Geom_Plane.hxx>
 #include <Geom_SphericalSurface.hxx>
+#include <Geom_ToroidalSurface.hxx>
 #include <Geom_TrimmedCurve.hxx>
 #include <Precision.hxx>
 #include <ShapeBuild_ReShape.hxx>
@@ -441,6 +443,54 @@ bool CircleThrough(const std::vector<glm::dvec3>& pts, double tol,
   return true;
 }
 
+// The circle on torus `f` that `pts` (fitted by `centre`, `normal` and
+// `radius`) are, made exact: a parallel, square to the axis and centred on
+// it at the radius the torus has at that height, or a meridian, in a plane
+// through the axis and about the core circle at the tube's radius. False,
+// leaving them, when the points are neither to the tolerance.
+bool TorusCircle(const mesh::FitResult& f, const std::vector<glm::dvec3>& pts,
+                 double tol, glm::dvec3& centre, glm::dvec3& normal,
+                 double& radius) {
+  const glm::dvec3 axis = glm::normalize(f.axis);
+  glm::dvec3 c, n;
+  double r = 0.0;
+  if (std::abs(glm::dot(axis, normal)) >= 1.0 - 1e-6) {
+    c = f.origin + axis * glm::dot(centre - f.origin, axis);
+    const double h = glm::dot(c - f.origin, axis);
+    if (!(std::abs(h) <= f.minor))
+      return false;
+    const double s = std::sqrt(f.minor * f.minor - h * h);
+    r = std::abs(radius - (f.radius + s)) < std::abs(radius - (f.radius - s))
+            ? f.radius + s
+            : f.radius - s;
+    n = axis;
+  } else if (std::abs(glm::dot(axis, normal)) <= 1e-6) {
+    glm::dvec3 q = centre - f.origin;
+    q -= glm::dot(q, axis) * axis;
+    if (!(glm::length(q) > 0.0))
+      return false;
+    q = glm::normalize(q);
+    c = f.origin + q * f.radius;
+    n = glm::cross(axis, q);
+    r = f.minor;
+  } else {
+    return false; // tilted: an ellipse's worth of it
+  }
+  if (!(r > 0.0))
+    return false;
+  for (const glm::dvec3& p : pts) {
+    const glm::dvec3 w = p - c;
+    const double along = glm::dot(w, n);
+    if (!(std::abs(along) <= tol &&
+          std::abs(glm::length(w - along * n) - r) <= tol))
+      return false;
+  }
+  centre = c;
+  normal = glm::dot(n, normal) > 0.0 ? n : -n;
+  radius = r;
+  return true;
+}
+
 bool Builder::BuildEdges(std::string& why) {
   BRep_Builder bb;
   const auto vertex = [&](uint32_t v) -> TopoDS_Vertex {
@@ -492,6 +542,11 @@ bool Builder::BuildEdges(std::string& why) {
           if (side == mesh::kNone)
             continue;
           const mesh::FitResult& f = m_seg.regions[side].fit;
+          if (f.kind == mesh::Kind::Torus) {
+            if (TorusCircle(f, pts, m_tol, centre, normal, radius))
+              break;
+            continue;
+          }
           if (f.kind != mesh::Kind::Cylinder && f.kind != mesh::Kind::Cone &&
               f.kind != mesh::Kind::Sphere)
             continue;
@@ -668,6 +723,18 @@ TopoDS_Face Builder::BuildFace(uint32_t r, std::string& why) const {
       surface = new Geom_SphericalSurface(frame, f.radius);
       break;
     }
+    case mesh::Kind::Torus: {
+      // Its u seam behind the region, as a cylinder's; its v seam is the
+      // outer equator, wherever the frame turns.
+      glm::dvec3 x = -middle;
+      x -= glm::dot(x, f.axis) * f.axis;
+      if (glm::length(x) < 1e-6 * glm::length(middle) + 1e-300)
+        x = Square(f.axis);
+      surface = new Geom_ToroidalSurface(
+          gp_Ax3(Pnt(f.origin), Dir(f.axis), Dir(glm::normalize(x))), f.radius,
+          f.minor);
+      break;
+    }
     }
   } catch (const Standard_Failure& e) {
     why = std::string("its surface would not build: ") + e.GetMessageString();
@@ -696,6 +763,19 @@ TopoDS_Face Builder::BuildFace(uint32_t r, std::string& why) const {
 
   BRep_Builder bb;
   TopoDS_Face face;
+  if (m_loops[r].empty()) {
+    // A whole torus (a ring, an O-ring) has no boundary: the surface's own
+    // bounds, its two seams.
+    BRepBuilderAPI_MakeFace whole(surface, m_tol);
+    if (!whole.IsDone()) {
+      why = "its whole surface would not make a face";
+      return {};
+    }
+    face = whole.Face();
+    if (!agree)
+      face.Reverse();
+    return face;
+  }
   bb.MakeFace(face, surface, m_tol);
   const auto addUses = [&](TopoDS_Wire& wire,
                            const std::vector<LoopUse>& loop) {
@@ -808,7 +888,7 @@ Rebuilt Builder::Run() {
   m_tol = std::max(m_seg.tolerance, Precision::Confusion());
   Trace();
   for (uint32_t r = 0; r < m_loops.size(); r++)
-    if (m_loops[r].empty()) {
+    if (m_loops[r].empty() && m_seg.regions[r].fit.kind != mesh::Kind::Torus) {
       out.failed = "a region has no boundary to bound a face with";
       return out;
     }

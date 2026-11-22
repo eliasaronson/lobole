@@ -32,6 +32,10 @@ inline constexpr double kSplitApart = 4.0;
 // the axis for cylinders -- explains the region as well when its rms is
 // within this factor of the two surfaces': a crowned plate or a taper.
 inline constexpr double kSplitSmooth = 1.5;
+// Two cylinders whose axes lean apart past this (degrees) may be one bent
+// tube -- a torus, which is then the smooth surface the split is judged
+// against.
+inline constexpr double kBentDeg = 1.0;
 // A plane whose normals spread past this, or that covers less than
 // kCrownCover of its own bounding rectangle while it bows past the noise,
 // is a strip along the crown of a round.

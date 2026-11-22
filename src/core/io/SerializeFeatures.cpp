@@ -2474,10 +2474,11 @@ static constexpr FeatureTypeInfo kFeatureTypes[] = {
     {"DatumAxis", 1,
      "kind: two_points (points [[x,y,z] x2] mm)|sketch_line (sketch_id, "
      "entity_id)|global_x|global_y|global_z|from_fit (fit {body_id, point_mm "
-     "[x,y,z], kind: cylinder|cone, tolerance_mm?}: the axis of the "
-     "cylinder or cone refitted round the point every regeneration -- a "
-     "cylinder's sense has its largest component positive, a cone's points "
-     "from the apex, which is its origin; "
+     "[x,y,z], kind: cylinder|cone|torus, tolerance_mm?}: the axis of the "
+     "cylinder, cone or torus refitted round the point every regeneration "
+     "-- a cylinder's and a torus's sense has its largest component "
+     "positive, a cone's points from the apex, which is its origin; a "
+     "torus's origin is its centre; "
      "docs/modeling/README.md#datums-on-a-scan)",
      "kind:'two_points'|'sketch_line'|'global_x'|'global_y'|'global_z'|"
      "'from_fit', points?:any[], points_expr?:any[], sketch_id?:int>=0, "
@@ -3735,8 +3736,10 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
     case DatumAxisKind::GlobalZ:
       break;
     case DatumAxisKind::FromFit:
-      da->fit = FitRefFromJson(j.at("fit"), "DatumAxis fit",
-                               {mesh::Kind::Cylinder, mesh::Kind::Cone});
+      // vNEXT: a torus too.
+      da->fit = FitRefFromJson(
+          j.at("fit"), "DatumAxis fit",
+          {mesh::Kind::Cylinder, mesh::Kind::Cone, mesh::Kind::Torus});
       break;
     }
     out = std::move(da);

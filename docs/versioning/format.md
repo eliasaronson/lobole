@@ -366,6 +366,7 @@ into the history above, numbered, when the branch lands
 
 | v | Change |
 |---|--------|
+| vNEXT | A `DatumAxis` `from_fit`'s `fit` may be of `kind` `torus`: the axis of the torus refitted round the point, through its centre, its sense with its largest component positive ([datums on a scan](../modeling/README.md#datums-on-a-scan)). A `radius_mm` hint on it is refused, as on a cone (a torus has two radii). Golden `vNEXT-datum-fit-torus` |
 
 ## Paths in a project
 

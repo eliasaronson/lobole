@@ -28,6 +28,7 @@
 #include <ctime>
 #include <limits>
 #include <memory>
+#include <optional>
 
 using Catch::Matchers::ContainsSubstring;
 using Catch::Matchers::WithinAbs;
@@ -851,6 +852,185 @@ TEST_CASE("A plane on the crown of a round is refused, naming the cylinder",
             .fit.ok);
 }
 
+namespace {
+
+const fixtures::Ring& Ring() {
+  static const fixtures::Ring ring =
+      fixtures::ScannedRing(20.0, 5.0, 0.5, 0.05);
+  return ring;
+}
+
+const fixtures::Boss& Boss() {
+  static const fixtures::Boss boss = fixtures::ScannedBoss();
+  return boss;
+}
+
+// A mesh body of `m`, for meshfit::Fit.
+Body ScanBody(const mesh::TriMesh& m) {
+  Body b;
+  b.name = "scan";
+  b.mesh = std::make_shared<mesh::TriMesh>(m);
+  return b;
+}
+
+meshfit::Result FitAt(const mesh::TriMesh& m, const glm::dvec3& p,
+                      std::optional<mesh::Kind> kind, std::string& error,
+                      std::optional<double> toleranceMm = std::nullopt) {
+  const Body body = ScanBody(m);
+  meshfit::Request r;
+  r.pointMm = p;
+  r.kind = kind;
+  r.toleranceMm = toleranceMm;
+  meshfit::Result out;
+  if (!meshfit::Fit({&body}, r, out, error))
+    out.region.fit.ok = false;
+  return out;
+}
+
+glm::dvec3 V3(const nlohmann::json& j) {
+  return {j.at(0).get<double>(), j.at(1).get<double>(), j.at(2).get<double>()};
+}
+
+// How far `p` stands off the torus about `centre` along unit `axis`.
+double OffTorus(const glm::dvec3& p, const glm::dvec3& centre,
+                const glm::dvec3& axis, double major, double minor) {
+  const glm::dvec3 w = p - centre;
+  const double h = glm::dot(w, axis);
+  return std::hypot(glm::length(w - h * axis) - major, h) - minor;
+}
+
+} // namespace
+
+TEST_CASE("A scanned ring's torus is the generated one", "[mesh][fit]") {
+  const fixtures::Ring& ring = Ring();
+  const mesh::TriMesh& m = ring.organic.mesh;
+  const double tol = mesh::ScanTolerance(m);
+  std::string why;
+  const mesh::Region r = mesh::GrowFrom(m, SeedAt(m, ring.At(30.0, 40.0)),
+                                        mesh::Kind::Torus, tol, &why);
+  INFO(why);
+  REQUIRE(r.fit.ok);
+  REQUIRE(r.fit.kind == mesh::Kind::Torus);
+  const double angle = LineAngleDeg(r.fit.axis, ring.axis);
+  const double off = glm::length(r.fit.origin - ring.centre);
+  std::printf("ring: core %.4f (20), tube %.4f (5), axis off %.4f deg, "
+              "centre %.4f mm off, rms %.4f, %zu triangles of %zu, %s\n",
+              r.fit.radius, r.fit.minor, angle, off, r.fit.rms,
+              r.triangles.size(), m.triangles.size(),
+              r.concave ? "concave" : "convex");
+  CHECK_THAT(r.fit.radius, WithinAbs(ring.major, ring.noise));
+  CHECK_THAT(r.fit.minor, WithinAbs(ring.minor, ring.noise));
+  CHECK(angle < 0.1);
+  CHECK(off < ring.noise);
+  CHECK_FALSE(r.concave);
+  CHECK(r.area > 0.9 * ring.organic.area);
+  SECTION("auto takes it, and the reply says so") {
+    std::string error;
+    const meshfit::Result res = FitAt(m, ring.At(200.0, -60.0), {}, error);
+    INFO(error);
+    REQUIRE(res.region.fit.ok);
+    CHECK(res.region.fit.kind == mesh::Kind::Torus);
+    const nlohmann::json j = meshfit::ResultJson(res);
+    INFO(j.dump());
+    CHECK(j.at("kind") == "torus");
+    CHECK_THAT(j.at("major_radius_mm").get<double>(),
+               WithinAbs(ring.major, ring.noise));
+    CHECK_THAT(j.at("minor_radius_mm").get<double>(),
+               WithinAbs(ring.minor, ring.noise));
+    CHECK(j.at("concave") == false);
+    CHECK(LineAngleDeg(V3(j.at("axis")), ring.axis) < 0.1);
+    CHECK(glm::length(V3(j.at("centre_mm")) - ring.centre) < ring.noise);
+    // The axis has the sense a cylinder's has: largest component positive.
+    CHECK(glm::dot(V3(j.at("axis")), ring.axis) > 0.0);
+  }
+}
+
+TEST_CASE("A concave round between two faces is the generated torus",
+          "[mesh][fit]") {
+  const fixtures::Boss& boss = Boss();
+  const mesh::TriMesh& m = boss.organic.mesh;
+  const double tol = mesh::ScanTolerance(m);
+  const glm::dvec3 centre = boss.RoundCentre();
+  // The quarter round's area: 2 pi f (pi/2 (Rb + f) - f).
+  const double f = boss.round;
+  const double roundArea = 2.0 * kPi * f * (0.5 * kPi * boss.RoundMajor() - f);
+  std::string why;
+  const mesh::Region r =
+      mesh::GrowFrom(m, SeedAt(m, boss.onRound), mesh::Kind::Torus, tol, &why);
+  INFO(why);
+  REQUIRE(r.fit.ok);
+  const double angle = LineAngleDeg(r.fit.axis, boss.axis);
+  const double off = glm::length(r.fit.origin - centre);
+  std::printf("round: core %.4f (11), tube %.4f (3), axis off %.4f deg, "
+              "centre %.4f mm off, rms %.4f, area %.1f of %.1f, %s\n",
+              r.fit.radius, r.fit.minor, angle, off, r.fit.rms, r.area,
+              roundArea, r.concave ? "concave" : "convex");
+  CHECK_THAT(r.fit.radius, WithinAbs(boss.RoundMajor(), boss.noise));
+  CHECK_THAT(r.fit.minor, WithinAbs(boss.round, boss.noise));
+  CHECK(angle < 0.1);
+  CHECK(off < boss.noise);
+  CHECK(r.concave);
+  // The round and not the faces it is tangent to: most of it, and every
+  // corner on the generated torus within the noise and the tolerance.
+  CHECK(r.area > 0.7 * roundArea);
+  CHECK(r.area < 1.02 * roundArea);
+  double worst = 0.0;
+  for (uint32_t t : r.triangles)
+    for (int c = 0; c < 3; c++)
+      worst =
+          std::max(worst, std::abs(OffTorus(m.Corner(t, c), centre, boss.axis,
+                                            boss.RoundMajor(), boss.round)));
+  CHECK(worst <= boss.noise + tol);
+  SECTION("auto takes the torus on the round, and the faces beside it") {
+    std::string error;
+    const meshfit::Result round = FitAt(m, boss.onRound, {}, error);
+    INFO(error);
+    REQUIRE(round.region.fit.ok);
+    CHECK(round.region.fit.kind == mesh::Kind::Torus);
+    CHECK(meshfit::ResultJson(round).at("concave") == true);
+    const meshfit::Result plate = FitAt(m, boss.onPlate, {}, error);
+    CHECK(plate.region.fit.kind == mesh::Kind::Plane);
+    const meshfit::Result side = FitAt(m, boss.onBossSide, {}, error);
+    CHECK(side.region.fit.kind == mesh::Kind::Cylinder);
+    CHECK_THAT(side.region.fit.radius, WithinAbs(boss.bossRadius, boss.noise));
+  }
+  SECTION("a plane asked of the round names the torus, not two planes") {
+    for (const double t : {tol, 0.6}) {
+      std::string w;
+      mesh::GrowOptions o;
+      o.noiseMm = tol;
+      const mesh::Region p = mesh::GrowFrom(m, SeedAt(m, boss.onRound),
+                                            mesh::Kind::Plane, t, &w, o);
+      std::printf("plane on the round at %.3g mm: %s\n", t, w.c_str());
+      CHECK_FALSE(p.fit.ok);
+      CHECK_THAT(w, ContainsSubstring("strip along the crown of a round"));
+      CHECK_THAT(w, ContainsSubstring("a torus fits there: R11"));
+      CHECK_THAT(w, ContainsSubstring("fit kind torus"));
+      CHECK_THAT(w, !ContainsSubstring("two planes"));
+    }
+  }
+}
+
+TEST_CASE("A stepped bore does not become a torus under auto", "[mesh][fit]") {
+  const fixtures::Bore& b = SteppedBore();
+  std::string error;
+  const meshfit::Result r =
+      FitAt(b.organic.mesh, b.At(6.0, 30.0), {}, error, 0.6);
+  std::printf("stepped bore under auto at 0.6 mm: %s\n", error.c_str());
+  CHECK_FALSE(r.region.fit.ok);
+  CHECK_THAT(error, ContainsSubstring("two cylinders here"));
+  // And the post's side under auto is its cylinder, the torus tried.
+  const fixtures::Post& post = Post();
+  const meshfit::Result side =
+      FitAt(post.organic.mesh, post.onCylinder, {}, error);
+  REQUIRE(side.region.fit.ok);
+  CHECK(side.region.fit.kind == mesh::Kind::Cylinder);
+  bool triedTorus = false;
+  for (const meshfit::Candidate& c : side.tried)
+    triedTorus = triedTorus || c.kind == mesh::Kind::Torus;
+  CHECK(triedTorus);
+}
+
 // What the region and the clip cost against the growth by distance alone
 // that came before them, on the same machine in the same run: CPU time, a
 // COST check (docs/ui/testing.md#tests-that-time-things).
@@ -935,5 +1115,26 @@ TEST_CASE("What a fit from a point costs", "[.][fit-cost]") {
                 "triangles), radius %.4f\n",
                 s.mesh.TriangleCount(), tolMs, growMs, r.triangles.size(),
                 r.fit.radius);
+  } // A torus, grown whole: a scanned ring at three spacings.
+  for (const double spacing : {1.0, 0.25, 0.1}) {
+    const fixtures::Ring ring = fixtures::ScannedRing(20.0, 5.0, spacing, 0.05);
+    const mesh::TriMesh& m = ring.organic.mesh;
+    const double tol = mesh::ScanTolerance(m);
+    const uint32_t seed = SeedAt(m, ring.At(30.0, 40.0));
+    auto t = Clock::now();
+    std::string why;
+    const mesh::Region r =
+        mesh::GrowFrom(m, seed, mesh::Kind::Torus, tol, &why);
+    const double growMs = ms(t);
+    INFO(why);
+    REQUIRE(r.fit.ok);
+    t = Clock::now();
+    std::string error;
+    const meshfit::Result a = FitAt(m, ring.At(30.0, 40.0), {}, error);
+    const double autoMs = ms(t);
+    std::printf("ring %zu: grow+fit %.0f ms (%zu triangles), core %.4f tube "
+                "%.4f; auto %.0f ms (%s)\n",
+                m.TriangleCount(), growMs, r.triangles.size(), r.fit.radius,
+                r.fit.minor, autoMs, mesh::KindName(a.region.fit.kind));
   }
 }

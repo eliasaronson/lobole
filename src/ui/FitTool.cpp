@@ -26,11 +26,13 @@ namespace ui {
 
 namespace {
 
-constexpr const char* kKindLabels[] = {"Auto", "Plane", "Cylinder", "Cone",
-                                       "Sphere"};
+constexpr const char* kKindLabels[] = {"Auto", "Plane",  "Cylinder",
+                                       "Cone", "Sphere", "Torus"};
 // The combo's order, after Auto.
 constexpr mesh::Kind kKinds[] = {mesh::Kind::Plane, mesh::Kind::Cylinder,
-                                 mesh::Kind::Cone, mesh::Kind::Sphere};
+                                 mesh::Kind::Cone, mesh::Kind::Sphere,
+                                 mesh::Kind::Torus};
+constexpr int kKindCount = int(sizeof kKinds / sizeof kKinds[0]);
 
 bool OnItsDocument(const AppState& state) {
   const auto& t = state.fitTool;
@@ -50,12 +52,12 @@ void Arm(AppState& state) {
   state.slotPick.slot = 0;
   state.slotPick.kinds = SelectionKindBit(SelectionItem::Kind::Face);
   state.slotPick.prompt = "Fit: click a point on the surface to fit (a "
-                          "scan's flat, bore, boss, cone or ball)";
+                          "scan's flat, bore, boss, cone, ball or round)";
 }
 
 std::optional<mesh::Kind> AskedKind(const AppState& state) {
   const int k = state.fitTool.kind;
-  if (k <= 0 || k > 4)
+  if (k <= 0 || k > kKindCount)
     return std::nullopt;
   return kKinds[k - 1];
 }
@@ -67,7 +69,8 @@ mesh::FitHints HintsOf(const AppState& state) {
   const std::optional<mesh::Kind> kind = AskedKind(state);
   if (t.side != 0 && kind != mesh::Kind::Plane)
     h.outside = t.side == 2;
-  if (t.radiusOn && kind != mesh::Kind::Plane && kind != mesh::Kind::Cone) {
+  if (t.radiusOn && kind != mesh::Kind::Plane && kind != mesh::Kind::Cone &&
+      kind != mesh::Kind::Torus) {
     h.radiusMin = t.radiusMin;
     h.radiusMax = t.radiusMax;
   }
@@ -96,6 +99,12 @@ std::string Summary(const meshfit::Result& r) {
     break;
   case mesh::Kind::Sphere:
     std::snprintf(head, sizeof head, "Sphere, radius %.4g mm", f.radius);
+    break;
+  case mesh::Kind::Torus:
+    std::snprintf(head, sizeof head,
+                  "Torus, %s, core radius %.4g mm, tube %.4g mm",
+                  r.region.concave ? "concave (a round)" : "convex (a ring)",
+                  f.radius, f.minor);
     break;
   }
   const nlohmann::json j = meshfit::ResultJson(r);
@@ -175,7 +184,7 @@ void Recompute(AppState& state) {
   if (res.region.fit.kind == mesh::Kind::Sphere)
     t.error = "A sphere has no plane or axis for a datum to keep: its "
               "centre and radius are above (fit_primitive reports them). "
-              "Pick a plane, cylinder or cone to make a datum.";
+              "Pick a plane, cylinder, cone or torus to make a datum.";
 }
 
 } // namespace
@@ -275,7 +284,8 @@ void DrawFitToolWindow(AppState& state) {
   int kind = t.kind;
   LeftLabel("Kind");
   ImGui::SetNextItemWidth(-1);
-  if (ImGui::Combo("##fit_kind", &kind, kKindLabels, 5) && kind != t.kind) {
+  if (ImGui::Combo("##fit_kind", &kind, kKindLabels, kKindCount + 1) &&
+      kind != t.kind) {
     t.kind = kind;
     Recompute(state);
   }
@@ -332,7 +342,8 @@ void DrawFitToolWindow(AppState& state) {
     }
     ImGui::EndDisabled();
     const bool round = AskedKind(state) != mesh::Kind::Plane &&
-                       AskedKind(state) != mesh::Kind::Cone;
+                       AskedKind(state) != mesh::Kind::Cone &&
+                       AskedKind(state) != mesh::Kind::Torus;
     ImGui::BeginDisabled(!round);
     bool on = t.radiusOn;
     if (ImGui::Checkbox("Radius range###fit_radius_on", &on)) {

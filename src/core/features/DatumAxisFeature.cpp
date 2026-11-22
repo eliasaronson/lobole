@@ -54,8 +54,10 @@ bool DatumAxisFeature::Execute(RegenContext& ctx) {
     return true;
   }
   case DatumAxisKind::FromFit: {
-    if (fit.kind != mesh::Kind::Cylinder && fit.kind != mesh::Kind::Cone) {
-      SetError(std::string("a datum axis fits a cylinder or a cone, not a ") +
+    if (fit.kind != mesh::Kind::Cylinder && fit.kind != mesh::Kind::Cone &&
+        fit.kind != mesh::Kind::Torus) {
+      SetError(std::string("a datum axis fits a cylinder, a cone or a "
+                           "torus, not a ") +
                mesh::KindName(fit.kind) +
                (fit.kind == mesh::Kind::Plane
                     ? " (a plane is a DatumPlane from_fit)"
@@ -71,8 +73,9 @@ bool DatumAxisFeature::Execute(RegenContext& ctx) {
     }
     const mesh::FitResult& f = r.region.fit;
     m_dir = glm::normalize(meshfit::CanonicalAxis(f));
-    // A cone's apex; a cylinder's axis point nearest the seed.
-    m_origin = f.kind == mesh::Kind::Cone
+    // A cone's apex, a torus's centre; a cylinder's axis point nearest the
+    // seed.
+    m_origin = f.kind != mesh::Kind::Cylinder
                    ? f.origin
                    : f.origin + glm::dot(fit.pointMm - f.origin, m_dir) * m_dir;
     m_fitReport = meshfit::ResultJson(r);

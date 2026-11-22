@@ -4,7 +4,7 @@
 #pragma once
 
 // A B-Rep rebuilt from a segmented mesh: one face per region, on its fitted
-// plane, cylinder, cone or sphere
+// plane, cylinder, cone, sphere or torus
 // (docs/interchange/README.md#rebuilding-the-solid).
 //
 // Faces are built on SHARED edges -- the boundary between two regions is cut

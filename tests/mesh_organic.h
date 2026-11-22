@@ -114,6 +114,40 @@ struct Cup {
 };
 Cup ScannedCup(size_t triangles, double noise = 0.05);
 
+// A scanned ring: a torus of core radius `major` and tube `minor`, a grid
+// of about `spacing`, its axis tilted off Z and its centre moved off the
+// origin, every vertex moved along the true normal by a noise of at most
+// `noise`. Closed.
+struct Ring {
+  Organic organic;
+  glm::dvec3 centre{0.0}, axis{0.0, 0.0, 1.0}; // axis: largest component +
+  double major = 0.0, minor = 0.0, noise = 0.0;
+  // The surface at `turnDeg` round the axis and `tubeDeg` round the tube (0
+  // the outer equator, 90 the side the axis points to).
+  [[nodiscard]] glm::dvec3 At(double turnDeg, double tubeDeg) const;
+};
+Ring ScannedRing(double major, double minor, double spacing, double noise);
+
+// A scanned boss standing on a round plate, a concave round at its foot: a
+// plate of radius 30 and 5 thick, a boss of radius 8 and 15 tall above it,
+// the round of radius 3 tangent to both -- a torus about the axis of core
+// radius 11 and tube 3, its triangles facing its core. Tilted off Z and
+// moved off the origin, every vertex moved along the normal by a noise of
+// at most `noise`, a grid of about `spacing` on the round. Closed.
+struct Boss {
+  Organic organic;
+  glm::dvec3 base{0.0}, axis{0.0, 0.0, 1.0}; // axis: bottom to top
+  double plateRadius = 30.0, plate = 5.0, bossRadius = 8.0, bossHeight = 15.0,
+         round = 3.0, noise = 0.0;
+  // The round's torus: its centre on the axis, its core's radius.
+  [[nodiscard]] glm::dvec3 RoundCentre() const;
+  [[nodiscard]] double RoundMajor() const { return bossRadius + round; }
+  // Half way round the round's quarter, on the plate's top clear of the
+  // round, on the boss's side clear of it.
+  glm::dvec3 onRound{0.0}, onPlate{0.0}, onBossSide{0.0};
+};
+Boss ScannedBoss(double spacing = 0.5, double noise = 0.05);
+
 // An open patch of a cylinder's side: `arcDeg` of its arc and `length`
 // along it, a grid of about `spacing`, facing out of the cylinder or (a
 // bore) into it, tilted off the axes; noise radial, at most `noise`.

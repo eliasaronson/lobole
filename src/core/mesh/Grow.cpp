@@ -85,8 +85,10 @@ void Gather(const TriMesh& m, const std::vector<uint32_t>& tris,
 }
 
 FitResult Robust(Kind kind, const Samples& s, double tol,
-                 const glm::dvec3* through, const Admit& admit) {
-  return FitRobust(kind, s.points, s.centres, s.normals, tol, through, admit);
+                 const glm::dvec3* through, const Admit& admit,
+                 const FitResult* also = nullptr) {
+  return FitRobust(kind, s.points, s.centres, s.normals, tol, through, admit,
+                   also);
 }
 
 // The middle of `v` (reordered); 0 when it is empty.
@@ -135,6 +137,43 @@ double MedianTilt(const TriMesh& m, const FitResult& f,
   return std::acos(std::clamp(Median(c), -1.0, 1.0));
 }
 
+// Where a triangle's centre is round torus `f`'s tube: the angle about its
+// core circle, 0 at the outer equator.
+double TubeAngle(const FitResult& f, const glm::dvec3& p) {
+  const glm::dvec3 w = p - f.origin;
+  const double h = glm::dot(w, f.axis);
+  return std::atan2(h, glm::length(w - h * f.axis) - f.radius);
+}
+
+// How far the triangles of `ring` lag, on average, behind torus `f`'s
+// normal as it turns round the tube away from `middle` (the region's tube
+// angle): a face the round is tangent to keeps its normal where the round's
+// goes on turning, where noise lags as often one way as the other. In rad.
+double MeanLag(const TriMesh& m, const FitResult& f,
+               const std::vector<uint32_t>& ring, double side, double middle) {
+  double sum = 0.0;
+  size_t count = 0;
+  for (uint32_t t : ring) {
+    const glm::dvec3 n = UnitNormal(m, t);
+    if (n == glm::dvec3(0.0))
+      continue;
+    const glm::dvec3 c = Centre(m, t);
+    const glm::dvec3 w = c - f.origin;
+    const glm::dvec3 q = w - glm::dot(w, f.axis) * f.axis;
+    if (!(glm::length(q) > 0.0))
+      continue;
+    const double v = TubeAngle(f, c);
+    // The way the normal turns as the tube angle grows.
+    const glm::dvec3 along =
+        -std::sin(v) * glm::normalize(q) + std::cos(v) * f.axis;
+    const double d = std::remainder(v - middle, 2.0 * M_PI);
+    sum += (d > 0.0 ? -1.0 : 1.0) * side * glm::dot(n, along);
+    count++;
+  }
+  return count == 0 ? 0.0
+                    : std::asin(std::clamp(sum / double(count), -1.0, 1.0));
+}
+
 // The fewest points a least-squares fit of `kind` takes.
 size_t FewestPoints(Kind k) {
   switch (k) {
@@ -145,6 +184,8 @@ size_t FewestPoints(Kind k) {
     return 5;
   case Kind::Cone:
     return 6;
+  case Kind::Torus:
+    return 8;
   }
   return 6;
 }
@@ -489,6 +530,7 @@ Region Settle(const TriMesh& m, std::vector<uint32_t> region, Kind kind,
 
   std::sort(region.begin(), region.end());
   r.fit = fit;
+  r.concave = kind == Kind::Torus && side < 0.0;
   r.firstTriangle = region.front();
   for (uint32_t t : region)
     r.area += m.Area(t);
@@ -648,7 +690,11 @@ Region GrowFrom(const TriMesh& m, uint32_t seed, Kind kind, double tol,
     region = grow(fit, cap);
     const bool capped = region.size() >= cap;
     Gather(m, region, stamp, smp, kFitPoints);
-    if (const FitResult g = Robust(kind, smp, tol, &seedCentre, admit); g.ok)
+    // A torus keeps the fit it was regrown under in the running (FitRobust's
+    // `also`).
+    if (const FitResult g = Robust(kind, smp, tol, &seedCentre, admit,
+                                   kind == Kind::Torus ? &fit : nullptr);
+        g.ok)
       fit = g;
     if (!capped && wasShort)
       break;
@@ -657,8 +703,14 @@ Region GrowFrom(const TriMesh& m, uint32_t seed, Kind kind, double tol,
   }
 
   // 4. The rim peeled, ring by ring, while it leans off the fit more than
-  // the region does.
-  {
+  // the region does. A torus's again under the fit made without the rim,
+  // until no ring leans: a round is narrow, so the faces it is tangent to
+  // are a large share of what it first grows over, and the fit leans to
+  // them (a 3 mm round between two faces read 3.4 after one peel).
+  double grownArea = 0.0;
+  for (uint32_t t : region)
+    grownArea += m.Area(t);
+  for (int pass = 0; pass < (kind == Kind::Torus ? 8 : 1); pass++) {
     const double own = MedianTilt(m, fit, region, side, 200000);
     // Never below what the file's precision tilts a triangle of the median
     // edge by: a clean export's flats lean off their fit by nothing, and
@@ -670,7 +722,7 @@ Region GrowFrom(const TriMesh& m, uint32_t seed, Kind kind, double tol,
       in[t] = 1;
       area += m.Area(t);
     }
-    const double least = 0.5 * area;
+    const double least = 0.5 * grownArea;
     std::vector<uint32_t> ring;
     for (uint32_t t : region)
       for (int e = 0; e < 3; e++) {
@@ -682,8 +734,25 @@ Region GrowFrom(const TriMesh& m, uint32_t seed, Kind kind, double tol,
       }
     std::vector<uint8_t> next(m.triangles.size(), 0);
     bool peeled = false;
+    // A torus's region's middle round the tube, for the lag.
+    double middle = 0.0;
+    if (kind == Kind::Torus) {
+      double sn = 0.0, cs = 0.0;
+      for (uint32_t t : region) {
+        const double v = TubeAngle(fit, Centre(m, t));
+        sn += std::sin(v);
+        cs += std::cos(v);
+      }
+      middle = std::atan2(sn, cs);
+    }
     while (!ring.empty()) {
-      if (!(MedianTilt(m, fit, ring, side, ring.size()) > limit))
+      // A torus's ring also while it lags behind the turning normal by more
+      // than an eighth of the region's own tilt (noise lags each way as
+      // often; its mean over a ring is a fraction of that): a tangent face's
+      // strip.
+      if (!(MedianTilt(m, fit, ring, side, ring.size()) > limit) &&
+          !(kind == Kind::Torus &&
+            MeanLag(m, fit, ring, side, middle) > 0.125 * own))
         break;
       double ringArea = 0.0;
       for (uint32_t t : ring)
@@ -714,11 +783,15 @@ Region GrowFrom(const TriMesh& m, uint32_t seed, Kind kind, double tol,
           kept.push_back(t);
       region = std::move(kept);
       Gather(m, region, stamp, smp, kFitPoints);
-      if (const FitResult g = Robust(kind, smp, tol, &seedCentre, admit); g.ok)
+      if (const FitResult g = Robust(kind, smp, tol, &seedCentre, admit,
+                                     kind == Kind::Torus ? &fit : nullptr);
+          g.ok)
         fit = g;
     }
     for (uint32_t t : region)
       in[t] = 0;
+    if (!peeled)
+      break;
   }
 
   Region settled =
@@ -733,7 +806,7 @@ Region GrowFrom(const TriMesh& m, uint32_t seed, Kind kind, double tol,
       BowOf(m, settled.triangles, settled.fit, settled.extent, settled.area);
   if (!bow.Crown(settled.fit.rms > kSplitAbove * noise))
     return settled;
-  char buf[160];
+  char buf[200];
   std::string msg = "the plane fitted here is a strip along the crown of a "
                     "round: ";
   if (bow.spreadRad > angles::ToRadians(kCrownSpreadDeg)) {
@@ -748,39 +821,61 @@ Region GrowFrom(const TriMesh& m, uint32_t seed, Kind kind, double tol,
                   100.0 * bow.cover, 100.0 * kCrownCover, settled.fit.rms);
   }
   msg += buf;
-  // What does fit there: the round's cylinder, or a sphere. The plane's
-  // own hints (a normal) are not a round's; the box is.
+  // What does fit there: the round, as fit_primitive's auto would choose
+  // among the kinds a round is (most area, a simpler one covering nearly
+  // as much). The plane's own hints (a normal) are not a round's; the box
+  // is.
   GrowOptions round = opt;
   round.hints = FitHints{};
   round.hints.withinLo = hints.withinLo;
   round.hints.withinHi = hints.withinHi;
-  std::string roundWhy;
-  const Region cyl = GrowFrom(m, seed, Kind::Cylinder, tol, &roundWhy, round);
-  if (cyl.fit.ok) {
-    glm::dvec3 a = cyl.fit.axis;
+  const Kind kinds[] = {Kind::Sphere, Kind::Cylinder, Kind::Torus}; // simplest
+  Region rounds[3];
+  std::string cylinderWhy;
+  double most = 0.0;
+  for (int i = 0; i < 3; i++) {
+    rounds[i] =
+        GrowFrom(m, seed, kinds[i], tol,
+                 kinds[i] == Kind::Cylinder ? &cylinderWhy : nullptr, round);
+    if (rounds[i].fit.ok)
+      most = std::max(most, rounds[i].area);
+  }
+  int pick = -1;
+  for (int i = 0; i < 3 && pick < 0; i++)
+    if (rounds[i].fit.ok && rounds[i].area >= kSimplerShare * most)
+      pick = i;
+  const auto canonical = [](glm::dvec3 a) {
     int big = 0;
     for (int i = 1; i < 3; i++)
       if (std::abs(a[i]) > std::abs(a[big]))
         big = i;
-    if (a[big] < 0.0)
-      a = -a;
+    return a[big] < 0.0 ? -a : a;
+  };
+  if (pick < 0) {
+    msg += "; no cylinder, sphere or torus fits there either (" + cylinderWhy +
+           ")";
+  } else if (const FitResult& f = rounds[pick].fit; f.kind == Kind::Cylinder) {
+    const glm::dvec3 a = canonical(f.axis);
     std::snprintf(buf, sizeof buf,
                   "; a cylinder fits there: R%.4g mm, axis [%.4g, %.4g, "
                   "%.4g] through [%.4g, %.4g, %.4g] -- fit kind cylinder",
-                  cyl.fit.radius, a.x, a.y, a.z, cyl.fit.origin.x,
-                  cyl.fit.origin.y, cyl.fit.origin.z);
+                  f.radius, a.x, a.y, a.z, f.origin.x, f.origin.y, f.origin.z);
     msg += buf;
-  } else if (const Region sph =
-                 GrowFrom(m, seed, Kind::Sphere, tol, nullptr, round);
-             sph.fit.ok) {
+  } else if (f.kind == Kind::Sphere) {
     std::snprintf(buf, sizeof buf,
                   "; a sphere fits there: R%.4g mm about [%.4g, %.4g, "
                   "%.4g] -- fit kind sphere",
-                  sph.fit.radius, sph.fit.origin.x, sph.fit.origin.y,
-                  sph.fit.origin.z);
+                  f.radius, f.origin.x, f.origin.y, f.origin.z);
     msg += buf;
   } else {
-    msg += "; no cylinder or sphere fits there either (" + roundWhy + ")";
+    const glm::dvec3 a = canonical(f.axis);
+    std::snprintf(buf, sizeof buf,
+                  "; a torus fits there: R%.4g mm round its axis, its tube "
+                  "r%.4g mm, axis [%.4g, %.4g, %.4g] through [%.4g, %.4g, "
+                  "%.4g] -- fit kind torus",
+                  f.radius, f.minor, a.x, a.y, a.z, f.origin.x, f.origin.y,
+                  f.origin.z);
+    msg += buf;
   }
   return fail(msg, &settled.triangles);
 }

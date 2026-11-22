@@ -23,10 +23,12 @@
 namespace fixtures {
 
 struct Round {
-  glm::dvec3 point;     // on the axis (a cone: its apex; a sphere: centre)
+  glm::dvec3 point;     // on the axis (a cone: its apex; a sphere, a torus:
+                        // centre)
   glm::dvec3 axis;      // unit (a cone: into the cone)
-  double radius = 0;    // cylinder, sphere
+  double radius = 0;    // cylinder, sphere; a torus's core
   double halfAngle = 0; // cone (rad)
+  double minor = 0;     // a torus's tube
 };
 
 struct Flat {
@@ -42,6 +44,7 @@ struct Part {
   std::vector<Round> cylinders;
   std::vector<Round> cones;
   std::vector<Round> spheres;
+  std::vector<Round> tori;
   std::vector<Flat> polygons; // vertical prisms of so many sides
 };
 
@@ -58,6 +61,14 @@ Part ObliqueAndDome();
 // A 60 x 40 x 4 plate whose four upright corners are rounded (radius 7):
 // each corner a quarter cylinder tangent to the two walls either side.
 Part RoundedPlate();
+
+// A 50 x 36 x 14 block, its four upright edges rounded (radius 6) and then
+// its top edges (radius 2), so that at each corner the two rounds meet in a
+// quarter of a torus (core radius 4, tube 2) about the upright round's
+// axis; and a boss of radius 5 on its top, its foot rounded 1.5 -- a whole
+// ring of a concave torus. Turned off the axes and moved off the origin, as
+// every answer it lists is.
+Part RoundedCorners();
 
 // Writes `part` as binary STL tessellated at `deflection` mm and
 // `angularRad`, into a fresh copy so an earlier tessellation does not

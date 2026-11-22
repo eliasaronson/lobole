@@ -5,7 +5,7 @@
 
 // A primitive fitted to a body's triangles from a picked point
 // (docs/modeling/README.md#fitting-a-primitive-to-a-mesh): the region a
-// plane, cylinder, cone or sphere grows over from the point, fitted
+// plane, cylinder, cone, sphere or torus grows over from the point, fitted
 // robustly against a scan's outliers. What `fit_primitive` answers, what a
 // DatumPlane or DatumAxis `from_fit` refits on every regeneration, and what
 // the GUI Fit tool previews. Works on a mesh body's own triangles and on a
@@ -22,7 +22,7 @@
 
 namespace meshfit {
 
-// "plane, cylinder, cone, sphere, auto": what a refusal names.
+// "plane, cylinder, cone, sphere, torus, auto": what a refusal names.
 std::string AcceptedKinds();
 // A kind by name; `auto` is nullopt in `kind` with true returned. False for
 // any other string.
@@ -64,11 +64,11 @@ struct Request {
   mesh::FitHints hints;
 };
 
-// auto takes a simpler kind (plane, sphere, cylinder, cone, in that order)
-// when it covers at least this share of the best one's area: a cone fits a
-// cylinder's triangles as well as the cylinder does, with a half angle of
-// nearly nothing.
-inline constexpr double kAutoShare = 0.95;
+// auto takes a simpler kind (plane, sphere, cylinder, cone, torus, in that
+// order) when it covers at least this share of the best one's area: a cone
+// fits a cylinder's triangles as well as the cylinder does, with a half
+// angle of nearly nothing, and a torus a sphere's with a core of nothing.
+inline constexpr double kAutoShare = mesh::kSimplerShare;
 
 struct Candidate {
   mesh::Kind kind = mesh::Kind::Plane;
@@ -76,10 +76,9 @@ struct Candidate {
   double areaMm2 = 0.0;
   double rmsMm = 0.0;
   std::string why; // when not ok
-  // Refused as two surfaces (mesh::SplitTwo), over this much area: auto
-  // does not take another kind over the same triangles.
+  // Refused as two surfaces (mesh::SplitTwo): auto does not take another
+  // kind over the same triangles.
   bool twoSurfaces = false;
-  double twoAreaMm2 = 0.0;
 };
 
 struct Result {
@@ -110,7 +109,8 @@ std::vector<const Body*> BodiesOf(const std::vector<Body>& bodies,
                                   uint64_t featureId);
 
 // The reply's {kind, origin_mm | centre_mm | apex_mm, normal | axis,
-// radius_mm?, half_angle_deg?, rms_mm, max_mm, sigma_mm, form_mm, used,
+// radius_mm?, half_angle_deg?, major_radius_mm?, minor_radius_mm?,
+// concave?, rms_mm, max_mm, sigma_mm, form_mm, used,
 // clip_sigma, diameter_min_mm?, diameter_max_mm?, length_mm?, arc_deg?,
 // extent_mm?, warnings?, tolerance_mm, triangles, area_mm2, body,
 // seed_distance_mm, tried?}.
@@ -120,9 +120,9 @@ nlohmann::json ResultJson(const Result& r);
 // certain.
 inline constexpr double kPartialArcDeg = 60.0;
 
-// A cylinder's axis has no sense of its own: the one whose largest
-// component is positive, so a refit on a re-scan does not flip it. A
-// cone's points from the apex into the cone.
+// A cylinder's or a torus's axis has no sense of its own: the one whose
+// largest component is positive, so a refit on a re-scan does not flip it.
+// A cone's points from the apex into the cone.
 glm::dvec3 CanonicalAxis(const mesh::FitResult& f);
 
 // What a datum stores to refit itself (DatumPlane / DatumAxis `from_fit`):

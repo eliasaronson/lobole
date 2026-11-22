@@ -4,11 +4,11 @@
 #pragma once
 
 // The Fit tool (docs/modeling/README.md#datums-on-a-scan): click a point on
-// a body -- a scan's mesh body or any B-Rep -- and a plane, cylinder, cone
-// or sphere is grown and fitted from it, as `fit_primitive` does. Accept
-// keeps it as a datum that refits every regeneration: a DatumPlane
-// from_fit for a plane, a DatumAxis from_fit for a cylinder's or cone's
-// axis. A sphere is reported and refused as a datum, naming why.
+// a body -- a scan's mesh body or any B-Rep -- and a plane, cylinder, cone,
+// sphere or torus is grown and fitted from it, as `fit_primitive` does.
+// Accept keeps it as a datum that refits every regeneration: a DatumPlane
+// from_fit for a plane, a DatumAxis from_fit for a cylinder's, cone's or
+// torus's axis. A sphere is reported and refused as a datum, naming why.
 
 #include "ui/AppState.h"
 

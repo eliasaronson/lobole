@@ -29,7 +29,8 @@ namespace {
 constexpr double kPi = 3.14159265358979323846;
 
 struct Counts {
-  int faces = 0, planes = 0, cylinders = 0, cones = 0, spheres = 0, other = 0;
+  int faces = 0, planes = 0, cylinders = 0, cones = 0, spheres = 0, tori = 0,
+      other = 0;
 };
 
 Counts Count(const CADShape& s) {
@@ -48,6 +49,9 @@ Counts Count(const CADShape& s) {
       break;
     case GeomAbs_Sphere:
       c.spheres++;
+      break;
+    case GeomAbs_Torus:
+      c.tori++;
       break;
     default:
       c.other++;
@@ -124,6 +128,57 @@ TEST_CASE("Rebuild: a fillet tangent to its planes, an oblique hole, a dome",
     CHECK(c.spheres == static_cast<int>(part.spheres.size()));
     CHECK_THAT(Volume(r.shape), Catch::Matchers::WithinRel(part.volume, 1e-6));
   }
+}
+
+TEST_CASE("Rebuild: rounds meeting at a corner are a torus, and so is a "
+          "boss's rounded foot",
+          "[mesh_recognition]") {
+  const fixtures::Part part = fixtures::RoundedCorners();
+  REQUIRE(Count(part.shape).tori == static_cast<int>(part.tori.size()));
+  const mesh::TriMesh m = fixtures::MeshOf(part, 0.01, 0.2);
+  mesh::Segmentation seg;
+  const cad::Rebuilt r = Rebuild(m, seg);
+  CHECK(seg.Count(mesh::Kind::Torus) == part.tori.size());
+  // Each generated torus is a region's, to the file's precision.
+  for (const fixtures::Round& want : part.tori) {
+    const mesh::Region* found = nullptr;
+    for (const mesh::Region& reg : seg.regions)
+      if (reg.fit.kind == mesh::Kind::Torus &&
+          glm::length(reg.fit.origin - want.point) < 1e-3)
+        found = &reg;
+    INFO("torus at " << want.point.x << ", " << want.point.y << ", "
+                     << want.point.z);
+    REQUIRE(found != nullptr);
+    CHECK(std::abs(std::abs(glm::dot(found->fit.axis, want.axis)) - 1.0) <
+          1e-8);
+    CHECK_THAT(found->fit.radius,
+               Catch::Matchers::WithinAbs(want.radius, 1e-3));
+    CHECK_THAT(found->fit.minor, Catch::Matchers::WithinAbs(want.minor, 1e-3));
+  }
+  const Counts c = Count(r.shape);
+  CHECK(c.tori == static_cast<int>(part.tori.size()));
+  CHECK(c.other == 0);
+  CHECK(c.faces == static_cast<int>(seg.regions.size()));
+  CHECK_THAT(Volume(r.shape), Catch::Matchers::WithinRel(part.volume, 1e-6));
+  const mesh::Recognition rec = mesh::Summarize(m, seg, 12);
+  CHECK(rec.Count(mesh::Kind::Torus) == part.tori.size());
+  CHECK(rec.Summary().find("5 tori") != std::string::npos);
+  CHECK(rec.facetsLeft == 0);
+}
+
+TEST_CASE("Rebuild: a whole ring is one toroidal face", "[mesh_recognition]") {
+  // The clean torus fixture: no boundary, its two seams the surface's own.
+  const fixtures::Organic ring = fixtures::Torus(10000);
+  mesh::TriMesh m = ring.mesh;
+  m.quantum = mesh::Float32Quantum(m.positions);
+  mesh::Segmentation seg;
+  const cad::Rebuilt r = Rebuild(m, seg);
+  CHECK(seg.regions.size() == 1);
+  const Counts c = Count(r.shape);
+  CHECK(c.faces == 1);
+  CHECK(c.tori == 1);
+  // The generated torus's volume, 2 pi^2 R r^2, to what its facets allow.
+  CHECK(std::abs(Volume(r.shape) - ring.volume) <= ring.volumeTolerance);
 }
 
 TEST_CASE("Rebuild: OpenSCAD's three files", "[mesh_recognition]") {

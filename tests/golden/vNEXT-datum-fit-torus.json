@@ -1,0 +1,78 @@
+{
+  "features": [
+    {
+      "constraints": [],
+      "entities": [
+        {
+          "center": [
+            20.0,
+            0.0
+          ],
+          "id": 11,
+          "radius": 5.0,
+          "type": "circle"
+        }
+      ],
+      "id": 1,
+      "name": "Ring sketch",
+      "plane": {
+        "normal": [
+          0.0,
+          1.0,
+          0.0
+        ],
+        "origin": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "uAxis": [
+          1.0,
+          0.0,
+          0.0
+        ]
+      },
+      "type": "Sketch"
+    },
+    {
+      "angle_deg": 360.0,
+      "axis": {
+        "direction": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "kind": "custom",
+        "origin": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "id": 2,
+      "mode": "new_body",
+      "name": "Ring",
+      "reversed": false,
+      "sketch_id": 1,
+      "type": "Revolve"
+    },
+    {
+      "fit": {
+        "body_id": 2,
+        "kind": "torus",
+        "point_mm": [
+          25.0,
+          0.0,
+          0.0
+        ],
+        "side": "outside"
+      },
+      "id": 3,
+      "kind": "from_fit",
+      "name": "Ring axis",
+      "type": "DatumAxis"
+    }
+  ],
+  "format": "designer-document",
+  "version": 231
+}

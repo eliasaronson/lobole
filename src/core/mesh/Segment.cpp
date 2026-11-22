@@ -26,6 +26,9 @@ const double kSmoothCos = std::cos(kTwoPi / kMinSidesLowest * (1.0 + 1e-6));
 // How far past 360/min_sides a facet may turn and still count: float noise
 // on a facet's angular width, not a tolerance on the shape.
 constexpr double kTurnSlack = 1e-3;
+// The fewest corners a set is tried as a torus on: its seven numbers over
+// two corners each and a couple over.
+constexpr size_t kTorusLeastPoints = 16;
 // Triples tried from one seed before it is given up: a large plane with a
 // hundred tangent fillets would otherwise try every pair of them.
 constexpr int kMaxTriples = 256;
@@ -60,15 +63,40 @@ private:
   FitResult FitSet(const std::vector<uint32_t>& set,
                    const FitResult* prefer) const;
   bool OnSurface(const FitResult& f, uint32_t patch) const;
+  // Whether every patch of `set` faces the way `f` does where it is, to
+  // within the most a facet may turn: the corners of a cylinder's strips
+  // lie on two circles, which a whole family of tori holds as well, and
+  // one of those can take a flat's few corners too -- facing elsewhere.
+  bool FacetsFace(const std::vector<uint32_t>& set, const FitResult& f) const;
+  // Whether a smooth neighbour of `set` that is in no region yet lies on
+  // `f` too, with a corner on a circle about its axis that none of the
+  // set's is on: a torus fitted to corners on three circles is any of a
+  // family until a fourth says which.
+  bool Confirmed(const FitResult& f, const std::vector<uint32_t>& set) const;
+  // Two curved sets side by side where one's surface holds the other's
+  // corners are one surface: a ring of a torus's facets taken as a cone
+  // before the torus grew, a cylinder's single ring of strips split
+  // between it and a sphere (two equal circles lie on both). The one whose
+  // surface holds both takes the other -- the simpler kind (cylinder, cone,
+  // sphere, torus) when each holds both -- until none does.
+  void MergeHeld(std::vector<std::vector<uint32_t>>& sets,
+                 std::vector<FitResult>& fits, std::vector<double>& turns);
   void Grow(std::vector<uint32_t>& set, FitResult& fit);
   // The most a facet of `set` turns about `fit`'s axis or centre; `total`,
   // when given, the sum of every facet's turn (a full ring's is a turn).
   double FacetTurn(const std::vector<uint32_t>& set, const FitResult& fit,
                    double* total = nullptr) const;
+  // How far patch `p` turns on torus `fit`: about its axis and about its
+  // core circle (in the half-plane through the axis), the larger, and each
+  // apart when asked.
+  double TorusTurn(const Patch& p, const FitResult& fit,
+                   double* aboutAxis = nullptr,
+                   double* aboutCore = nullptr) const;
 
   const TriMesh& m_mesh;
   const SegmentOptions& m_opt;
   double m_tol = 0.0;
+  double m_turnLimit = kTwoPi; // the most a facet of a round turns (rad)
   std::vector<uint32_t> m_patchOf;
   std::vector<Patch> m_patches;
   std::vector<uint32_t> m_curvedOf; // per patch: a curved region, or kNone
@@ -204,6 +232,132 @@ bool Segmenter::OnSurface(const FitResult& f, uint32_t patch) const {
   return true;
 }
 
+bool Segmenter::FacetsFace(const std::vector<uint32_t>& set,
+                           const FitResult& f) const {
+  const double least = std::cos(m_turnLimit);
+  for (uint32_t id : set) {
+    const Patch& p = m_patches[id];
+    const glm::dvec3 n = f.Normal(f.Project(p.point));
+    if (!(std::abs(glm::dot(n, p.normal)) >= least))
+      return false;
+  }
+  return true;
+}
+
+void Segmenter::MergeHeld(std::vector<std::vector<uint32_t>>& sets,
+                          std::vector<FitResult>& fits,
+                          std::vector<double>& turns) {
+  const auto order = [](Kind k) {
+    switch (k) {
+    case Kind::Cylinder:
+      return 0;
+    case Kind::Cone:
+      return 1;
+    case Kind::Sphere:
+      return 2;
+    case Kind::Torus:
+      return 3;
+    case Kind::Plane:
+      break;
+    }
+    return 4;
+  };
+  const auto holds = [&](const FitResult& f, const std::vector<uint32_t>& set) {
+    for (uint32_t id : set)
+      if (!OnSurface(f, id))
+        return false;
+    return FacetsFace(set, f);
+  };
+  for (bool changed = true; changed;) {
+    changed = false;
+    for (uint32_t a = 0; a < sets.size() && !changed; a++) {
+      if (sets[a].empty())
+        continue;
+      std::vector<uint32_t> beside;
+      for (uint32_t id : sets[a])
+        for (uint32_t q : m_patches[id].neighbours)
+          if (const uint32_t b = m_curvedOf[q];
+              b != kNone && b != a && !sets[b].empty())
+            beside.push_back(b);
+      std::sort(beside.begin(), beside.end());
+      beside.erase(std::unique(beside.begin(), beside.end()), beside.end());
+      for (uint32_t b : beside) {
+        if (!holds(fits[a], sets[b]))
+          continue;
+        if (holds(fits[b], sets[a]) &&
+            order(fits[b].kind) < order(fits[a].kind))
+          continue; // b takes a, when b is reached
+        std::vector<uint32_t> both = sets[a];
+        both.insert(both.end(), sets[b].begin(), sets[b].end());
+        const double turn = FacetTurn(both, fits[a]);
+        if (turn > m_turnLimit)
+          continue;
+        for (uint32_t id : sets[b])
+          m_curvedOf[id] = a;
+        sets[a] = std::move(both);
+        sets[b].clear();
+        turns[a] = turn;
+        changed = true;
+        break;
+      }
+    }
+  }
+  // The emptied sets go, and the rest are renumbered.
+  std::vector<std::vector<uint32_t>> keptSets;
+  std::vector<FitResult> keptFits;
+  std::vector<double> keptTurns;
+  for (size_t c = 0; c < sets.size(); c++) {
+    if (sets[c].empty())
+      continue;
+    for (uint32_t id : sets[c])
+      m_curvedOf[id] = static_cast<uint32_t>(keptSets.size());
+    keptSets.push_back(std::move(sets[c]));
+    keptFits.push_back(fits[c]);
+    keptTurns.push_back(turns[c]);
+  }
+  sets = std::move(keptSets);
+  fits = std::move(keptFits);
+  turns = std::move(keptTurns);
+}
+
+bool Segmenter::Confirmed(const FitResult& f,
+                          const std::vector<uint32_t>& set) const {
+  // Each corner's place in the half-plane through the axis: a circle about
+  // it is one place.
+  const auto place = [&](uint32_t v) {
+    const glm::dvec3 w = m_mesh.positions[v] - f.origin;
+    const double h = glm::dot(w, f.axis);
+    return glm::dvec2(glm::length(w - h * f.axis), h);
+  };
+  std::vector<glm::dvec2> circles;
+  for (uint32_t id : set)
+    for (uint32_t v : m_patches[id].verts)
+      circles.push_back(place(v));
+  std::sort(circles.begin(), circles.end(),
+            [](const glm::dvec2& a, const glm::dvec2& b) { return a.y < b.y; });
+  const double apart = 16.0 * m_tol;
+  const auto known = [&](const glm::dvec2& p) {
+    auto it =
+        std::lower_bound(circles.begin(), circles.end(), p.y - apart,
+                         [](const glm::dvec2& a, double y) { return a.y < y; });
+    for (; it != circles.end() && it->y <= p.y + apart; ++it)
+      if (std::abs(it->x - p.x) <= apart)
+        return true;
+    return false;
+  };
+  for (uint32_t id : set)
+    for (uint32_t q : m_patches[id].neighbours) {
+      if (m_curvedOf[q] != kNone || !Smooth(id, q) ||
+          std::find(set.begin(), set.end(), q) != set.end() ||
+          !OnSurface(f, q) || !FacetsFace({q}, f))
+        continue;
+      for (uint32_t v : m_patches[q].verts)
+        if (!known(place(v)))
+          return true; // a circle the fit was not made through
+    }
+  return false;
+}
+
 FitResult Segmenter::FitSet(const std::vector<uint32_t>& set,
                             const FitResult* prefer) const {
   if (m_stamp.size() < m_mesh.positions.size())
@@ -250,6 +404,31 @@ FitResult Segmenter::FitSet(const std::vector<uint32_t>& set,
     }
     case Kind::Sphere:
       return FitSphere(pts, giveUp);
+    case Kind::Torus: {
+      // Seven numbers fit nearly any three patches' few corners (a flat and
+      // two strips of a fillet): a torus is tried on a set with a few
+      // corners for each of them, which a seed's triple of a torus's own
+      // facets rarely has -- but a ring of them fits a cone (two circles
+      // always do), and the growth that outgrows the cone refits a torus.
+      if (pts.size() < kTorusLeastPoints)
+        return {};
+      // From the torus already grown, the cone or cylinder that was, or the
+      // axis the facets' normal lines meet.
+      if (prefer && prefer->kind == Kind::Torus) {
+        FitResult f = FitTorus(pts, *prefer, giveUp);
+        return f.ok && FacetsFace(set, f) ? f : FitResult{};
+      }
+      std::vector<FitResult> starts{TorusFromNormals(pts, normals, onPlane)};
+      if (prefer &&
+          (prefer->kind == Kind::Cone || prefer->kind == Kind::Cylinder))
+        starts.push_back(TorusAbout(pts, prefer->origin, prefer->axis));
+      for (const FitResult& start : starts)
+        if (start.ok)
+          if (FitResult f = FitTorus(pts, start, giveUp);
+              f.ok && f.max <= m_tol && FacetsFace(set, f))
+            return f;
+      return {};
+    }
     case Kind::Plane:
       break;
     }
@@ -260,7 +439,7 @@ FitResult Segmenter::FitSet(const std::vector<uint32_t>& set,
     if (accept(f))
       return f;
   }
-  for (Kind k : {Kind::Cylinder, Kind::Cone, Kind::Sphere}) {
+  for (Kind k : {Kind::Cylinder, Kind::Cone, Kind::Sphere, Kind::Torus}) {
     if (prefer != nullptr && k == prefer->kind)
       continue;
     FitResult f = tryKind(k);
@@ -295,7 +474,11 @@ void Segmenter::Grow(std::vector<uint32_t>& set, FitResult& fit) {
     // one in and keep it only if every vertex still fits.
     set.push_back(q);
     const FitResult refit = FitSet(set, &fit);
-    if (refit.ok) {
+    // A torus in place of another kind needs a patch it was not fitted to:
+    // three coaxial circles of corners -- a cone's ring and the next ring of
+    // whatever it meets -- always lie on some torus.
+    if (refit.ok && (refit.kind != Kind::Torus || fit.kind == Kind::Torus ||
+                     Confirmed(refit, set))) {
       fit = refit;
       enqueue(q);
     } else {
@@ -321,6 +504,13 @@ double Segmenter::FacetTurn(const std::vector<uint32_t>& set,
           most =
               std::max(most, std::acos(std::clamp(glm::dot(a, b), -1.0, 1.0)));
         }
+      continue;
+    }
+    // A torus's facet turns about its axis and about its core circle: the
+    // larger.
+    if (fit.kind == Kind::Torus) {
+      const double turn = TorusTurn(p, fit);
+      most = std::max(most, turn);
       continue;
     }
     // About the axis: each corner's angle measured from the patch's own
@@ -354,6 +544,47 @@ double Segmenter::FacetTurn(const std::vector<uint32_t>& set,
   return most;
 }
 
+double Segmenter::TorusTurn(const Patch& p, const FitResult& fit,
+                            double* aboutAxis, double* aboutCore) const {
+  const glm::dvec3 ax = fit.axis;
+  glm::dvec3 mid(0.0);
+  for (uint32_t v : p.verts)
+    mid += m_mesh.positions[v];
+  mid /= double(p.verts.size());
+  glm::dvec3 r0 = mid - fit.origin;
+  r0 -= glm::dot(r0, ax) * ax;
+  if (glm::length(r0) == 0.0)
+    return 0.0;
+  const glm::dvec3 u = glm::normalize(r0), w = glm::cross(ax, u);
+  double lo = 0.0, hi = 0.0, vlo = 0.0, vhi = 0.0;
+  // The meridian angle measured from the middle's, so it never wraps.
+  const auto meridian = [&](const glm::dvec3& x) {
+    const glm::dvec3 d = x - fit.origin;
+    const double h = glm::dot(d, ax);
+    const double rho = glm::length(d - h * ax);
+    return std::atan2(h, rho - fit.radius);
+  };
+  const double v0 = meridian(mid);
+  for (uint32_t v : p.verts) {
+    const glm::dvec3 d = m_mesh.positions[v] - fit.origin;
+    const glm::dvec3 r = d - glm::dot(d, ax) * ax;
+    if (glm::length(r) == 0.0)
+      continue;
+    const double ang = std::atan2(glm::dot(r, w), glm::dot(r, u));
+    lo = std::min(lo, ang);
+    hi = std::max(hi, ang);
+    const double dv =
+        std::remainder(meridian(m_mesh.positions[v]) - v0, kTwoPi);
+    vlo = std::min(vlo, dv);
+    vhi = std::max(vhi, dv);
+  }
+  if (aboutAxis != nullptr)
+    *aboutAxis = hi - lo;
+  if (aboutCore != nullptr)
+    *aboutCore = vhi - vlo;
+  return std::max(hi - lo, vhi - vlo);
+}
+
 Segmentation Segmenter::Run() {
   Segmentation out;
   glm::dvec3 lo, hi;
@@ -366,6 +597,7 @@ Segmentation Segmenter::Run() {
   const double turnLimit =
       kTwoPi / std::clamp(m_opt.minSides, kMinSidesLowest, kMinSidesHighest) *
       (1.0 + kTurnSlack);
+  m_turnLimit = turnLimit;
 
   std::vector<uint32_t> seeds(m_patches.size());
   std::iota(seeds.begin(), seeds.end(), 0u);
@@ -408,7 +640,7 @@ Segmentation Segmenter::Run() {
         triples++;
         const std::vector<uint32_t> triple = {p, q, r};
         const FitResult f = FitSet(triple, nullptr);
-        if (f.ok) {
+        if (f.ok && (f.kind != Kind::Torus || Confirmed(f, triple))) {
           set = triple;
           fit = f;
           break;
@@ -427,8 +659,8 @@ Segmentation Segmenter::Run() {
       // shares with a neighbour may be missing), not two flats that happen
       // to fit an arc.
       const int sides = turn > 0.0 ? int(std::lround(kTwoPi / turn)) : 0;
-      if (fit.kind != Kind::Sphere && sides >= kMinSidesLowest &&
-          around >= kTwoPi / 2) {
+      if (fit.kind != Kind::Sphere && fit.kind != Kind::Torus &&
+          sides >= kMinSidesLowest && around >= kTwoPi / 2) {
         Polygon poly;
         poly.sides = sides;
         poly.axis = fit.axis;
@@ -474,6 +706,7 @@ Segmentation Segmenter::Run() {
     curvedFits.push_back(fit);
     curvedTurns.push_back(turn);
   }
+  MergeHeld(curvedSets, curvedFits, curvedTurns);
 
   // Regions: each curved set, then each patch left a plane.
   const double facetLimitCos = std::cos(turnLimit);
@@ -493,6 +726,20 @@ Segmentation Segmenter::Run() {
         }
     }
     r.sagitta = reach * (1.0 - std::cos(r.facetTurn / 2.0));
+    if (r.fit.kind == Kind::Torus) {
+      // Round the axis at the outer equator's reach, round the core at the
+      // tube's.
+      double turnU = 0.0, turnV = 0.0;
+      for (uint32_t id : curvedSets[c]) {
+        double u = 0.0, v = 0.0;
+        TorusTurn(m_patches[id], r.fit, &u, &v);
+        turnU = std::max(turnU, u);
+        turnV = std::max(turnV, v);
+      }
+      r.sagitta =
+          std::max((r.fit.radius + r.fit.minor) * (1.0 - std::cos(turnU / 2.0)),
+                   r.fit.minor * (1.0 - std::cos(turnV / 2.0)));
+    }
     for (uint32_t id : curvedSets[c]) {
       r.area += m_patches[id].area;
       r.triangles.insert(r.triangles.end(), m_patches[id].tris.begin(),
@@ -805,6 +1052,7 @@ void Recognition::Transform(const glm::dmat4& m, double scale) {
     r.centre = point(r.centre);
     r.axis = glm::normalize(rot * r.axis);
     r.radius *= scale;
+    r.minorRadius *= scale;
     r.sagitta *= scale;
   }
   for (Polygon& p : polygonal) {
@@ -825,6 +1073,7 @@ std::string Recognition::Summary() const {
   add(Count(Kind::Cylinder), "cylinder", "cylinders");
   add(Count(Kind::Cone), "cone", "cones");
   add(Count(Kind::Sphere), "sphere", "spheres");
+  add(Count(Kind::Torus), "torus", "tori");
   add(planes, "plane", "planes");
   for (const Polygon& p : polygonal)
     out += "; a " + std::to_string(p.sides) + "-sided pocket or boss left flat";
@@ -853,10 +1102,11 @@ Recognition Summarize(const TriMesh& mesh, const Segmentation& s,
     round.axis = r.fit.axis;
     round.radius = r.fit.radius;
     round.halfAngle = r.fit.halfAngle;
+    round.minorRadius = r.fit.minor;
     round.sides = r.sides;
     round.sagitta = r.sagitta;
     round.centre = r.fit.origin;
-    if (r.fit.kind != Kind::Sphere) {
+    if (r.fit.kind != Kind::Sphere && r.fit.kind != Kind::Torus) {
       double lo = 0.0, hi = 0.0, widest = 0.0;
       bool first = true;
       for (uint32_t t : r.triangles)
