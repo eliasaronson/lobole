@@ -264,6 +264,23 @@ the heading if it is not here yet.
 - **Likely fix:** price them from a measured run of each row as a mesh
   body instead of the faceted estimate.
 
+### The Boolean feature checks the faces it made twice
+
+- **Symptom:** a Boolean feature's result is checked by `Measure::CheckGeometry`
+  (BRepCheck over the whole solid, its `extra` check) and then by
+  `BooleanRefusal`, which runs BRepCheck again on every face the boolean
+  made. Those faces' checks are about half of `BooleanRefusal`'s time on a
+  plate's 400 cuts (where it is 18% of the build's CPU, next to 20% in the
+  booleans themselves), and on the Boolean feature they are already known.
+- **Cause:** `CheckedBooleanNamed`'s `extra` is opaque, so `BooleanRefusal`
+  cannot know it already validated the shape.
+- **Where:** `BooleanRefusal` and `CheckedBooleanNamed` in
+  `src/core/BodyMode.cpp`; the `wellFormed` check in
+  `src/core/features/BooleanFeature.cpp`.
+- **Likely fix:** a flag on `CheckedBooleanNamed` saying the extra check
+  validated the whole result, passed to `BooleanRefusal` to skip its
+  per-face BRepCheck.
+
 ## Rendering
 
 ### The remote is silent while a Wayland window is not on screen
