@@ -22,6 +22,7 @@ in the file; the UI and expressions show degrees.
 | snap/auto-constraint inference (pure, camera-free) | `src/core/sketch/SketchInference.{h,cpp}` |
 | box-select hit test (pure) | `src/core/sketch/SketchSelection.{h,cpp}` |
 | which corner a click means (`CornerAt`), the fillet of two curves and the largest that fits (pure) | `src/core/sketch/SketchFillet.{h,cpp}` |
+| where a curve is crossed (`Crossings`), the nearest point of it, the pieces a cut makes (pure) | `src/core/sketch/SketchSplit.{h,cpp}` |
 | serialization | `src/core/io/SerializeFeatures.cpp` (`EntityFromJson`, `ConstraintToJson`, `DerivedOpToJson`, the sketch arm of `FeatureToJson/FromJson`) |
 | viewport interaction, Escape ladder | `src/ui/SketchInteraction.cpp` (`HandleSketchViewport`) |
 | drawing tools, commits, drag sessions, copy/paste | `src/ui/SketchTools.cpp` |
@@ -345,8 +346,10 @@ sketch already fixes (constraints 0, 1, 6)`. Indices are into
 `constraints`. One addition takes the place of what it repeats instead of
 being refused: a Midpoint replaces a PointOnLine of the same point on the
 same line (`sketch::SubsumedBy`; a circle whose centre was snapped onto a
-line can then go to the line's middle), and `add_constraint` answers the
-count as `replaced`. `add_constraint(s)` refuses with it ("not added: …", adding
+line can then go to the line's middle), and a Coincident of a point with a
+curve's end replaces a PointOnLine of that point on that curve (a
+[Split](#split)'s joint at a T, or a point slid along a line and then
+joined to its end); `add_constraint` answers the count as `replaced`. `add_constraint(s)` refuses with it ("not added: …", adding
 "pass driven: true (and no value) to add it as a reference dimension" for a
 dimension kind) and leaves the sketch as it was; `add_constraints` judges
 the whole list in one solve and, on a refusal, steps through it to name the
@@ -822,15 +825,55 @@ All are `SketchFeature` methods; UI and RPC commits wrap them in one
   constraint that reads the dead id, and returns how many *non-trivial*
   constraints (anything but Coincident/Horizontal/Vertical) were dropped, for
   a warning. Dimensions on the dead entity are dropped, not transferred.
-- **SplitEntity(lineId, P)** — piece 1 keeps the id (`a`→P), piece 2 is new
-  (P→`b`); refs to the old far end move to piece 2 (so a whole-edge distance
-  re-anchors to span both pieces); H/V/Parallel/Perpendicular are copied onto
-  piece 2; a coincident joins the pieces. No collinear is added.
-- **TrimLineAt / TrimCurveAt(id, click)** — remove the span between the
-  crossings (with lines and circles) that bracket the click (via split + delete). With no bracketing
-  crossing the whole entity goes. A trimmed circle becomes the complementary
-  arc (keeping the id); a trimmed arc becomes up to two arcs. `TrimSpanAt`
-  gives the span for the hover preview.
+- **SplitEntity(id, cuts, whyNot)** — cuts a line or an arc at one point,
+  a circle at two, into pieces that stay one curve ([Split](#split)). Piece
+  1 keeps the id, and the ids come back in order along the curve (a
+  circle's from the first cut counter-clockwise; both pieces are arcs). A
+  line's pieces are joined by a Coincident and a Parallel, or a copy of the
+  Horizontal/Vertical the line carried, so they stay collinear; an arc's by
+  Coincident and Concentric, so the radius follows. A circle's two arcs are
+  joined Coincident at both cuts and Tangent at the first: a concentric
+  beside two coincidents repeats an equation, which PlaneGCS reports as
+  redundant, and two arcs through the same two points tangent at one are
+  one circle with no configuration where that degenerates (an equal radius
+  does, with the cuts a diameter apart). The transfer
+  reads each constraint's slots: a ref to the far end in a POINT slot moves
+  to piece 2 (so a whole-edge distance `{id,0}`-`{id,1}` spans both
+  pieces), and so does a tangent or curvature joined at that end (the
+  first coincident between an end of each, as the solver reads a joint);
+  anything on the whole curve — its direction, its circle, a point on it, a
+  symmetry about it, a radius — stays on piece 1, which the joints hold
+  piece 2 to. A midpoint of the line becomes a symmetric of the outer ends
+  about the point. A far end's coordinate expressions go with it, and a
+  linked pattern or mirror of the curve repeats both pieces. Each joint is
+  held where it lies: at another curve's end or a point it is made
+  coincident with it, taking the place of the point-on-curve that held that
+  end on this curve (`sketch::SubsumedBy`, [Refusals](#refusals)); at a
+  crossing (`SplitCut::crossing`, a curve or a datum axis) it is held on the
+  crossing curve, so the DOF does not change; anywhere else it slides, one
+  DOF more. Refused with nothing changed, naming why (`SplitRefusal` is the
+  part that does not depend on the cuts): an unknown id, an entity a linked
+  op or the model generates (`GeneratedBy`), a point or a label, a spline,
+  an ellipse or an elliptical arc ("a spline is not split yet (Split takes
+  lines, arcs and circles)"), the wrong number of cuts, a cut at an end
+  (1e-4 mm), two cuts at one point, a cut more than a hundredth of the
+  curve's length off it, a crossing that does not cross, and an equal
+  length on the line or an `arc_length` on the arc, which two pieces cannot
+  keep ("line 5 carries an equal length (constraint 3), which two pieces
+  cannot keep: delete it, then split").
+- **TrimLineAt / TrimCurveAt(id, click, whyNot)** — remove the span between
+  the crossings (with lines and circles) that bracket the click. With no
+  bracketing crossing the whole entity goes. A line is cut by Trim's own
+  split and the clicked piece deleted: piece 2 takes the far end's refs and
+  copies of the line's H/V/Parallel/Perpendicular, and the survivors are
+  not tied to each other. A trimmed circle becomes the complementary arc
+  (keeping the id). A trimmed arc's middle is cut out through Split's
+  transfer without its joints, so the far survivor (a new id) takes the far
+  end's constraints; a span at one end goes with that end, and its
+  constraints with it (`DropEndRefs`, coincidences chained through the end
+  kept between the others). An entity a linked op or the model generates
+  is refused by name, so the click and every other caller agree.
+  `TrimSpanAt` gives the span for the hover preview.
 - **TrimAlongPath(path, removed)** — every span a UV polyline crosses, as
   the click trims above, in path order: each crossing is resolved against
   the CURRENT entities after every split (a split keeps the id on its first
@@ -879,7 +922,7 @@ All are `SketchFeature` methods; UI and RPC commits wrap them in one
   a spline or an elliptical arc end ("a spline end is not filleted yet (a
   fillet takes lines and arcs)"), a circle, ellipse, point or label (no
   end), two curves sharing no end, and an entity a linked op generates or a
-  projection owns (`GeneratedBy`), as Trim leaves them.
+  projection owns (`GeneratedBy`), as Trim and Split refuse them.
 - **AddLinearPattern / AddCircularPattern(..., link)** — bake or a derived op.
   The circular angle is the per-step angle.
 - **OffsetChain(chain, distance, joinArc)** — offsets one closed loop through
@@ -1076,8 +1119,8 @@ is upright but +U reads to the left.
 **Tools** (`SketchTool`): Select, Point, Line, Circle, Rectangle,
 RectangleCenter, Arc (centre→start→end), ArcThreePoint (start→end→through),
 Ellipse (centre→major end→minor), EllipseArc (5 clicks), Spline (click poles;
-Escape, Enter or a double-click finishes), Trim, Mirror, Fillet
-([Fillet](#fillet)), Pattern, Offset,
+Escape, Enter or a double-click finishes), Trim, Split ([Split](#split)),
+Mirror, Fillet ([Fillet](#fillet)), Pattern, Offset,
 Dimension, Project (live external geometry), CalibrateImage, Image, Text
 (each click places a label; the Tool window edits its text, cap height,
 font and alignment, and a label selected when the tool is armed is edited
@@ -1089,13 +1132,14 @@ shadowed while sketching; rebindable — `src/core/io/Keymap.cpp`):
 
 | draw | modify | constrain | other |
 |---|---|---|---|
-| L line, C circle, Shift+C ellipse, G rectangle, Shift+G centre rectangle, A 3-point arc, Shift+A centre arc, Ctrl+Shift+A elliptic arc, S spline, `.` point, Shift+T text, X project, Shift+I reference image | M trim, O offset, Shift+F fillet, Shift+M mirror, P pattern, D dimension, Q construction, Delete delete | H horizontal, V vertical, N coincident, B parallel, Shift+B perpendicular, T tangent, E equal, Shift+N concentric | Space clear selection, Ctrl+C/V/Shift+V copy/paste/paste linked, Shift+S auto-constrain, Y constraint glyphs, F7 slice, Shift+E extrude, Shift+R revolve, Shift+H holes |
+| L line, C circle, Shift+C ellipse, G rectangle, Shift+G centre rectangle, A 3-point arc, Shift+A centre arc, Ctrl+Shift+A elliptic arc, S spline, `.` point, Shift+T text, X project, Shift+I reference image | M trim, K split, O offset, Shift+F fillet, Shift+M mirror, P pattern, D dimension, Q construction, Delete delete | H horizontal, V vertical, N coincident, B parallel, Shift+B perpendicular, T tangent, E equal, Shift+N concentric | Space clear selection, Ctrl+C/V/Shift+V copy/paste/paste linked, Shift+S auto-constrain, Y constraint glyphs, F7 slice, Shift+E extrude, Shift+R revolve, Shift+H holes |
 
 Curvature (G2), point-on-line, symmetric, midpoint, fixed and collinear are
 commands with no default key.
 
 **Escape** backs out one level per press: an open dimension field → dimension
-placement → a drag-trim path → a spline in progress (finished with the poles
+placement → a drag-trim path → a circle's first split cut → a spline in
+progress (finished with the poles
 placed, as a line chain keeps its segments; a single pole is dropped) →
 pending clicks or a box → mirror axis phase →
 op re-pick → op edit session → dimension targets → the tool (back to Select)
@@ -1169,7 +1213,38 @@ hover. Pressed on empty space and dragged, it draws a path: every span the
 path crosses is previewed as it is crossed (`TrimAlongPath` on a copy), and
 the release trims them all on the sketch, one solve and one undo step.
 Escape drops the path; a press released without a drag still leaves the
-tool; Enter does too.
+tool; Enter does too. A click on an entity a linked op or the model
+generates says "Not trimmed: entity 7 is generated by a projection; …" and
+changes nothing: the refusal is in `TrimLineAt`/`TrimCurveAt`, which the
+click calls, where the click alone once checked only a pattern's or a
+mirror's instances and a projected line was trimmed and then re-stamped at
+the next regeneration.
+
+### Split
+
+The Split tool (`SketchTool::Split`, `sketch.split`, K, `###tb_sk_split`
+after Trim, the part Split's glyph) cuts the line, arc or circle under a
+click into pieces that stay one curve (`SplitEntity`,
+[Operations](#operations-on-the-entity-list)). Hovering snaps the cut to a
+crossing with any curve — a line, circle, arc, ellipse, spline or datum
+axis, found by sampling the other curve and bisecting each sign change of
+its distance to this one (`sketch::Crossings`) — within the coincident
+snap's 10 px, then to another curve's end (or a point) on it, else to the
+nearest point. Where two curves cross, the one nearer the cursor is the
+one cut, so the cursor goes along the curve meant; at a T it is the bar
+(the stem's foot would be a cut at an end). It previews a tick across the curve at the cut and the two
+pieces in two shades. Each click is one solve and one undo step; a tap in
+empty space or Enter finishes. A circle takes two clicks: the prompt reads
+"Split (Step 1/2)" over it and "Step 2/2" once the first cut is held;
+Escape drops the held cut and keeps the tool, a click on another curve
+says to click the circle again. The prompt pill alone says what to do; a
+refusal says only why, prefixed "Not split:", in `SplitEntity`'s words.
+
+Splitting a line where a circle crosses it, twice, and making the piece
+inside construction (Q) is the use it was built for: the sketch stays
+solved at the same DOF, the outer pieces stay collinear with the inner one
+(each carries the Horizontal the line did), and a cut built from the sketch
+builds to the same volume (`split/line_over_circle_inner_construction`).
 
 ### Fillet
 
@@ -1256,6 +1331,7 @@ In `src/remote/RemoteModeling.cpp` (`describe` lists `sketch_entity_types`,
 | `add_constraint` | `sketch_id, kind, refs, value \| value_deg \| expr \| driven` | `refs` = `[[entity_id, which], …]` (a, b, c); `value` is mm (an `arc_length` too), or **radians** for an angle (`value_deg` instead, never both; more than a full turn is refused as degrees); `expr` is in base units, angles in degrees. A constraint that constrains nothing is refused ([Refusals](#refusals)). `driven: true` on a dimension kind, with none of `value`/`value_deg`/`expr`, adds a [driven dimension](#constraints) and answers `measured` (mm; radians for an angle). Every answer carries the sketch's `dof` after the add. One solve, one undo step. The geometry is taken literally: nothing is [rescaled](#the-first-dimension). A new variable driving a dimension is a `batch` of `set_variable` (`scope: "part"` keeps it one undo step; a project variable is undone on its own) and `add_constraint` with `expr` naming it |
 | `add_constraints` | `sketch_id, constraints[]` | many at once, each spec as `add_constraint`'s: one judgement, solve, regen, undo step; a refused spec adds nothing and is named by index; `measured` lists each spec's measure (null for a driving one) when any is driven |
 | `delete_entity` | `sketch_id, entity_id` | with the constraint cleanup above |
+| `split` | `sketch_id, entity_id, at, crossing?` | a line or an arc at `at` = [u, v] in sketch mm, a circle at two, `[[u, v], [u, v]]`; `crossing` = an entity id (or one per cut, null for none) cuts at that curve's crossing nearest each `at` and holds the joint on it; without it `at` moves to the nearest point of the curve (refused past a hundredth of its length). Returns `entity_ids` in order along the curve, the first keeping the id, and `dof`, `regen`, `digest`; a refusal names why ([Operations](#operations-on-the-entity-list), SplitEntity) and changes nothing |
 | `fillet` | `sketch_id, entity1, entity2, radius, near?` | lines and arcs sharing an end; `radius` in mm, `near` = [u, v] in sketch mm picks the corner where they share two ends; returns `arc_id`; a refusal names why ([Operations](#operations-on-the-entity-list), FilletCorner) and changes nothing |
 | `offset` | `sketch_id, chain, distance, join_arc?` | sign of `distance` picks the side |
 | `mirror` | `sketch_id, sources, axis, link?` | `axis` may be a datum axis id |
@@ -1276,8 +1352,7 @@ degrees in a radian field). A `text` takes `angle` or `angle_deg`, and
 refuses an unknown `font`, `halign` or `valign` naming the accepted words. Any entity may carry `construction` and
 `<field>_expr`.
 
-There is no RPC to delete a single constraint, trim, split, paste or break a
-link; `modify_feature` with an edited sketch JSON covers them.
+There is no RPC to delete a single constraint, trim, paste or break a link; `modify_feature` with an edited sketch JSON covers them.
 
 ## Tests
 

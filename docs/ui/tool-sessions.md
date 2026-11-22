@@ -150,6 +150,10 @@ origin that misses the body. Examples in the code:
   height is five; a typed radius stays for the session
   (`fillet/armed_radius_tracks_the_grid`;
   [sketching](../sketching/README.md#fillet)).
+- The sketch Split has no number to default: it cuts where the click is,
+  snapped within the coincident snap's 10 px (a distance on the screen, the
+  same at any zoom), and a refusal names why, "Not split: …"
+  ([sketching](../sketching/README.md#split)).
 - Fillet and Chamfer open at a tenth of the target body's thinnest extent,
   rounded to 1/2/5 (`SizeFromBody`); Shell at a tenth of its thinnest wall
   (`SizeFromWall`, `ThinnestWall`: on a body already hollow the extent is

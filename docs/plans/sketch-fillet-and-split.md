@@ -1,9 +1,10 @@
-# Sketch fillet on splines and elliptical arcs, and a Split tool
+# Sketch fillet and split on splines and elliptical arcs
 
-A curve should split in two where it is clicked, and the two pieces should
-stay one curve until one is changed. The sketch fillet, which rounds the
-corner of two lines or arcs (docs/sketching/README.md#fillet), should round
-a corner with a spline or an elliptical arc in it too.
+The sketch fillet, which rounds the corner of two lines or arcs
+(docs/sketching/README.md#fillet), should round a corner with a spline or an
+elliptical arc in it too, and Split (docs/sketching/README.md#split), which
+cuts a line, an arc or a circle into pieces that stay one curve, should cut
+a spline, an ellipse and an elliptical arc.
 
 ## The problem
 
@@ -12,13 +13,9 @@ a corner with a spline or an elliptical arc in it too.
   traced outline with spline sides cannot be rounded. `sketch::CornerAt`
   already lists their ends, so the sector a click means is right; the
   construction is what is missing.
-- **No Split.** `SplitEntity` takes lines only, adds no collinear, and has no
-  tool or RPC. It moves constraints by ref alone: a midpoint or an equal
-  length on the line then holds only the first piece, and a tangent naming
-  `{line, 1}` moves to piece 2 whether it meant the end or the line.
-- **Trimming an arc's middle loses its far end.** `TrimCurveAt` rebuilds the
-  survivors with no transfer: refs to the arc's end stay on the first
-  survivor, whose end has moved, and the second joins nothing.
+- **Split stops at circles.** `SplitEntity` refuses a spline, an ellipse and
+  an elliptical arc by name ("a spline is not split yet"), so a traced
+  outline cannot be cut where another curve crosses it.
 
 ## The shape of the fix
 
@@ -58,64 +55,25 @@ spline 9"). The pieces carry more poles than they replace, and the pill's
 DOF says by how much. No format change is needed: the results are entities
 and constraint kinds the file already holds.
 
-### 3. Split
+### 3. Split of the other curves
 
-`SplitEntity(id, at)` cuts a curve into pieces that stay one curve:
+`SplitEntity` takes the rest, with the transfer it has for lines and arcs:
 
-- a line: piece 2 runs at→b, joined Coincident plus Parallel to piece 1,
-  or the H/V the line carried, so the pieces are collinear;
-- an arc: two arcs joined Coincident and Concentric (the radius follows); a
-  circle takes two cuts, joined the same way at both;
 - an elliptical arc, or an ellipse in two cuts: Concentric, Equal and
   Coincident;
 - a spline: cut as in §2, with G2 at the cut; a closed spline takes one cut,
-  since its seam is the other.
+  since its seam is the other. A point on a spline goes to the piece it
+  lies on.
 
-A constraint on an end goes with the piece that holds the end, and so does a
-Tangent or Curvature joined there. One on the whole curve (its direction, its
-circle, symmetry about it, a point on a line or arc) stays on piece 1, and
-the joints hold piece 2 to it. A point on a spline goes to the piece it lies
-on. A whole-edge distance spans both pieces, as today, and a midpoint of the
-line becomes a symmetric of its outer ends. An equal length on the line or
-an `arc_length` on the arc has no two-piece form and is refused by name. At a
-crossing, the joint is put on the crossing curve, so the DOF does not change.
-At another curve's end, the joint becomes coincident with that end, replacing
-the point-on-curve that held it. Anywhere else the joint slides (one DOF).
-Trim keeps its own transfer, so its survivors are not left parallel.
-`TrimCurveAt` cuts an arc through this split, so the far end keeps its
-constraints.
+`sketch::Crossings` already finds where these curves are crossed, and the
+Split tool already snaps to their crossings; `SplitPieces` and
+`NearestOnCurve` gain them, and `SplitRefusal` stops refusing them.
 
-### 4. The Split tool
-
-`SketchTool::Split`, command `sketch.split` "Split a curve" (Modify),
-`###tb_sk_split` after Trim, default key `K`. Its icon is `ICON_DS_SPLIT`,
-part Split's glyph, so the two go into one same-idea group in
-`test_conventions.cpp`. Hover snaps to a crossing with any curve (sampled,
-then refined) within the coincident snap's 10 px, then to another curve's
-end on it, else to the nearest point. It previews a cut mark and the two
-pieces in two shades. Each click cuts, with one solve and one undo step, and
-a tap on empty space or Enter finishes, as with Trim. A closed curve takes two
-clicks (Step 1/2, 2/2). Refusals name why, prefixed "Not split:" as the
-Fillet tool's are "Not filleted:": a generated entity (`GeneratedBy`), a
-point or a label, a cut at an end, or the constraints above.
-
-### 5. RPCs
+### 4. RPCs
 
 - `fillet` adds `replaced` (each cut spline and its pieces) and `dropped` to
   its reply once it takes splines.
-- `split {sketch_id, entity_id, at, crossing?}`. `at` is one [u, v] in
-  sketch mm, or two for a closed curve. With `crossing`, the cut is that
-  curve's crossing nearest `at` and the joint goes on it. Otherwise `at`
-  moves to the nearest point of the curve, and is refused past a hundredth of
-  the curve's length. It returns `entity_ids` in order along the curve, the
-  first keeping the id, plus `dropped`, `dof`, `regen` and `digest`.
-
-## Stages
-
-Each lands with the suites green.
-
-- **B.** Split of lines, arcs and circles: §3–4, `split`, the Trim fix.
-- **C.** Splines and elliptical arcs: §2, then §1 in Fillet and in Split.
+- `split` adds `dropped` to its reply once it takes splines.
 
 ## Not in this plan
 
@@ -124,21 +82,16 @@ sketch chamfers, and Trim at crossings with ellipses and splines.
 
 ## Files
 
-- `src/core/features/SketchFeature.{h,cpp}` (`FilletCorner`, `SplitEntity`,
-  `TrimCurveAt`); `src/core/sketch/SketchFillet.{h,cpp}` (the Newton
-  construction) and new `SketchSpline.{h,cpp}`;
+- `src/core/features/SketchFeature.{h,cpp}` (`FilletCorner`, `SplitEntity`);
+  `src/core/sketch/SketchFillet.{h,cpp}` (the Newton construction),
+  `SketchSplit.{h,cpp}` and new `SketchSpline.{h,cpp}`;
   `src/core/io/SketchImport.cpp`; `CMakeLists.txt`
-- `src/ui/SketchInteraction.cpp`, `SketchToolOverlay.cpp`,
-  `SketchToolbar.cpp`, `SketchOverlay.cpp`, `AppState.h`, `Toolbar.cpp`,
-  `Commands.cpp`, `Icons.cpp`; `src/core/io/Keymap.cpp`
+- `src/ui/SketchInteraction.cpp`
 - `src/remote/RemoteModeling.cpp`, `api/rpc-surface.json`
-- `tests/test_sketch_feature.cpp`, `test_sketch_solver.cpp`,
-  `test_sketch_curves.cpp`, `test_keymap.cpp`, `test_conventions.cpp`;
+- `tests/test_sketch_feature.cpp`, `test_sketch_curves.cpp`;
   `src/app/guitests/GuiTestsModeling.cpp` (`fillet/*`), `GuiTestsSketch.cpp`
-  (`split/*`), `GuiTestsShell.cpp`; `tests/remote_smoke.py`,
-  `refused_calls_smoke.py`
-- docs/sketching/README.md, docs/ui/tool-sessions.md,
-  docs/ui/keybindings.md
+  (`split/*`); `tests/remote_smoke.py`, `refused_calls_smoke.py`
+- docs/sketching/README.md
 
 ## Verified by
 
@@ -154,13 +107,9 @@ sketch chamfers, and Trim at crossings with ellipses and splines.
 - **Exact spline cuts.** The pieces of a cut spline lie on the original at
   every sample (1e-12 relative); constraints on untouched poles survive and
   each replaced one is named in `dropped`.
-- **Split.** A line, an arc, a circle, an ellipse and a spline, each split at
-  a crossing and at a free point: the geometry unchanged after the solve, DOF
-  unchanged at a crossing and one higher elsewhere, and making either piece
-  construction leaves the other where it was. A midpoint carried, an equal
-  length refused. A trimmed arc's far end keeps its coincident.
-- **The bar.** `toolbar/every_tool_is_reachable` covers the sketch bar too
-  (the row fits, every `###tb_sk_*` exists); `no_duplicate_glyph` holds; the
-  keymap has no conflict.
-- **Through the RPCs.** `split` in `remote_smoke.py`, each refusal changing
-  nothing in `refused_calls_smoke`, and `rpc_units_gate`.
+- **Split.** An ellipse, an elliptical arc and a spline, each split at a
+  crossing and at a free point: the geometry unchanged after the solve, DOF
+  unchanged at a crossing and higher elsewhere, and making either piece
+  construction leaves the other where it was.
+- **Through the RPCs.** `fillet` and `split` with a spline in
+  `remote_smoke.py`, each refusal changing nothing in `refused_calls_smoke`.
