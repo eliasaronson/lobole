@@ -369,6 +369,7 @@ set(core_sources
     src/cad/BoundedRead.cpp
     src/cad/CurveSample.cpp
     src/cad/CADKernel.cpp
+    src/cad/Integrate.cpp
     src/cad/OccPatches.cpp
     src/cad/OccSignals.cpp
     src/cad/KernelThreads.cpp
