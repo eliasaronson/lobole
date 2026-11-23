@@ -22,6 +22,7 @@
 #include "core/io/GitVault.h"
 #include "core/io/ProjectMerge.h"
 #include "core/io/ProjectPaths.h"
+#include "core/io/ReadContext.h"
 #include "core/io/Serialization.h"
 #include "core/io/SerializeSimulation.h"
 #include "core/io/Settings.h"
@@ -107,7 +108,10 @@ bool IsDerived(const std::string& rel) {
     if (part == "geometry")
       return true;
   const std::string name = p.filename().string();
-  return name.ends_with(".result.json") || name.ends_with(".projection.json");
+  // A simulation's stored mesh (v223) is derived as its results are: a
+  // damaged one is dropped and meshed again.
+  return name.ends_with(".result.json") || name.ends_with(".projection.json") ||
+         name.ends_with(".mesh.json");
 }
 
 std::string NormFile(const std::string& rel) {
@@ -163,7 +167,12 @@ std::set<uint64_t> ProjectedIds(const json& j) {
 
 void AddLeaves(const json& j, const std::string& file, const std::string& rel,
                const std::string& ptr, const std::string& shape,
-               const std::string& concrete, Leaves& out) {
+               const std::string& concrete, Leaves& out, size_t depth = 0) {
+  // Past what any reader takes (readctx::kMaxJsonDepth): a value wrapped
+  // 10 000 arrays deep took this walk past the end of its stack, and the
+  // whole family's run with it.
+  if (depth > 2 * readctx::kMaxJsonDepth)
+    throw std::runtime_error("nested past what any reader takes");
   if (j.is_object()) {
     const std::set<uint64_t> projected = ProjectedIds(j);
     for (auto it = j.begin(); it != j.end(); ++it) {
@@ -183,7 +192,8 @@ void AddLeaves(const json& j, const std::string& file, const std::string& rel,
               ptr + k + "/" +
                   (item ? "id=" + std::to_string(e.at("id").get<uint64_t>())
                         : std::to_string(i)),
-              shape + k + "/*", concrete + k + "/" + std::to_string(i), out);
+              shape + k + "/*", concrete + k + "/" + std::to_string(i), out,
+              depth + 1);
         }
         continue;
       }
@@ -196,11 +206,12 @@ void AddLeaves(const json& j, const std::string& file, const std::string& rel,
             ext.erase("gen_ids");
           AddLeaves(ext, file, rel, ptr + k + "/" + std::to_string(i),
                     shape + k + "/*", concrete + k + "/" + std::to_string(i),
-                    out);
+                    out, depth + 1);
         }
         continue;
       }
-      AddLeaves(it.value(), file, rel, ptr + k, shape + k, concrete + k, out);
+      AddLeaves(it.value(), file, rel, ptr + k, shape + k, concrete + k, out,
+                depth + 1);
     }
   } else if (j.is_array()) {
     // An item with an id is named by it, not by where it stands: a list
@@ -214,7 +225,8 @@ void AddLeaves(const json& j, const std::string& file, const std::string& rel,
                 ptr + "/" +
                     (item ? "id=" + std::to_string(e.at("id").get<uint64_t>())
                           : std::to_string(i)),
-                shape + "/*", concrete + "/" + std::to_string(i), out);
+                shape + "/*", concrete + "/" + std::to_string(i), out,
+                depth + 1);
     }
   } else if (!j.is_null()) {
     // The file's id is part of the shape's `*` too: features/7 -> features/*.
