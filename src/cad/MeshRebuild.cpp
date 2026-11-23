@@ -46,6 +46,7 @@
 #include <TopoDS_Wire.hxx>
 #include <gp_Ax3.hxx>
 #include <gp_Circ.hxx>
+#include <gp_Vec2d.hxx>
 
 #include <algorithm>
 #include <cmath>
@@ -73,43 +74,101 @@ std::string Num(double v) {
 
 // A unit vector square to `a`.
 // A full-turn cylinder's or cone's seam, its two p-curves made the same
-// line a period apart. The seam is the straight edge between two vertices of
-// the mesh, which lie on the fitted surface to its noise, not on one ruling:
-// ShapeFix projects one use of it onto u = 2 pi exactly and the other as a
-// line leaning off u = 0 (by 1.6e-8 on a countersink's cone), and BRepMesh
-// fails on a face whose seam p-curves are not a translation of each other,
-// at any deflection, so the face was a hole in every picture of the part
-// (docs/interchange/README.md#rebuilding-the-solid). Each use is put on the
-// ruling at the multiple of the period it is nearest, over the same v; the
-// gap that leaves is the vertex's noise, far inside the edge's tolerance.
-void StraightenSeams(TopoDS_Face& face) {
+// line a period apart, and every full circle on the face begun on it. The
+// seam is the straight edge between two vertices of the mesh, which lie on
+// the fitted surface to its noise, not on one ruling: ShapeFix projects one
+// use of it onto u = 2 pi exactly and the other as a line leaning off u = 0
+// (by 1.6e-8 on a countersink's cone on OpenCASCADE 7.9, 1.8e-6 on 7.6), and
+// BRepMesh fails on a face whose seam p-curves are not a translation of each
+// other, at any deflection, so the face was a hole in every picture of the
+// part (docs/interchange/README.md#rebuilding-the-solid). Each use is put on
+// the ruling at the multiple of the period it is nearest, over the same v.
+// On 7.6 the circle at the seam's leaning end starts where the lean ends,
+// 1.8e-6 past 2 pi, and the wire no longer closes in the parameter plane
+// once the seam is straight: the face still did not mesh. So a closed
+// edge's p-curve that runs a whole period is moved along u to start on a
+// multiple of it too.
+//
+// What decides each move is the gap it leaves, measured on the surface
+// against the edge's own 3D curve, not how far it is in u (near an apex any
+// u is the same point): a gap inside `precision`, the fits' own noise, is
+// taken, and the edge's tolerance raised to it where it is more (on 7.6,
+// 6e-6 mm against the 1.4e-6 ShapeFix left).
+void StraightenSeams(TopoDS_Face& face, double precision) {
   const Handle(Geom_Surface) surface = BRep_Tool::Surface(face);
   if (surface.IsNull() || !surface->IsUPeriodic())
     return;
   const double period = surface->UPeriod();
   BRep_Builder bb;
+  // Whether `pc`, over [first, last], lies within `precision` of the edge's
+  // 3D curve on the surface; `tol` raised to the widest gap.
+  const auto fits = [&](const Handle(Geom_Curve) & curve,
+                        const Handle(Geom2d_Curve) & pc, double first,
+                        double last, double& tol) {
+    for (int i = 0; i <= 8; i++) {
+      const double t = first + (last - first) * i / 8.0;
+      const gp_Pnt2d on = pc->Value(t);
+      const double gap =
+          surface->Value(on.X(), on.Y()).Distance(curve->Value(t));
+      if (!(gap <= precision))
+        return false;
+      tol = std::max(tol, gap);
+    }
+    return true;
+  };
+  const auto raise = [&](const TopoDS_Edge& e, double tol) {
+    for (TopExp_Explorer v(e, TopAbs_VERTEX); v.More(); v.Next())
+      if (BRep_Tool::Tolerance(TopoDS::Vertex(v.Current())) < tol)
+        bb.UpdateVertex(TopoDS::Vertex(v.Current()), tol);
+  };
   for (TopExp_Explorer ex(face, TopAbs_EDGE); ex.More(); ex.Next()) {
     const TopoDS_Edge e = TopoDS::Edge(ex.Current().Oriented(TopAbs_FORWARD));
-    if (!BRep_Tool::IsClosed(e, face) || BRep_Tool::Degenerated(e))
+    if (BRep_Tool::Degenerated(e))
       continue;
-    Handle(Geom2d_Curve) uses[2];
+    double c0 = 0.0, c1 = 0.0;
+    const Handle(Geom_Curve) curve = BRep_Tool::Curve(e, c0, c1);
+    if (curve.IsNull())
+      continue;
+    double tol = BRep_Tool::Tolerance(e);
     double first = 0.0, last = 0.0;
+    if (!BRep_Tool::IsClosed(e, face)) {
+      // A full circle: its ends a period apart in u.
+      if (!TopExp::FirstVertex(e).IsSame(TopExp::LastVertex(e)))
+        continue;
+      const Handle(Geom2d_Curve) pc =
+          BRep_Tool::CurveOnSurface(e, face, first, last);
+      if (pc.IsNull() || last <= first)
+        continue;
+      const gp_Pnt2d a = pc->Value(first), b = pc->Value(last);
+      if (std::abs(std::abs(b.X() - a.X()) - period) > 1e-3 * period)
+        continue;
+      const double du = period * std::round(a.X() / period) - a.X();
+      if (du == 0.0)
+        continue;
+      const Handle(Geom2d_Curve) moved =
+          Handle(Geom2d_Curve)::DownCast(pc->Translated(gp_Vec2d(du, 0.0)));
+      if (moved.IsNull() || !fits(curve, moved, first, last, tol))
+        continue;
+      bb.UpdateEdge(e, moved, face, tol);
+      raise(e, tol);
+      continue;
+    }
+    Handle(Geom2d_Curve) uses[2];
     bool ok = true;
     for (int k = 0; k < 2 && ok; k++) {
       const TopoDS_Edge use =
           k == 0 ? e : TopoDS::Edge(e.Oriented(TopAbs_REVERSED));
       const Handle(Geom2d_Curve) pc =
           BRep_Tool::CurveOnSurface(use, face, first, last);
-      if (pc.IsNull()) {
+      if (pc.IsNull() || last <= first) {
         ok = false;
         break;
       }
       const gp_Pnt2d a = pc->Value(first), b = pc->Value(last);
-      // Only a ruling: both ends at (nearly) one u, and v along the edge's
-      // parameter one for one, as a straight edge's arc length is.
+      // Only a ruling: v along the edge's parameter one for one, as a
+      // straight edge's arc length is.
       const double slope = (b.Y() - a.Y()) / (last - first);
-      if (std::abs(b.X() - a.X()) > 1e-6 ||
-          std::abs(std::abs(slope) - 1.0) > 1e-6 || last <= first) {
+      if (std::abs(std::abs(slope) - 1.0) > 1e-6) {
         ok = false;
         break;
       }
@@ -117,11 +176,13 @@ void StraightenSeams(TopoDS_Face& face) {
       const double dir = slope > 0.0 ? 1.0 : -1.0;
       uses[k] =
           new Geom2d_Line(gp_Pnt2d(u, a.Y() - dir * first), gp_Dir2d(0.0, dir));
+      ok = fits(curve, uses[k], first, last, tol);
     }
     if (!ok || std::abs(uses[0]->Value(first).X() - uses[1]->Value(first).X()) <
                    0.5 * period)
       continue;
-    bb.UpdateEdge(e, uses[0], uses[1], face, BRep_Tool::Tolerance(e));
+    bb.UpdateEdge(e, uses[0], uses[1], face, tol);
+    raise(e, tol);
   }
 }
 
@@ -901,7 +962,7 @@ TopoDS_Face Builder::BuildFace(uint32_t r, std::string& why) const {
     fix.Perform();
     face = fix.Face();
     if (seam != m_seams.end())
-      StraightenSeams(face);
+      StraightenSeams(face, m_tol);
   } catch (const Standard_Failure& e) {
     why = std::string("it would not fix: ") + e.GetMessageString();
     return {};

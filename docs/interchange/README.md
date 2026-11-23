@@ -833,7 +833,13 @@ code involved.
   BRepMesh fails on at any deflection (the bracket fixture's countersink
   cone, demoted to flats for it). Each use of the seam is laid on its
   ruling after the face is fixed (`StraightenSeams` in
-  `cad/MeshRebuild.cpp`), and the cone comes back as a cone that meshes.
+  `cad/MeshRebuild.cpp`), and every full circle on the face is moved along
+  u to begin on it, since OpenCASCADE 7.6's fix starts the rim where the
+  seam's lean ended and the wire no longer closes once the seam is
+  straight. Each move is taken when the gap it leaves on the surface,
+  against the edge's 3D curve, is inside the fits' tolerance, and the
+  edge's tolerance is raised to it; the cone comes back as a cone that
+  meshes on both kernels.
   - Every face is checked on its own first, in one parallel `BRepCheck`
     of them all, before any shell is made. A curved face that will not
     build, that is faulted, or that leaves the shell open is demoted to its
