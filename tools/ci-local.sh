@@ -328,7 +328,7 @@ lane_asan() {
   # uses, so an incremental developer build and this share their objects.
   source "$root/tools/sanitizer-env.sh"
   run_build asan -S . -B build-asan -G Ninja -DENABLE_SANITIZERS=ON \
-    -- build-asan --target designer designer_tests
+    -- build-asan --target designer designer_tests femgpu_tests
   # -j from free memory, not cores (SANITIZER_TEST_MB says what a test
   # costs and how that was measured): at -j$(nproc) the suite peaked at
   # 26.6 GB. Read when the suite starts, after the build has given its
