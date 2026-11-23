@@ -1763,15 +1763,23 @@ def profile(out, metas, results, seconds):
 def same_family(xa, xb):
     """Each (outcome, class, digest) of one family's members matched by one
     of the other's, as a multiset: the second instance runs the actions in
-    reverse, so members with one outcome come back in another order."""
-    left = list(xb)
-    for o, c, d in xa:
-        hit = next((i for i, (o2, c2, d2) in enumerate(left)
-                    if (o, c) == (o2, c2) and same_digest(d, d2)), None)
-        if hit is None:
-            return False
-        left.pop(hit)
-    return not left
+    reverse, so members with one outcome come back in another order. Both
+    sides sorted by outcome, class and digest, then paired in that order:
+    taking the first member within tolerance instead paired a chamfer with a
+    neighbour 1e-5 mm3 away (members of a twisted extrude's family lie that
+    close), left its twin nothing to match, and failed two identical runs."""
+    if len(xa) != len(xb):
+        return False
+
+    def order(t):
+        o, c, d = t
+        return (o, c, json.dumps([[x[0]] for x in d]) if d else "",
+                [x[1] for x in d] if d else [],
+                [v for x in d for v in x[2] + x[3]] if d else [])
+
+    return all((o, c) == (o2, c2) and same_digest(d, d2)
+               for (o, c, d), (o2, c2, d2) in zip(sorted(xa, key=order),
+                                                  sorted(xb, key=order)))
 
 
 def cmd_determinism(args, corpus):
@@ -2088,6 +2096,19 @@ def self_test():
     if parse_line(toks["d"][fam]) != {"edge.fillet": {"pass": 1, "fail": 1,
                                                       "refuse": 0}}:
         problems.append(f"family line {toks['d'][fam]!r} does not parse back")
+    # Two runs of one family whose members lie within the digest's tolerance
+    # of each other (a twisted extrude's chamfers, 1e-5 mm3 apart), in two
+    # orders: the same multiset, so the same family.
+    def member(v):
+        return ("pass", "", [["2", v, [0.0, 0.0, 0.0], [1.0, 1.0, 1.0]]])
+    close = [member(11961.98662973305), member(11961.986640886935),
+             member(11961.986642477159), member(11961.98684605931)]
+    if not same_family(close, close[::-1]) or \
+            not same_family(close[2:] + close[:2], close):
+        problems.append("one family's members in two orders were judged "
+                        "different")
+    if same_family(close, close[:3] + [member(11961.99)]):
+        problems.append("a family member 3e-3 mm3 off was judged the same")
     # The committed baseline is in the shape this tool writes it, one line
     # per entity, so a diff names the entity that moved. A formatter that
     # reflowed it once (clang-format's JSON mode, from a bare
@@ -2107,7 +2128,8 @@ def self_test():
           "the revision, a broken feature, a caught OSD_SIGSEGV, a silent "
           "message, a hole that added and an undo that did not undo were each "
           "judged right; swapped ordinal pieces are no regression, a lost "
-          "pass and an unknown finding are")
+          "pass and an unknown finding are; a family's close members in two "
+          "orders are one family")
     return 0
 
 
