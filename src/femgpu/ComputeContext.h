@@ -128,6 +128,11 @@ public:
   // Tests: the submit `after` submits from now is answered as
   // VK_ERROR_DEVICE_LOST (0 = the next one).
   void InjectLossForTest(int after = 0) { m_lossCountdown = after + 1; }
+  // The buffers, pipelines and bound sets made and not yet destroyed. A
+  // solver gives back all it made: one it forgot is a Vulkan object alive
+  // at vkDestroyDevice, whose host memory the driver never frees (the
+  // energy kernel's bound set, 62 KB a solve).
+  int LiveObjects() const { return m_live; }
 
 private:
   // Every batched command is preceded by a full compute/transfer memory
@@ -154,6 +159,7 @@ private:
   bool m_lost = false;
   bool m_abandoned = false; // a wait was cancelled: nothing more is submitted
   int m_lossCountdown = 0;  // InjectLossForTest; 0 = none armed
+  int m_live = 0;           // LiveObjects
   std::function<bool()> m_cancel;
 };
 

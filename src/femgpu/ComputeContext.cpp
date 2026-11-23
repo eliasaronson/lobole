@@ -207,6 +207,7 @@ bool ComputeContext::CreateBuffer(VkDeviceSize size, Buffer& out,
   bci.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
   if (vkCreateBuffer(m_device, &bci, nullptr, &out.buffer) != VK_SUCCESS)
     return SetError(error, "vkCreateBuffer failed");
+  ++m_live;
 
   VkMemoryRequirements mr;
   vkGetBufferMemoryRequirements(m_device, out.buffer, &mr);
@@ -255,8 +256,10 @@ void ComputeContext::Destroy(Buffer& b) {
       vkUnmapMemory(m_device, b.memory);
     vkFreeMemory(m_device, b.memory, nullptr);
   }
-  if (b.buffer)
+  if (b.buffer) {
     vkDestroyBuffer(m_device, b.buffer, nullptr);
+    --m_live;
+  }
   b = Buffer{};
 }
 
@@ -269,6 +272,7 @@ bool ComputeContext::CreatePipeline(const unsigned char* spirv,
   smci.pCode = reinterpret_cast<const uint32_t*>(spirv); // alignas(4) embed
   if (vkCreateShaderModule(m_device, &smci, nullptr, &out.module) != VK_SUCCESS)
     return SetError(error, "vkCreateShaderModule failed");
+  ++m_live;
 
   std::vector<VkDescriptorSetLayoutBinding> bindings(bufferCount);
   for (uint32_t i = 0; i < bufferCount; ++i)
@@ -321,8 +325,10 @@ void ComputeContext::Destroy(Pipeline& p) {
     vkDestroyPipelineLayout(m_device, p.layout, nullptr);
   if (p.setLayout)
     vkDestroyDescriptorSetLayout(m_device, p.setLayout, nullptr);
-  if (p.module)
+  if (p.module) {
     vkDestroyShaderModule(m_device, p.module, nullptr);
+    --m_live;
+  }
   p = Pipeline{};
 }
 
@@ -440,6 +446,7 @@ bool ComputeContext::CreateBoundSet(const Pipeline& p,
   dpci.pPoolSizes = &dps;
   if (vkCreateDescriptorPool(m_device, &dpci, nullptr, &out.pool) != VK_SUCCESS)
     return SetError(error, "vkCreateDescriptorPool failed");
+  ++m_live;
   VkDescriptorSetAllocateInfo dsai{
       VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
   dsai.descriptorPool = out.pool;
@@ -466,8 +473,10 @@ bool ComputeContext::CreateBoundSet(const Pipeline& p,
 }
 
 void ComputeContext::Destroy(BoundSet& s) {
-  if (s.pool)
+  if (s.pool) {
     vkDestroyDescriptorPool(m_device, s.pool, nullptr);
+    --m_live;
+  }
   s = BoundSet{};
 }
 

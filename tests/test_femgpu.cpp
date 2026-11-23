@@ -428,6 +428,39 @@ TEST_CASE("femgpu: element energies match the CPU oracle (GPU4 GATE)",
 #endif
 }
 
+// The energy kernel's bound set was made and never destroyed: alive at
+// vkDestroyDevice, its pool's host memory (62 KB) stayed with the driver
+// after every GPU solve, which LeakSanitizer reported from a design sweep.
+TEST_CASE("femgpu: a CG solver gives back every object it made",
+          "[femgpu][cg]") {
+  REQUIRE_GPU();
+  fem::FemMesh mesh = GenerateBoxMesh(4, 2, 2, 40, 20, 20);
+  const std::vector<int> fixed = NodesAtPlane(mesh, 0, 0.0, 1e-9);
+  const gpu::SpmvSystem sys = PackSystem(mesh, fixed, 210000.0, 0.3);
+  gpu::CgOptions opts;
+  std::string err;
+  const std::string precond = GENERATE("jacobi", "chebyshev", "multigrid");
+  INFO("preconditioner: " << precond);
+  if (precond == "chebyshev") {
+    opts.precond = gpu::CgOptions::Precond::Chebyshev;
+  } else if (precond == "multigrid") {
+    const auto dofs =
+        fem::internal::BuildDofMap(static_cast<int>(mesh.nodes.size()), fixed);
+    opts.mg = gpu::MakeMgGpuData(FlatNodes(mesh), sys, dofs.map, &err);
+    INFO(err);
+    REQUIRE(opts.mg);
+    opts.precond = gpu::CgOptions::Precond::Multigrid;
+  }
+  const int before = ctx->LiveObjects();
+  {
+    auto cg = gpu::TopoCgSolver::Create(*ctx, sys, &err, opts);
+    INFO(err);
+    REQUIRE(cg);
+    CHECK(ctx->LiveObjects() > before);
+  }
+  CHECK(ctx->LiveObjects() == before);
+}
+
 TEST_CASE("femgpu: CG solves the reduced system to tolerance", "[femgpu][cg]") {
   REQUIRE_GPU();
   INFO("device: " << ctx->DeviceName());

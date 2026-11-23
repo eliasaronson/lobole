@@ -256,7 +256,7 @@ TopoCgSolver::~TopoCgSolver() {
         &m_setChebIter,   &m_setDotRZ,      &m_setDotRR,      &m_setDivdAp,
         &m_setScaleRD,    &m_setDotDR,      &m_setDotDD,      &m_setDotRRcheb,
         &m_setSpmvZ,      &m_setResidualMg, &m_setMgRestrict, &m_setMgProlong,
-        &m_setChebInitMg, &m_setChebIterMg, &m_setVecAddZt})
+        &m_setChebInitMg, &m_setChebIterMg, &m_setVecAddZt,   &m_setEnergy})
     m_ctx.Destroy(*set);
   for (Buffer* b :
        {&m_dof,  &m_ke,   &m_scale, &m_diagK,   &m_f,       &m_x,       &m_r,
