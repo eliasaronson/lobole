@@ -89,6 +89,10 @@ const sketch::Candidate* Find(const std::vector<sketch::Candidate>& cs,
       return &c;
   return nullptr;
 }
+// Not on a temporary: the pointer would outlive the list it points into
+// (the inch case read one after its list was gone).
+const sketch::Candidate* Find(std::vector<sketch::Candidate>&&,
+                              sketch::CandidateKind) = delete;
 
 void Print(const char* what, const std::vector<sketch::Candidate>& cs) {
   std::printf("candidates (%s):\n", what);
@@ -210,12 +214,12 @@ TEST_CASE("An inch document's sizes step in inches", "[sketch][candidates]") {
   const SketchFeature sk = Traced({Sample(Boss(12.7), Noisy(0.05, 0.3), 90)});
   sketch::CandidateOptions o;
   o.unit = units::Length::Inch;
-  const sketch::Candidate* d =
-      Find(sketch::FindCandidates(sk, o), sketch::CandidateKind::Diameter);
+  const std::vector<sketch::Candidate> inInches = sketch::FindCandidates(sk, o);
+  const sketch::Candidate* d = Find(inInches, sketch::CandidateKind::Diameter);
   REQUIRE(d != nullptr);
   CHECK(std::abs(d->nominal - 12.7) < 1e-9);
-  CHECK(Find(sketch::FindCandidates(sk, {}), sketch::CandidateKind::Diameter) ==
-        nullptr);
+  const std::vector<sketch::Candidate> inMm = sketch::FindCandidates(sk, {});
+  CHECK(Find(inMm, sketch::CandidateKind::Diameter) == nullptr);
 }
 
 TEST_CASE("Accepting a slot's relations keeps it on its points",
