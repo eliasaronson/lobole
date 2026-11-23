@@ -156,6 +156,9 @@ double Volume(const Document& doc) {
 TEST_CASE("Suppressed fastener holes mesh the plate to a fraction of the "
           "elements and leave the part as it is",
           "[fem][simdoc][simgeom]") {
+#ifndef HAVE_NETGEN
+  SKIP("built without Netgen: nothing here meshes");
+#endif
   Plate plate;
   const double volumeBefore = Volume(plate.doc);
   const uint64_t versionBefore = plate.doc.Version();
@@ -166,12 +169,16 @@ TEST_CASE("Suppressed fastener holes mesh the plate to a fraction of the "
   const fem::SimContext ctx = Context(plate.doc);
   std::vector<fem::StudyBodyMesh> withHoles, without;
   std::string err;
-  REQUIRE(fem::MeshSimStudy(sim, ctx, id, &withHoles, &err));
+  const bool meshedWith = fem::MeshSimStudy(sim, ctx, id, &withHoles, &err);
+  INFO(err);
+  REQUIRE(meshedWith);
 
   fem::SimGeometry g;
   g.suppressed.push_back({0, plate.holesId});
   sim.SetGeometry(g);
-  REQUIRE(fem::MeshSimStudy(sim, ctx, id, &without, &err));
+  const bool meshedWithout = fem::MeshSimStudy(sim, ctx, id, &without, &err);
+  INFO(err);
+  REQUIRE(meshedWithout);
   const size_t a = Tets(withHoles), b = Tets(without);
   INFO("with holes " << a << " tets, suppressed " << b);
   // Measured: 538 against 6764, a twelfth. Stated with room: under a fifth.
@@ -235,6 +242,9 @@ TEST_CASE("A load on a suppressed feature's face is refused naming it",
 
 TEST_CASE("Suppression, a feature it breaks and the input hash",
           "[fem][simdoc][simgeom]") {
+#ifndef HAVE_NETGEN
+  SKIP("built without Netgen: nothing here meshes");
+#endif
   Plate plate(2);
   std::string err;
   CHECK(fem::AnalysisPart(plate.doc, {9999}, &err) == nullptr);
@@ -249,7 +259,9 @@ TEST_CASE("Suppression, a feature it breaks and the input hash",
   fem::SimContext ctx = Context(plate.doc);
   ctx.sim = &sim;
   fem::StudyRuntime rt;
-  REQUIRE(fem::RunSimStudy(sim, ctx, id, rt, &err));
+  const bool ran = fem::RunSimStudy(sim, ctx, id, rt, &err);
+  INFO(err);
+  REQUIRE(ran);
   const uint64_t before = fem::SimStudyInputKey(ctx, id);
   REQUIRE(before != 0);
   CHECK_FALSE(sim.StudyResultsStale(id, [](uint64_t) { return 7; }));
@@ -322,13 +334,19 @@ double Reaction(const fem::StudyRuntime& rt, uint64_t support) {
 
 TEST_CASE("A half model on a symmetry plane answers as the whole",
           "[fem][simdoc][simgeom]") {
+#ifndef HAVE_NETGEN
+  SKIP("built without Netgen: nothing here meshes");
+#endif
   Bar bar;
   std::string err;
   // The whole bar.
   fem::SimDocument whole = PartSim(2.5);
   const uint64_t wid = AddStudy(whole, bar.Bend());
   fem::StudyRuntime full;
-  REQUIRE(fem::RunSimStudy(whole, Context(bar.doc), wid, full, &err));
+  const bool ranWhole =
+      fem::RunSimStudy(whole, Context(bar.doc), wid, full, &err);
+  INFO(err);
+  REQUIRE(ranWhole);
   // Half of it, cut on the datum, a roller on the cut.
   fem::SimDocument half = PartSim(2.5);
   const uint64_t hid = AddStudy(half, bar.Bend());
@@ -336,7 +354,9 @@ TEST_CASE("A half model on a symmetry plane answers as the whole",
   g.symmetry.datum = bar.datumId;
   half.SetGeometry(g);
   fem::StudyRuntime cut;
-  REQUIRE(fem::RunSimStudy(half, Context(bar.doc), hid, cut, &err));
+  const bool ranHalf = fem::RunSimStudy(half, Context(bar.doc), hid, cut, &err);
+  INFO(err);
+  REQUIRE(ranHalf);
   INFO("whole: " << full.maxDisplacement << " mm, " << full.maxVonMises
                  << " MPa; half: " << cut.maxDisplacement << " mm, "
                  << cut.maxVonMises << " MPa");

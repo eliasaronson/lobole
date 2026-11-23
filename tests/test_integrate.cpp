@@ -1191,6 +1191,9 @@ TEST_CASE("a tube trimmed by 40 intersection curves", "[integrate][slow]") {
 
 TEST_CASE("a meshed thread body is not refused for its volume",
           "[integrate][fem][slow]") {
+#ifndef HAVE_NETGEN
+  SKIP("built without Netgen: nothing here meshes");
+#endif
   // The FEM mesh check's slack takes the integrator's uncertainty for the
   // B-Rep's own volume: on a thread, 57 of 75 faces suspect, it converges
   // and the mesh is held to its own sag.
