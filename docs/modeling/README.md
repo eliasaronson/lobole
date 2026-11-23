@@ -1856,6 +1856,14 @@ concave edge that added 637 mm3 where its corner's triangle is 19; of
 23 216 on the matrix's, three, one edge of fuzz/24 rounded at 0.19, 0.39
 and 0.69 mm, which removed 101 and 70 mm3 and then added 135, where the
 three rounds can remove 1.4, 5.7 and 19.
+In the action matrix it refuses three blends that had passed, each a
+wrong body built with the check off: fuzz/33's round of a 114 mm convex
+arc removes 24.3 r^2 mm3 up to R1.86, as a round of it does, and adds 869
+and 694 mm3 at R2.2 and R2.5; fuzz/38's 0.029 mm chamfer of a chain round
+a 62.8 mm rim removes 0.654 mm3 where the chamfer's triangle is 0.027,
+and what it removes grows as 22 d, not as d^2 (0.902, 0.654, 0.438, 0.320
+mm3 at 0.04, 0.029, 0.02, 0.0147 mm), so it is not a section swept along
+the edges; fuzz/24 is the sweep's.
 `tests/test_blend_fit.cpp` plants wrong volumes against a box edge's reach
 and holds the tee through the feature: R0.143 is refused for its volume,
 and nothing it builds at R2 or under is kept.
