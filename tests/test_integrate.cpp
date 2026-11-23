@@ -49,6 +49,7 @@
 #include <Geom_BSplineCurve.hxx>
 #include <Geom_BezierCurve.hxx>
 #include <Geom_TrimmedCurve.hxx>
+#include <Standard_Version.hxx>
 #include <TColStd_Array1OfInteger.hxx>
 #include <TColStd_Array1OfReal.hxx>
 #include <TColgp_Array1OfPnt.hxx>
@@ -1184,9 +1185,25 @@ TEST_CASE("a tube trimmed by 40 intersection curves", "[integrate][slow]") {
   CheckMass(mp, truth, 1e-9);
   CHECK(mp.unconvergedFaces.empty());
   // Measured at 2.0 times today's three passes (0.097 s against 0.049, a
-  // copy included): the suspect faces' second estimates. The budget is
-  // half as much again.
-  CHECK(now < 3.0 * today);
+  // copy included): the suspect faces' second estimates, the deepest of
+  // them settling after one halving. The budget is half as much again.
+  //
+  // How deep a face goes is the kernel's geometry, not the integrator's
+  // cost: OpenCASCADE 7.6's boolean leaves the tube's outer cylinder with
+  // p-curves that settle a halving later, and each halving of a curved
+  // face multiplies its evaluations by four (3.2 million against 0.77 on
+  // 7.9, at the same cost each), so 7.6 read 4.2 times today. The budget is
+  // four times larger for each halving past the first, and 7.9, the kernel
+  // this is measured on, is held to its one halving, so a change that
+  // makes the faces converge later fails there.
+  int deepest = 0;
+  for (const cad::FaceReport& f : Measure(s).result.faces)
+    deepest = std::max(deepest, f.halvings);
+  INFO("the deepest face settled after " << deepest << " halving(s)");
+#if OCC_VERSION_HEX >= 0x070900
+  CHECK(deepest == 1);
+#endif
+  CHECK(now < 3.0 * today * double(1 << (2 * std::max(0, deepest - 1))));
 }
 
 TEST_CASE("a meshed thread body is not refused for its volume",
