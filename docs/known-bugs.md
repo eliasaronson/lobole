@@ -126,6 +126,27 @@ the heading if it is not here yet.
 - **Case:**
   `solidcore/fillets/15437-fillet-round-ends-at-crease-beside-drafted-side`.
 
+### A size search seeds from one face's curvature at the edge's middle
+
+- **Symptom:** a Fillet that does not fit along an edge whose face curves
+  toward the round much tighter somewhere other than the edge's middle
+  builds its search's candidates around that tight place, where a failing
+  blend walks the builder's smallest steps: seconds of CPU a candidate,
+  nine candidates. On a pad's planar cap beside a wall square to it the
+  bend bound refuses first, so this is any other face: a loft's, a
+  revolve's, a drafted wall's.
+- **Cause:** the curvature bound (`ConcaveRadius`) reads the face's
+  curvature at one station, the edge's middle, so its seed can miss the
+  limit by orders of magnitude; the bend bound
+  ([bounds that refuse](modeling/README.md#bounds-that-refuse)) covers only
+  a planar face whose setback is constant along the edge.
+- **Where:** `Measure::BlendProbe::ConcaveRadius`
+  (`src/core/MeasureBlend.cpp`), seeded in `fit::BlendBounds`.
+- **Likely fix:** sample the face's curvature toward the blend along the
+  edge as the bend bound samples the edge, and seed from the least; it
+  stays a guess (the corpus builds past it), so it only moves where the
+  search starts.
+
 ### A blend that builds beside a split builds a patch more
 
 - **Symptom:** an L bracket joined from two boxes, its bend rounded, then
