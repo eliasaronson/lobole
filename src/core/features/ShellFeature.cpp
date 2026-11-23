@@ -434,7 +434,7 @@ bool ShellFeature::Execute(RegenContext& ctx) {
         [&] {
           return heavy::Cancelled() || directedit::Expired(searchDeadline);
         },
-        {.steps = fit::kShellSearchSteps, .seedIsBound = false});
+        {.steps = fit::kShellSearchSteps, .seedIsBound = false, .least = 0.0});
     fitMemo = fit::Memo{body->shape, removeIdx, fit::kShellOp, *answer};
   }
   FitHint hint = fit::HintOf(*answer);

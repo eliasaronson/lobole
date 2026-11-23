@@ -993,7 +993,14 @@ Answer LargestThatBuilds(double asked, const std::optional<Bound>& bound,
   // rounds that would meet exactly leave a sliver between them.
   if (bound && bound->size < asked) {
     const double c = RoundDown3(bound->size * (1.0 - 1e-3));
-    if (c > 0.0 && c < a.fails) {
+    if (c > 0.0 && c < options.least) {
+      // Under the least blend: nothing above a bound fits, so nothing is
+      // tried; under a guess the search goes on from the size asked.
+      if (options.seedIsBound) {
+        a.least = options.least;
+        return a;
+      }
+    } else if (c > 0.0 && c < a.fails) {
       if (stop()) {
         a.stopped = true;
         return a;
@@ -1017,6 +1024,10 @@ Answer LargestThatBuilds(double asked, const std::optional<Bound>& bound,
         RoundDown3(lo > 0.0 ? std::sqrt(lo * a.fails) : 0.4 * a.fails);
     if (c <= lo || c >= a.fails)
       break; // converged at three digits
+    if (c < options.least) {
+      a.least = options.least;
+      break;
+    }
     if (stop()) {
       a.stopped = true;
       return a;
@@ -1100,6 +1111,9 @@ std::string BoundSentence(EdgeBlendOp op, const Answer& a, const Bound& past,
   if (a.fits)
     return s + "; the largest " + param + " that fits is " + Mm(*a.fits) +
            " mm" + places;
+  if (a.least > 0.0 && a.fails == a.asked) // nothing tried: under the least
+    return s + "; no " + param + " of " + Mm(a.least) + " mm or more fits" +
+           places;
   return s + "; no " + param + " builds on these edges, down to " +
          Mm(a.fails) + " mm; fewer edges in one " +
          (chamfer ? "chamfer" : "fillet") + " usually builds";

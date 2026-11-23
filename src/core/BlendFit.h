@@ -124,6 +124,13 @@ double RoundDown3(double v);
 // depend on how busy the machine is.
 inline constexpr int kSearchSteps = 8;
 
+// The least blend a search builds: ten times the 1e-4 mm the blend builder
+// approximates the faces it rebuilds to (ChFi3d's tolapp3d). Under it a
+// round is mostly its approximation, and the builder walks it in steps of
+// its size: a 0.6 um round along a pad's 60 mm spline built in 2 s, and
+// its faces took 24 s to weigh.
+inline constexpr double kLeastBlend = 1e-3; // mm
+
 // What the search established. `fits` is the largest candidate that built
 // (none: nothing did), `fails` the least size known to fail (the asked size,
 // or less). `bound` is set when the bound's own candidate built, so the
@@ -133,6 +140,9 @@ struct Answer {
   std::optional<double> fits;
   double fails = 0.0;
   bool stopped = false;
+  // Set when the search went no lower because the next candidate was under
+  // SearchOptions::least: the size nothing under was tried.
+  double least = 0.0;
   std::optional<Bound> bound;
 };
 
@@ -148,6 +158,8 @@ struct Stopped {};
 struct SearchOptions {
   int steps = kSearchSteps;
   bool seedIsBound = true;
+  // No candidate under it is built (a Shell's search passes 0).
+  double least = kLeastBlend;
 };
 
 // The largest size that builds, given that `asked` does not. The first

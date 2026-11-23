@@ -244,10 +244,10 @@ TEST_CASE("The v217 golden's closed spline is two edges and weighs its area",
 // reader fuzz's damage) bends the outline to a radius of 0.6 um, and its
 // 0.5 mm round does not fit. The size search built at sizes around that
 // bend, where a failing blend costs the builder seconds: 13 s of CPU over
-// nine candidates. The bend is a bound that refuses, so the search builds
-// one candidate, just under it.
-TEST_CASE("A round past a spiked spline's tightest bend is refused after one "
-          "build",
+// nine candidates. The bend is a bound that refuses, and it is under the
+// least blend a search builds (a 0.6 um round's faces took 24 s to weigh),
+// so nothing is built.
+TEST_CASE("A round past a spiked spline's tightest bend is refused unbuilt",
           "[spline][fillet][fit]") {
   nlohmann::json j;
   std::ifstream(std::string(TestSourceDir()) +
@@ -267,9 +267,8 @@ TEST_CASE("A round past a spiked spline's tightest bend is refused after one "
   const std::string error = doc->GetFeature(2)->GetError();
   INFO(error);
   CHECK(error.find("bends toward face") != std::string::npos);
-  CHECK(error.find("the largest radius that fits is 0.000591 mm") !=
-        std::string::npos);
-  CHECK(built == 1);
+  CHECK(error.find("no radius of 0.001 mm or more fits") != std::string::npos);
+  CHECK(built == 0);
 }
 
 TEST_CASE("A lone closed spline's pad shells", "[spline][extrude]") {

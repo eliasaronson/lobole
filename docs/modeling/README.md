@@ -1533,7 +1533,12 @@ of 0.4 while nothing has built, so the steps reach a thousandth of the size, the
 halving the bracket between the largest that built and the least that
 failed by ratio (its geometric mean), so the answer is as close in
 proportion whatever its size. Nine builds at most, a fixed count, so the answer does not depend
-on how busy the machine is. Every candidate is rounded down to three
+on how busy the machine is. No candidate is under the least blend
+(`fit::kLeastBlend`, 0.001 mm: ten times the 1e-4 mm the builder
+approximates the faces it rebuilds to), where a round is mostly its
+approximation and the builder walks it in steps of its size; a bound that
+refuses under it is the answer with nothing built: "...; no radius of
+0.001 mm or more fits". A Shell's search has no such floor. Every candidate is rounded down to three
 significant digits, so the number reported is a number that was built. A
 candidate builds when `topo::EdgeBlendUnnamed` returns a solid that
 `InvalidReasons` passes and whose volume a blend of its size can reach
@@ -1703,8 +1708,10 @@ curvature misses: a pad on a closed spline whose pole a damaged file threw
 back past its neighbours bends to 0.6 um at one place, its 0.5 mm round
 measured no such curvature, and the search built nine candidates around
 the bend at up to 7 s of CPU each -- a failing blend near where it stops
-existing walks the builder's smallest steps -- 13 s in all; past the bend
-it builds one, 0.000591 mm, in a hundredth of that
+existing walks the builder's smallest steps -- 13 s in all. Past the bend
+the one candidate, 0.000591 mm, built in 2 s and took 24 s to weigh (its
+faces walked in steps of its size); under the least blend, it is not
+built at all, and the read takes a tenth of a second
 (`tests/test_spline.cpp`). `tests/test_blend_fit_rim.cpp` holds it against
 the builder both ways on an ellipse's pad and pocket floor (b^2 / a), and
 finds none on a half ellipse's arc or an elliptic bore's rim, which build
