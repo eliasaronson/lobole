@@ -12,6 +12,7 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
 
+#include "CostCheck.h"
 #include "core/Document.h"
 #include "core/Feature.h"
 #include "core/Measure.h"
@@ -450,9 +451,11 @@ TEST_CASE("calibrate the buckling memory estimate", "[.][buckling-calibrate]") {
 // The cost of a buckling run of about 240k DOF (217k is what Netgen's 1.28
 // mm makes of the column): mesh, base state, K_G and the eigensolve.
 // Measured once (kBucklingCostBoundSeconds says where), bounded at twice
-// that against the slowest core.
+// that against the slowest core. asan_slow: past ctest's 25 minutes under
+// ASan, where the budget is not judged and smaller buckling runs put the
+// same path under it.
 TEST_CASE("a buckling run of 240k DOF costs what it was measured to",
-          "[fem][buckling][slow]") {
+          "[fem][buckling][slow][asan_slow]") {
   Document doc;
   fem::Study s = Column(doc, 10.0, 10.0, 200.0, 1000.0, 1.28);
   const double base = PeakRssBytes();
@@ -467,6 +470,6 @@ TEST_CASE("a buckling run of 240k DOF costs what it was measured to",
               rt.bodies[0].buckling.factor);
   CHECK(dofs > 200000);
   CHECK(dofs < 300000);
-  CHECK(cpu < kBucklingCostBoundSeconds);
+  CHECK_COST(cpu < kBucklingCostBoundSeconds);
 }
 #endif

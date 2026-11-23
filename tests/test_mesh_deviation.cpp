@@ -8,6 +8,7 @@
 // the Compare to scan tool call -- and every number checked against the
 // generator's. Every fixture is turned off the axes.
 
+#include "CostCheck.h"
 #include "mesh_organic.h"
 
 #include "cad/CADKernel.h"
@@ -328,12 +329,6 @@ TEST_CASE("compare_scan of a 500k-triangle scan costs what it did",
   CHECK(got.deviation.within > 0.99);
   // Measured at 1.6 CPU s (2026-11, 505k scan triangles against a 341k
   // triangle body, threads on both kinds of core); the budget leaves room
-  // for every thread on the slow ones, which cost 1.8 times as much, and
-  // ten times that under the sanitizers.
-#if defined(__SANITIZE_THREAD__) || defined(__SANITIZE_ADDRESS__)
-  constexpr double kBudget = 40.0;
-#else
-  constexpr double kBudget = 4.0;
-#endif
-  CHECK(cpu < kBudget);
+  // for every thread on the slow ones, which cost 1.8 times as much.
+  CHECK_COST(cpu < 4.0);
 }

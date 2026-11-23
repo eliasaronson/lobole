@@ -213,8 +213,7 @@ three suites that passed alone):
 - **Cost** -- "this must not go quadratic", "a refusal costs a parse", "a
   frame does not run the pass". Read CPU time, which other work does not
   inflate: `std::clock()` for the process in a Catch2 case (Delete Face's
-  100 holes, under 120 s of CPU; the feature-limit refusal, under 5 s, ten times that under the
-  sanitizers as the reader-fuzz budget is;
+  100 holes, under 120 s of CPU; the feature-limit refusal, under 5 s;
   `FaceSnapPoints`), `MainThreadCpuMs()` in a GUI test (above), the
   reader-fuzz budget (docs/versioning/README.md#reader-fuzzing). CPU time
   still depends on the core the work lands on: a hybrid CPU's low-power
@@ -227,6 +226,17 @@ three suites that passed alone):
   from a performance core to a low-power one between them multiplies the
   ratio by five (the blend refusal on the plate of 100 holes read 31 builds
   for its 6).
+  A Catch2 cost check is written `CHECK_COST` (`tests/CostCheck.h`): `CHECK`
+  in a normal build, not judged under ASan, UBSan or TSan, where the work
+  and every other check in the case still run. The sanitized build is
+  Debug (`-Og`) with only our code instrumented, so it costs 2 to 170 times
+  as much while OpenCASCADE costs the same: neither a budget nor a ratio
+  against the kernel means anything there, and ten times a best fit's
+  budget did not hold it. A case that reads CPU time uses it, or says with
+  `NOT_A_COST_CHECK("why")` that what it reads is none (a hang guard's
+  deadline, a figure it prints); `test_conventions.cpp` holds every case to
+  one or the other. A cost case that takes minutes under ASan carries
+  `asan_slow` as well (tools/sanitizer-env.sh).
 - **Responsiveness** -- "a ping answers within 1 s while a job runs", "a
   reuse answers within 1 s", "a cancel lands inside the hold", "a budget
   bounds the call". Wall time is the point, so a smoke keeps it, measures

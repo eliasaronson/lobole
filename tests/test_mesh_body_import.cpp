@@ -6,6 +6,7 @@
 // on the organic and mechanical fixtures, what it measures, what it bakes as,
 // what it exports, and every B-Rep feature refusing it by name.
 
+#include "CostCheck.h"
 #include "mesh_fixtures.h"
 #include "mesh_organic.h"
 
@@ -404,8 +405,10 @@ TEST_CASE("Mesh body: what auto reads off the fixtures",
 // per piece set against the slowest core (an E-core, `taskset`), each shown
 // to fail against a spin planted in what it times. The 2M figure is the
 // largest a scan comes in at (docs/interchange/README.md#mesh-bodies).
+// asan_slow: 12 minutes under ASan, where the budgets are not judged and
+// smaller scans put the same import, mass and section under it.
 TEST_CASE("A 2M-triangle scan imports, weighs and sections in seconds",
-          "[mesh_body][slow]") {
+          "[mesh_body][slow][asan_slow]") {
   const auto fig = fixtures::Figurine(2000000);
   const auto stl = fixtures::WriteStl(fig.mesh, "mesh-body-2m");
   const auto cpu = [](std::clock_t t0) {
@@ -435,9 +438,9 @@ TEST_CASE("A 2M-triangle scan imports, weighs and sections in seconds",
               importS, massS, capS);
   // Measured on this machine's low-power E-core: 10.5 s, 0.32 s and
   // 0.075 s (2.7, 0.065 and 0.017 on a P-core).
-  CHECK(importS < 30.0);
-  CHECK(massS < 2.0);
-  CHECK(capS < 1.0);
+  CHECK_COST(importS < 30.0);
+  CHECK_COST(massS < 2.0);
+  CHECK_COST(capS < 1.0);
   fs::remove(stl);
 }
 
@@ -462,7 +465,7 @@ TEST_CASE("auto recognises the largest mechanical fixture below the limit "
   CHECK_FALSE(doc.GetBodies()[0].IsMesh());
   CHECK(LastImport(doc).RepresentationChosen() == "recognize");
   // 0.44 s on the low-power E-core (0.11 on a P-core).
-  CHECK(s < 5.0);
+  CHECK_COST(s < 5.0);
   fs::remove(stl);
 }
 

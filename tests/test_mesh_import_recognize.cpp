@@ -6,6 +6,7 @@
 // the CAD part it was exported from
 // (docs/interchange/README.md#recognising-a-faceted-mesh).
 
+#include "CostCheck.h"
 #include "mesh_fixtures.h"
 
 #include "core/Document.h"
@@ -340,7 +341,7 @@ TEST_CASE("A recognised mesh past the triangle limit reads, and one that "
     REQUIRE(ImportFeature::ReadModel(stl.string(), o, model, why));
     const double cpu = double(std::clock() - t0) / CLOCKS_PER_SEC;
     INFO(cpu << " s CPU, the sewing law says " << cost->expectedSeconds);
-    CHECK(cpu < 5.0);
+    CHECK_COST(cpu < 5.0);
     REQUIRE(model.products.size() == 1);
     CHECK(model.products[0].recognition->fellBack.empty());
     CHECK(model.products[0].shape.FaceCount() == 30);

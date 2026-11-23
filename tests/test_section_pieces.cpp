@@ -9,6 +9,7 @@
 // uncertainty -- and those uncertainties hold as uncertainties over many
 // noise draws.
 
+#include "CostCheck.h"
 #include "SameCore.h"
 #include "SectionOutlines.h"
 
@@ -356,5 +357,5 @@ TEST_CASE("What the pieces fit costs on a realistic section",
   CHECK(f.pieces.size() == prims.size());
   // Measured at 0.1 s on a performance core; ten times that is the
   // budget, an efficiency core's three to five times with room.
-  CHECK(pieces < 1.0);
+  CHECK_COST(pieces < 1.0);
 }

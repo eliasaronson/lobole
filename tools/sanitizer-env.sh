@@ -31,8 +31,12 @@ SANITIZER_TEST_EXCLUDE='Topo:|femgpu|topo_smoke'
 # Labels a sanitized run leaves out (ctest -LE). `asan_slow` goes on a test,
 # where it is written ([asan_slow] in Catch, LABELS in tests/CMakeLists.txt),
 # that ASan makes many times longer while quicker tests already put the same
-# code under it: the CAM clearing cases that ran 11 and 20 minutes, and the
-# app smokes that ran past their timeouts.
+# code under it: the CAM clearing cases that ran 11 and 20 minutes, the app
+# smokes that ran past their timeouts, and the FEM and scan cases (the
+# 240k-DOF buckling run, a hole's refinement, the 2M-triangle scan, two
+# Cradle cases) that ran 7 to past 25 minutes. The build is Debug (-Og), so
+# numeric code runs up to 170 times its Release cost here. A cost check
+# that stays in runs its work and drops only its budget (tests/CostCheck.h).
 SANITIZER_LABEL_EXCLUDE='gui|asan_slow'
 # What one sanitized test process costs, in MB, for the suite's -j
 # (tools/build-jobs "$SANITIZER_TEST_MB", as compiles take theirs): memory,

@@ -9,6 +9,7 @@
 // composed with it, it must be no motion at all, to within the noise. Every
 // fixture is tilted off the axes.
 
+#include "CostCheck.h"
 #include "mesh_organic.h"
 
 #include "core/Angles.h"
@@ -373,13 +374,8 @@ TEST_CASE("best_fit of a 500k-triangle scan costs what it did",
   CHECK(left.mm < 0.05);
   // Measured at 1.2-1.3 CPU s (2026-11, threads on both kinds of core);
   // the budget leaves room for every thread on the slow ones, which cost
-  // 1.8 times as much, and ten times that under the sanitizers.
-#if defined(__SANITIZE_THREAD__) || defined(__SANITIZE_ADDRESS__)
-  constexpr double kBudget = 40.0;
-#else
-  constexpr double kBudget = 4.0;
-#endif
-  CHECK(cpu < kBudget);
+  // 1.8 times as much.
+  CHECK_COST(cpu < 4.0);
 }
 
 TEST_CASE("A datum fitted before a re-scan refits after best_fit lays the "

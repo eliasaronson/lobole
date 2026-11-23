@@ -18,6 +18,7 @@
 // `tools/reader-fuzz.py case <id>` writes that case out as a regression
 // (tests/reader_cases/, test_reader_cases.cpp).
 
+#include "CostCheck.h"
 #include "TestPaths.h"
 #include "mutate/Mutate.h"
 #include "mutate/ReaderFuzz.h"
@@ -295,6 +296,7 @@ void SpinCpu(double seconds) {
 
 TEST_CASE("Reader fuzz: the harness catches what it claims to",
           "[reader_fuzz]") {
+  NOT_A_COST_CHECK("SpinCpu plants the cost the harness's budget must see");
   const fs::path golden =
       fs::path(TestSourceDir()) / "tests" / "golden" / "v01-plain-box.json";
   const std::string original = GoldenBytes("v01-plain-box.json");

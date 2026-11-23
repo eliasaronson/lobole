@@ -10,6 +10,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
+#include "CostCheck.h"
 #include "SameCore.h"
 #include "TestIO.h"
 #include "TestPaths.h"
@@ -691,6 +692,7 @@ Moments KnottedPrismTruth(double h) {
 TEST_CASE("the integrator is right where the fixed rule is wrong: a bar "
           "through a tube's wall",
           "[integrate]") {
+  NOT_A_COST_CHECK("the times are reported, not judged");
   const TopoDS_Shape tube = Tube();
   const TopoDS_Shape one = Placed(BRepAlgoAPI_Fuse(tube, Bar(0.0)).Shape());
   const Moments truth = Placed(Cylinder(23, 0, 20) - Cylinder(21.5, 0, 20) +
@@ -720,6 +722,7 @@ TEST_CASE("the integrator is right where the fixed rule is wrong: a bar "
 
 TEST_CASE("the integrator measures the tube and nine bars to the closed form",
           "[integrate]") {
+  NOT_A_COST_CHECK("the times are reported, not judged");
   TopoDS_Shape body = Tube();
   Moments truth = Cylinder(23, 0, 20) - Cylinder(21.5, 0, 20);
   for (int k = 0; k < 9; k++) {
@@ -740,6 +743,7 @@ TEST_CASE("the integrator measures the tube and nine bars to the closed form",
 }
 
 TEST_CASE("a cylinder cut on a slant: the mechanism", "[integrate]") {
+  NOT_A_COST_CHECK("the times are reported, not judged");
   const double r = 10, h = 20, lean = 0.5;
   const TopoDS_Shape conic = ObliqueCylinderShape(r, h, lean);
   // The same body with the planar face's ellipse p-curve swapped for the
@@ -782,6 +786,7 @@ TEST_CASE("a cylinder cut on a slant: the mechanism", "[integrate]") {
 
 TEST_CASE("a revolved Bezier profile and a horn torus keep their figures",
           "[integrate]") {
+  NOT_A_COST_CHECK("the times are reported, not judged");
   {
     const TopoDS_Shape s = Placed(BezierRevolve());
     const Moments truth = Placed(BezierRevolveTruth());
@@ -805,6 +810,7 @@ TEST_CASE("a revolved Bezier profile and a horn torus keep their figures",
 }
 
 TEST_CASE("an extruded spline loop", "[integrate]") {
+  NOT_A_COST_CHECK("the times are reported, not judged");
   const double h = 12.0;
   const TopoDS_Shape s = Placed(KnottedPrism(h));
   const Moments truth = Placed(KnottedPrismTruth(h));
@@ -885,7 +891,7 @@ TEST_CASE("a modelled M10 thread to a shoulder", "[integrate][slow]") {
   CHECK_THAT(run.result.volume, WithinRel(adaptive.Mass(), 1e-10));
   // 57 of 75 faces suspect: one fixed pass, one area pass and the second
   // estimates cost 1.3 times today's three passes.
-  CHECK(run.seconds < 2.0 * today.seconds);
+  CHECK_COST(run.seconds < 2.0 * today.seconds);
 }
 
 TEST_CASE("a level-3 Menger sponge costs no more than today's rule",
@@ -900,13 +906,14 @@ TEST_CASE("a level-3 Menger sponge costs no more than today's rule",
   CHECK(run.result.suspectFaces == 0);
   // Nothing suspect: one volume pass and one area pass where today takes
   // two and one (0.67 times its CPU time measured).
-  CHECK(run.seconds < today.seconds);
+  CHECK_COST(run.seconds < today.seconds);
   CheckSums(run.result, today);
   CheckAgainst(run.result, truth, 1e-9);
 }
 
 TEST_CASE("where the fixed rule is exact the two estimates agree",
           "[integrate]") {
+  NOT_A_COST_CHECK("the times are reported, not judged");
   // Every face of these is bounded by lines and conics on an elementary
   // surface. Given a second estimate as if each were suspect, the gap
   // between the two is the floor the agreement threshold sits above.
@@ -1116,7 +1123,7 @@ TEST_CASE("mass properties of a body with no face in doubt cost no more "
   std::printf("[integrate] holed plate: today's three passes %.4f s, "
               "ComputeMassProps uncached %.4f s (a copy alone %.4f s)\n",
               today, now, copy);
-  CHECK(now - copy <= today);
+  CHECK_COST(now - copy <= today);
 }
 
 TEST_CASE("an unchanged body's volume and mass are a lookup",
@@ -1163,8 +1170,8 @@ TEST_CASE("an unchanged body's volume and mass are a lookup",
               "mass properties %.4f s adding the area, %.6f s warm\n",
               cold, warm, withArea, massWarm);
   CHECK(again == first);
-  CHECK(warm < 0.02 * cold);
-  CHECK(massWarm < 0.02 * (cold + withArea));
+  CHECK_COST(warm < 0.02 * cold);
+  CHECK_COST(massWarm < 0.02 * (cold + withArea));
 }
 
 TEST_CASE("a tube trimmed by 40 intersection curves", "[integrate][slow]") {
@@ -1203,7 +1210,7 @@ TEST_CASE("a tube trimmed by 40 intersection curves", "[integrate][slow]") {
 #if OCC_VERSION_HEX >= 0x070900
   CHECK(deepest == 1);
 #endif
-  CHECK(now < 3.0 * today * double(1 << (2 * std::max(0, deepest - 1))));
+  CHECK_COST(now < 3.0 * today * double(1 << (2 * std::max(0, deepest - 1))));
 }
 
 TEST_CASE("a meshed thread body is not refused for its volume",
@@ -1262,5 +1269,5 @@ TEST_CASE("an extruded 360-knot cam with a hole through its side",
   // Measured at 0.17 s against 0.013 s for today's three passes, the
   // planar caps' 360 spans and three halvings most of it; once, then
   // cached.
-  CHECK(run.seconds < 0.5);
+  CHECK_COST(run.seconds < 0.5);
 }

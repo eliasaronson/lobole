@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+#include "CostCheck.h"
 #include "ui/CreateActions.h"
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
@@ -268,7 +269,7 @@ TEST_CASE("FaceSnapPoints stays linear on a drilled plate", "[kernel][slow]") {
   // per edge. The bound is deliberately far from BOTH — 12x the real cost, a
   // fifth of the broken one — so a slow machine cannot fail it and a return
   // to quadratic cannot pass it.
-  CHECK(msPerFrame < 2.0);
+  CHECK_COST(msPerFrame < 2.0);
 }
 
 TEST_CASE("Boolean union of overlapping boxes", "[kernel][booleans]") {
@@ -1868,7 +1869,7 @@ TEST_CASE("UnionOf fuses only what may touch, in body order, once",
   // s of CPU on 49 of these boxes, 1.9 s on these 121; this, 0.005 s. The
   // bound is far from both, for an E-core and the sanitizers.
   INFO("UnionOf of " << parts.size() << " boxes: " << cpu << " s of CPU");
-  CHECK(cpu < 0.5);
+  CHECK_COST(cpu < 0.5);
 
   // One part is itself, and an invalid one means no union, as Union does.
   CHECK(CADShape::UnionOf({parts[0]}).GetShape().IsSame(parts[0].GetShape()));

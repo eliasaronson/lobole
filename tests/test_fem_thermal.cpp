@@ -15,6 +15,7 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
 
+#include "CostCheck.h"
 #include "cad/CADMaterials.h"
 #include "core/Document.h"
 #include "core/Feature.h"
@@ -888,7 +889,7 @@ TEST_CASE("a thermal study of 228k nodes costs what it was measured to",
               rt.solver.c_str());
   CHECK(nodes > 200000);
   CHECK(nodes < 260000);
-  CHECK(cpu < kThermalCostBoundSeconds);
+  CHECK_COST(cpu < kThermalCostBoundSeconds);
   // k A dT / L, whatever the mesh.
   double out = 0.0;
   for (const fem::HeatFlow& f : rt.bodies[0].thermal.flows)

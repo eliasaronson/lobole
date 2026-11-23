@@ -299,9 +299,11 @@ TEST_CASE("a refinement leaves nothing in Netgen's property table",
 
 // A refinement on the hole grades into its edges and the volume behind it.
 // Through the legacy per-face array it did not: 0.3 mm left a 0.014 sliver
-// and a peak 50 % high, 0.2 mm did not mesh at all.
+// and a peak 50 % high, 0.2 mm did not mesh at all. asan_slow: three meshes
+// and solves, past ctest's 25 minutes under ASan; the hole-and-fillet case
+// and the property-table one put refinement under it.
 TEST_CASE("a hole's refinement meshes clean and reads the converged peak",
-          "[fem][mesher][slow]") {
+          "[fem][mesher][slow][asan_slow]") {
   auto p = HolePlate();
   for (const double h : {0.3, 0.2, 0.15}) {
     INFO("refinement " << h << " mm");

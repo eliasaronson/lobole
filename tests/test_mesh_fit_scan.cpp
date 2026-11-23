@@ -7,6 +7,7 @@
 // noise sets, and auto's choice -- each checked against the surface the
 // fixture was generated on, never against the fit's own numbers.
 
+#include "CostCheck.h"
 #include "SameCore.h"
 #include "mesh_organic.h"
 
@@ -1059,7 +1060,7 @@ TEST_CASE("The region and the clip cost at most twice the old growth",
                 "(x%.2f); radius %.5f, used %zu\n",
                 s.mesh.TriangleCount(), nowS, oldS, nowS / oldS, now.fit.radius,
                 now.used);
-    CHECK(nowS <= 2.0 * oldS);
+    CHECK_COST(nowS <= 2.0 * oldS);
     CHECK_THAT(now.fit.radius, WithinAbs(s.radius, 0.01));
   }
   // Where the split runs: a stepped bore of 240k triangles grown at a
@@ -1089,7 +1090,7 @@ TEST_CASE("The region and the clip cost at most twice the old growth",
                 "growth %.3f s (x%.2f): %s\n",
                 m.TriangleCount(), nowS, oldS, nowS / oldS, why.c_str());
     CHECK(now.twoSurfaces);
-    CHECK(nowS <= 2.0 * oldS);
+    CHECK_COST(nowS <= 2.0 * oldS);
   }
 }
 

@@ -9,6 +9,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
+#include "CostCheck.h"
 #include "SameCore.h"
 #include "TestPaths.h"
 #include "core/BlendFit.h"
@@ -427,12 +428,12 @@ TEST_CASE("A failed fillet on a plate of 100 holes answers within ten builds",
   REQUIRE(f->GetFitHint().has_value());
   INFO("one build " << one << " s of CPU; the refusal at 30 " << far
                     << " s, at 1.5 " << failed << " s");
-  CHECK(failed < 10.0 * one);
+  CHECK_COST(failed < 10.0 * one);
   // A cost check (docs/ui/testing.md#tests-that-time-things): the refusal
   // at 30 is the look before the build and the one candidate under the
   // bound, 1.3 times the round that fits, where building 30 first cost
   // twenty times it (3.4 s against 0.17 s). A planted 1 s spin fails it.
-  CHECK(far < 3.0 * one);
+  CHECK_COST(far < 3.0 * one);
 }
 
 namespace {
@@ -668,6 +669,7 @@ TEST_CASE("The size that fits a tee's joint builds a round's volume",
   CHECK_FALSE(doc.Regenerate());
   INFO("the refusal at R2: " << double(std::clock() - t0) / CLOCKS_PER_SEC
                              << " s of CPU");
+  NOT_A_COST_CHECK("the refusal's CPU is reported, not judged");
   if (const auto hint = f->GetFitHint(); hint && hint->fitsMm) {
     f->radius = *hint->fitsMm;
     REQUIRE(doc.Regenerate());

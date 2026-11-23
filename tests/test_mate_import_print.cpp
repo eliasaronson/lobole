@@ -6,6 +6,7 @@
 // whatever face then holds the number
 // (docs/assemblies/README.md#a-mate-on-an-imported-face).
 
+#include "CostCheck.h"
 #include "TestPaths.h"
 #include "mesh_fixtures.h"
 
@@ -290,7 +291,7 @@ TEST_CASE("Checking a mate's prints costs a solve nothing once taken",
     }
   }
   INFO("without prints " << plain << " s, with " << printed << " s");
-  CHECK(printed <= 1.25 * plain + 0.02);
+  CHECK_COST(printed <= 1.25 * plain + 0.02);
   std::filesystem::remove(stl);
 }
 

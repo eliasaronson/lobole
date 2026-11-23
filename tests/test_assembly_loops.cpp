@@ -4,6 +4,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
+#include "CostCheck.h"
 #include "core/AssemblyLoopSolve.h"
 #include "core/AssemblySolve.h"
 #include "core/Document.h"
@@ -1532,7 +1533,7 @@ TEST_CASE("Limits that do not bind cost a loop nothing; resting on them it "
                   resting.iterations, resting.converged ? "closed" : "OPEN");
     // A cost check, as a ratio within one run: wide limits are a box the
     // step never meets, so the solve is the free one.
-    CHECK(wideExcess <= 2e-3);
+    CHECK_COST(wideExcess <= 2e-3);
     if (held > 0) {
       // Resting on its limits the loop still closes -- the other joints
       // take the motion -- and every held joint is AT its limit, not crept
@@ -1545,7 +1546,7 @@ TEST_CASE("Limits that do not bind cost a loop nothing; resting on them it "
           CHECK(resting.solved[i].rotation >= g.min);
           CHECK(resting.solved[i].rotation <= g.max);
         }
-      CHECK(restExcess <= 5e-3);
+      CHECK_COST(restExcess <= 5e-3);
     }
   }
 }

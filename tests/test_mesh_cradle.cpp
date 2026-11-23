@@ -7,6 +7,7 @@
 // object down without trapping it, and the block it is cut from stays a
 // closed solid.
 
+#include "CostCheck.h"
 #include "mesh_organic.h"
 
 #include "core/Document.h"
@@ -97,9 +98,12 @@ TEST_CASE("Cradle pocket: the wall stands at the radius plus the clearance",
   }
 }
 
+// asan_slow: past ctest's 25 minutes under ASan (72 s in the Release
+// suite); the other pocket cases put Pocket, the Boolean and the slice
+// under it in 4 to 6.
 TEST_CASE("Cradle pocket: a block cut by it stays closed, and the object "
           "lowers into it without a clash only when swept",
-          "[mesh][cradle][slow]") {
+          "[mesh][cradle][slow][asan_slow]") {
   const auto s = fixtures::NoisySphere(20000, 20.0, 0.0);
   const double c = 0.4, h = 0.25;
   const glm::dvec3 lo(-30, -30, -30), hi(30, 30, 8);
@@ -447,10 +451,11 @@ TEST_CASE("Cradle: a mesh Boolean puts a B-Rep screw hole into it, and an "
 // of a Cradle of a 300k-triangle scan at its default resolution, against
 // the cost law's own estimate (the field's share counted on every thread it
 // ran on). Shown to fail against a 5 µs spin planted in each sample
-// mesh::Pocket hands the level set.
+// mesh::Pocket hands the level set. asan_slow: 7.6 minutes under ASan,
+// where its budget is not judged and the other Cradle cases build it.
 TEST_CASE("Cradle: a scan at the default resolution builds inside its "
           "estimate",
-          "[mesh][cradle][slow]") {
+          "[mesh][cradle][slow][asan_slow]") {
   const auto fig = fixtures::Figurine(300000);
   const auto stl = fixtures::WriteStl(fig.mesh, "cradle-cost-figure");
   Document doc;
@@ -485,7 +490,7 @@ TEST_CASE("Cradle: a scan at the default resolution builds inside its "
   // time counts the field on every thread it ran on, measured at up to 4 µs
   // a node across 22 (hyperthreads included), so it is bounded on its own.
   const double cells = rep.at("cells").get<double>();
-  CHECK(cpuS < 6.0e-6 * cells + 2.0 * estimate);
+  CHECK_COST(cpuS < 6.0e-6 * cells + 2.0 * estimate);
   std::filesystem::remove(stl);
 }
 

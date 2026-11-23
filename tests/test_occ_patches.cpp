@@ -13,6 +13,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
 
+#include "CostCheck.h"
 #include "TestPaths.h"
 #include "cad/OccPatches.h"
 #include "cad/OccSignals.h"
@@ -284,6 +285,7 @@ TEST_CASE("A thin shell of the worm stops when its deadline passes",
   INFO("stopped " << took - deadline << " CPU s after its deadline");
   // Ten times the longest silence measured, and a tenth of what an unheard
   // deadline overran by.
+  NOT_A_COST_CHECK("a hang guard: the deadline is the kernel's own clock");
   CHECK(took < deadline + 10.0);
 }
 
@@ -323,7 +325,7 @@ TEST_CASE("A fillet whose blend normal stays degenerate fails at once",
   CHECK_FALSE(out.IsValid());
   CHECK_FALSE(error.empty());
   INFO(error);
-  CHECK(took < 10.0);
+  CHECK_COST(took < 10.0);
 }
 
 // Random design 17's body, a 0.002 mm shell opening its blend face (face 9):
@@ -424,5 +426,5 @@ TEST_CASE("Signal scopes on every thread cost what one thread's do", "[occ]") {
   const double all = cpuPerScope(threads);
   INFO(threads << " threads: " << 1e9 * all << " ns of CPU a scope, against "
                << 1e9 * one << " ns on one");
-  CHECK(all < 8.0 * one);
+  CHECK_COST(all < 8.0 * one);
 }

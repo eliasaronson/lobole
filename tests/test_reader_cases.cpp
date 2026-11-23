@@ -18,6 +18,7 @@
 // rule holds. A case stores the bytes, not the case id, so a changed
 // operator never silently retargets an old regression.
 
+#include "CostCheck.h"
 #include "TestPaths.h"
 #include "mutate/ReaderFuzz.h"
 
@@ -255,18 +256,11 @@ TEST_CASE("Reader cases: a part past the feature limit is refused before it "
   CHECK(error.find("a part holds at most 50 000 features; this one lists "
                    "104 857") != std::string::npos);
   // Milliseconds of CPU: a bound a rebuild could never meet (0.55 s pinned
-  // to this machine's slowest core). The sanitizers multiply the parse's
-  // cost -- under ASan 5.9 s on a P-core and 24 s on the slowest, where the
-  // bound was 5 s -- so it is ten times the bound there, as the RSS check
-  // below is left out: still far below the minutes a rebuild of 104 857
-  // features would cost.
-#ifdef LOBOLE_READER_FUZZ_SANITIZED
-  constexpr double kCpuScale = 10.0;
-#else
-  constexpr double kCpuScale = 1.0;
-#endif
+  // to this machine's slowest core). Not judged under the sanitizers, which
+  // multiply the parse's cost (under ASan 5.9 s on a P-core and 24 s on the
+  // slowest), as the RSS check below is left out there.
   INFO("CPU seconds " << seconds);
-  CHECK(seconds < 5.0 * kCpuScale);
+  CHECK_COST(seconds < 5.0);
   // The parse is what it costs: about 90 MB for 8 MB of JSON. Not under
   // the sanitizers, whose allocator keeps what was freed.
 #ifndef LOBOLE_READER_FUZZ_SANITIZED

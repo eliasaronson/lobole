@@ -8,6 +8,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
+#include "CostCheck.h"
 #include "TestPaths.h"
 #include "core/DirectEdit.h"
 #include "core/Document.h"
@@ -861,7 +862,7 @@ TEST_CASE("Delete Face fills all 100 holes of a STEP plate in one feature",
   // OpenCASCADE 7.6 23 s, 41 s and 93 s. 180 s holds on the slowest and
   // still fails a heal that went quadratic in the holes.
   INFO("100 holes deleted in " << s << " s of CPU");
-  CHECK(s < 180.0);
+  CHECK_COST(s < 180.0);
 }
 
 namespace {
@@ -936,7 +937,7 @@ TEST_CASE("Offset Face costs what its face's neighbourhood does and not "
   // 0.6 s of CPU on a P-core here, 1.2 s on an E-core, 2.7 s on a
   // low-power one.
   INFO("offset in " << s << " s of CPU");
-  CHECK(s < 8.0);
+  CHECK_COST(s < 8.0);
 }
 
 // The whole-body cells also refused edits they should make: the target
@@ -1077,7 +1078,7 @@ TEST_CASE("The freeform-neighbour check costs a look at each neighbour's "
   const double s = double(std::clock() - t0) / CLOCKS_PER_SEC;
   CHECK(why.empty());
   INFO("checked in " << s << " s of CPU");
-  CHECK(s < 0.5);
+  CHECK_COST(s < 0.5);
 }
 
 // A neighbour is grown only as far as the target is from the face; a

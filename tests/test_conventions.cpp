@@ -2815,3 +2815,165 @@ TEST_CASE("a test process sees neither the developer's config nor state",
   CHECK(config != h / ".config" / "lobole");
   CHECK(state != h / ".local" / "state" / "lobole");
 }
+
+namespace {
+// Where `open` (an opening bracket) closes in `code`, or npos.
+size_t Closing(const std::string& code, size_t open) {
+  const char o = code[open], c = o == '(' ? ')' : o == '{' ? '}' : ']';
+  int depth = 0;
+  for (size_t i = open; i < code.size(); ++i) {
+    if (code[i] == o)
+      ++depth;
+    else if (code[i] == c && --depth == 0)
+      return i;
+  }
+  return std::string::npos;
+}
+
+size_t SkipSpace(const std::string& code, size_t i) {
+  while (i < code.size() && std::isspace(static_cast<unsigned char>(code[i])))
+    ++i;
+  return i;
+}
+
+// The test cases in `code` (comments and literals blanked; `named` the same
+// text with its literals kept, for the names) that read CPU time, directly
+// or through a function or lambda of the file that does, and neither state
+// a budget with CHECK_COST nor say with NOT_A_COST_CHECK why not. Hidden
+// cases ("[.") are measurements run by name, and judge nothing.
+std::vector<std::string> UnstatedCostReads(const std::string& code,
+                                           const std::string& named) {
+  static const std::regex readsCpu(
+      R"(std::clock\s*\(|CLOCK_(PROCESS|THREAD)_CPUTIME_ID|\bgetrusage\s*\()");
+  // Every function and named lambda the file defines, by name.
+  std::map<std::string, std::string> bodies;
+  static const std::regex callee(
+      R"(\b([A-Za-z_]\w*)\s*(=\s*\[[^\]]*\]\s*)?\()");
+  static const std::regex bareLambda(
+      R"(\b([A-Za-z_]\w*)\s*=\s*\[[^\]]*\]\s*\{)");
+  static const std::set<std::string> notNames = {
+      "if",        "for",     "while",  "switch", "catch",
+      "TEST_CASE", "SECTION", "return", "sizeof", "decltype"};
+  for (std::sregex_iterator it(code.begin(), code.end(), callee), end;
+       it != end; ++it) {
+    const std::string name = (*it)[1].str();
+    if (notNames.contains(name))
+      continue;
+    const size_t paren = static_cast<size_t>(it->position() + it->length() - 1);
+    const size_t closed = Closing(code, paren);
+    if (closed == std::string::npos)
+      continue;
+    size_t i = SkipSpace(code, closed + 1);
+    for (const char* word : {"const", "mutable", "noexcept", "override"})
+      if (code.compare(i, std::strlen(word), word) == 0)
+        i = SkipSpace(code, i + std::strlen(word));
+    if (code.compare(i, 2, "->") == 0)
+      i = code.find_first_of("{;", i);
+    if (i == std::string::npos || i >= code.size() || code[i] != '{')
+      continue;
+    const size_t shut = Closing(code, i);
+    if (shut != std::string::npos)
+      bodies[name] += code.substr(i, shut - i + 1);
+  }
+  for (std::sregex_iterator it(code.begin(), code.end(), bareLambda), end;
+       it != end; ++it) {
+    const size_t brace = static_cast<size_t>(it->position() + it->length() - 1);
+    const size_t shut = Closing(code, brace);
+    if (shut != std::string::npos)
+      bodies[(*it)[1].str()] += code.substr(brace, shut - brace + 1);
+  }
+  std::set<std::string> readers;
+  std::vector<std::regex> calls;
+  const auto callsReader = [&](const std::string& body) {
+    if (std::regex_search(body, readsCpu))
+      return true;
+    for (const std::regex& r : calls)
+      if (std::regex_search(body, r))
+        return true;
+    return false;
+  };
+  for (bool grew = true; grew;) {
+    grew = false;
+    for (const auto& [name, body] : bodies)
+      if (!readers.contains(name) && callsReader(body)) {
+        readers.insert(name);
+        calls.emplace_back("\\b" + name + "\\s*\\(");
+        grew = true;
+      }
+  }
+  std::vector<std::string> out;
+  static const std::regex testCase(R"(\bTEST_CASE\s*\()");
+  for (std::sregex_iterator it(code.begin(), code.end(), testCase), end;
+       it != end; ++it) {
+    const size_t paren = static_cast<size_t>(it->position() + it->length() - 1);
+    const size_t closed = Closing(code, paren);
+    if (closed == std::string::npos)
+      continue;
+    const std::string head = named.substr(paren, closed - paren + 1);
+    if (head.find("[.") != std::string::npos)
+      continue;
+    const size_t brace = SkipSpace(code, closed + 1);
+    if (brace >= code.size() || code[brace] != '{')
+      continue;
+    const size_t shut = Closing(code, brace);
+    if (shut == std::string::npos)
+      continue;
+    const std::string body = code.substr(brace, shut - brace + 1);
+    if (!callsReader(body) || body.find("CHECK_COST(") != std::string::npos ||
+        body.find("NOT_A_COST_CHECK(") != std::string::npos)
+      continue;
+    const size_t q = head.find('"');
+    out.push_back(head.substr(q, head.find('"', q + 1) - q + 1));
+  }
+  return out;
+}
+} // namespace
+
+// A budget measured on the build that ships means nothing in a sanitized
+// one, where only our code is instrumented: nine cost checks failed the
+// ASan suite at 2 to 170 times their budgets, one of them already given ten
+// times its budget there. CHECK_COST (tests/CostCheck.h) is CHECK in a
+// normal build and is not judged under the sanitizers, while the work and
+// every other check still run; a case that reads CPU time uses it, or says
+// why what it reads is not a budget.
+TEST_CASE("a test case that reads CPU time states its budget with CHECK_COST",
+          "[convention]") {
+  // The scan sees the cases it is for, through a helper, and passes the rest.
+  const std::string probe =
+      "double Cpu() { return double(std::clock()) / CLOCKS_PER_SEC; }\n"
+      "double Twice() { return 2 * Cpu(); }\n"
+      "TEST_CASE(\"a\", \"[x]\") { const double t = Twice(); CHECK(t < 1); }\n"
+      "TEST_CASE(\"b\", \"[x]\") { const double t = Cpu(); CHECK_COST(t < 1); "
+      "}\n"
+      "TEST_CASE(\"c\", \"[x]\") { CHECK(1 + 1 == 2); }\n"
+      "TEST_CASE(\"d\", \"[.][x]\") { (void)Cpu(); }\n"
+      "TEST_CASE(\"e\", \"[x]\") { auto now = [] { return std::clock(); };\n"
+      "  NOT_A_COST_CHECK(\"a deadline\"); (void)now(); }\n";
+  const std::vector<std::string> seen =
+      UnstatedCostReads(WithoutLiterals(CodeOnly(probe)), CodeOnly(probe));
+  REQUIRE(seen == std::vector<std::string>{"\"a\""});
+
+  std::vector<std::string> offenders;
+  for (const SourceFile& src : SourcesUnder("tests", ".cpp")) {
+    if (src.path.filename() == "test_conventions.cpp")
+      continue;
+    // Only a file that reads CPU time somewhere can have a case that does.
+    static const std::regex anyRead(
+        R"(std::clock\s*\(|_CPUTIME_ID|\bgetrusage\s*\()");
+    if (!std::regex_search(src.text, anyRead))
+      continue;
+    const std::string named = CodeOnly(src.text);
+    for (const std::string& name :
+         UnstatedCostReads(WithoutLiterals(named), named))
+      offenders.push_back(Relative(src.path) + ": " + name);
+  }
+  INFO("state the budget with CHECK_COST (tests/CostCheck.h), or say why "
+       "it is none with NOT_A_COST_CHECK:\n" +
+       [&] {
+         std::string s;
+         for (const std::string& o : offenders)
+           s += "  " + o + "\n";
+         return s;
+       }());
+  CHECK(offenders.empty());
+}
