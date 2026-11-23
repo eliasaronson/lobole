@@ -193,6 +193,7 @@ def main():
         d = Client.wait_for(app.port)
         try:
             desc = d.call("describe")
+            has_cam = d.call("ping").get("features", {}).get("cam", True)
         finally:
             d.close()
     finally:
@@ -270,7 +271,15 @@ def main():
                             "serve")
     # Every text an agent reads names only what exists.
     tools = announced_tools(m)
-    found, text_count = prose_problems(m, desc, tools)
+    # The prose describes the whole app. A build without CAM registers none
+    # of the CAM methods it names, so that build has no table to hold it to;
+    # the full build's run of this gate is the one that checks it.
+    if has_cam:
+        found, text_count = prose_problems(m, desc, tools)
+    else:
+        found, text_count = [], 0
+        print("mcp formats gate: prose scan skipped: this build has no CAM, "
+              "and the prose names its methods")
     problems += found
     # The schemas stay portable: the app's own (test_rpc_contract.cpp lints
     # them too) and the tools' signatures as the SDK writes them.

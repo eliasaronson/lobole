@@ -603,6 +603,7 @@ TEST_CASE("CG is judged by its energy: a slender part's climbing residual is "
 
 #endif // HAVE_FEM_SOLVER
 
+#if defined(HAVE_NETGEN) && defined(HAVE_FEM_SOLVER)
 // A bearing load (docs/simulation/README.md#bearing-loads): a cosine
 // pressure over the half of a shaft its direction pushes on, whose nodal
 // loads sum to exactly the force along it, carry no moment about the axis,
@@ -650,6 +651,7 @@ TEST_CASE("a bearing load's nodal loads are its force, with no moment about "
   CHECK(pushed > 0.0);
   CHECK(far == 0.0);
 }
+#endif // HAVE_NETGEN && HAVE_FEM_SOLVER
 
 // A bearing load needs a cylindrical face, a direction, and one across the
 // axis: each refused naming what it takes, before a mesh (the same check an
