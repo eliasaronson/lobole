@@ -1512,12 +1512,13 @@ of curvature. Two more are taken from the faces' own geometry rather than
 measured at stations ([bounds that refuse](#bounds-that-refuse)): at a
 closed circle, the **axis** -- a face of revolution leaning toward it from
 the rim reaches it, and no setback passes that (a cylinder's end rounded by
-its own radius is a hemisphere) -- and two blends that **meet** across a
-planar face, picked or brought in by the builder's tangent propagation.
-Each reads as an upper bound -- nothing above it fits, something below it
+its own radius is a hemisphere) -- two blends that **meet** across a
+planar face, picked or brought in by the builder's tangent propagation,
+and an edge's tightest **bend** in a planar face beside a wall square to
+it. Each reads as an upper bound -- nothing above it fits, something below it
 may still fail -- and the least of them, with the face or edge it is about,
-is the blend's bound. The axis and the meet hold in OpenCASCADE: they
-refuse a size past them, and every other kind seeds the search.
+is the blend's bound. The axis, the meet and the bend hold in OpenCASCADE:
+they refuse a size past them, and every other kind seeds the search.
 
 **The search** (`fit::LargestThatBuilds`). When the build at the asked size
 fails -- the builder is not done, a faulty contour, a fault in its signal
@@ -1634,7 +1635,12 @@ and failed at 1.005, the builder running the second blend a little onto
 the first. So those two refuse: the axis a thousandth past it
 (`fit::kRefuseMargin`: a blend as large as the bound is still the
 builder's to answer), two blends that meet a hundredth past
-(`fit::kMeetRefuseMargin`). `tests/test_blend_fit_rim.cpp` holds each
+(`fit::kMeetRefuseMargin`). Past an edge's bend, over the 82 edge sets of
+the corpus's spline, ellipse and text pads it bounds, the builder built 74
+rounds a thousandth past it and 66 a hundredth past (the fold in the
+round's edge smaller than its tolerance), 8 chamfers a thousandth past,
+and nothing a tenth past: the bend refuses a tenth past it
+(`fit::kBendRefuseMargin`). `tests/test_blend_fit_rim.cpp` holds each
 against the builder both ways -- the search's first candidate under the
 bound builds, the refusal margin past it does not -- on shafts, blind
 bores, frustums, tapered floors, drill points, pairs of bores, a bore
@@ -1680,7 +1686,31 @@ a copy of the body and the edges added (16 ms on the plate below, a tenth
 of its build), so the last four inputs' are kept, and a size dragged on
 one feature pays it once.
 
-`FilletFeature::Execute` looks for both before it builds
+**An edge's bend** (`fit::BendBounds`). An edge of the blend's contours
+that is neither a line nor a circle, on a planar face whose other face is
+a wall extruded square to that plane (a pad's side, a pocket's), so the
+setback on the plane is the blend's size all along it. The blend's edge on
+the plane is the edge's parallel at that setback, and a parallel folds
+back on itself (a swallowtail) where the edge bends toward the face with a
+radius under the setback: the bound is the least such radius inside the
+edge, found by sampling every span of its p-curve and refining each local
+tightest by golden section. Not at an open edge's end: a half ellipse
+closed by its axis bends tightest at its two ends, the fold runs off the
+arc into the corner there, and the builder rounds it at 1.5 times that
+radius. A circle's is the axis's or none (a bore's rim bends away from its
+face), and a line has none. It is what a midpoint's
+curvature misses: a pad on a closed spline whose pole a damaged file threw
+back past its neighbours bends to 0.6 um at one place, its 0.5 mm round
+measured no such curvature, and the search built nine candidates around
+the bend at up to 7 s of CPU each -- a failing blend near where it stops
+existing walks the builder's smallest steps -- 13 s in all; past the bend
+it builds one, 0.000591 mm, in a hundredth of that
+(`tests/test_spline.cpp`). `tests/test_blend_fit_rim.cpp` holds it against
+the builder both ways on an ellipse's pad and pocket floor (b^2 / a), and
+finds none on a half ellipse's arc or an elliptic bore's rim, which build
+at 1.5 times it.
+
+`FilletFeature::Execute` looks for these before it builds
 (`fit::RefusingBounds`, under the size asked; a look at analytic geometry,
 where measuring every bound costs more than a fitting blend, 0.35 s against
 0.2 s on the plate below). Past one it builds only the search's candidates,

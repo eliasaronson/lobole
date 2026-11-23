@@ -1,0 +1,14 @@
+{
+  "counts": {
+    "bodies": 1,
+    "configurations": 0,
+    "failed": 1,
+    "features": 3,
+    "studies": 0
+  },
+  "expect": "loads",
+  "family": "part",
+  "id": "part/v217-closed-spline-two-edges.json:replace_line:5",
+  "input": "v217-closed-spline-two-edges.json",
+  "seed": 0
+}

@@ -58,6 +58,8 @@ const char* KindName(fit::BoundKind k) {
     return "rim";
   case fit::BoundKind::Meet:
     return "meet";
+  case fit::BoundKind::Bend:
+    return "bend";
   }
   return "?";
 }
@@ -170,9 +172,9 @@ TEST_CASE("Nothing builds past a refusing bound", "[.fit_sweep]") {
   for (const auto& [key, t] : tally) {
     INFO(key);
     // A kind that refuses builds nothing past its refusal margin.
-    for (const auto k :
-         {fit::BoundKind::Width, fit::BoundKind::Between,
-          fit::BoundKind::Curvature, fit::BoundKind::Rim, fit::BoundKind::Meet})
+    for (const auto k : {fit::BoundKind::Width, fit::BoundKind::Between,
+                         fit::BoundKind::Curvature, fit::BoundKind::Rim,
+                         fit::BoundKind::Meet, fit::BoundKind::Bend})
       if (key.ends_with(KindName(k)) && fit::Refuses(k))
         for (int level = 0; level < kLevels; level++)
           if (kFactors[level] >= 1.0 + fit::RefuseMargin(k))

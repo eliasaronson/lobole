@@ -6,6 +6,7 @@
 
 #include "TestIO.h"
 #include "TestPaths.h"
+#include "core/BlendFit.h"
 #include "core/Document.h"
 #include "core/features/ExtrudeFeature.h"
 #include "core/features/FilletFeature.h"
@@ -16,7 +17,12 @@
 #include "core/sketch/SketchSection.h"
 #include "core/sketch/SketchSolver.h"
 
+#include <nlohmann/json.hpp>
+
+#include <cstdint>
 #include <filesystem>
+#include <fstream>
+#include <unistd.h>
 
 using Catch::Matchers::WithinAbs;
 using Catch::Matchers::WithinRel;
@@ -232,6 +238,38 @@ TEST_CASE("The v217 golden's closed spline is two edges and weighs its area",
   // its last digit and BRepGProp's fixed rule read 0.19 heavy.
   CHECK_THAT(doc->GetBodies().at(0).shape.Volume(),
              WithinAbs(4516.525400, 1e-2));
+}
+
+// A pole of the v217 golden's spline thrown back past its neighbours (the
+// reader fuzz's damage) bends the outline to a radius of 0.6 um, and its
+// 0.5 mm round does not fit. The size search built at sizes around that
+// bend, where a failing blend costs the builder seconds: 13 s of CPU over
+// nine candidates. The bend is a bound that refuses, so the search builds
+// one candidate, just under it.
+TEST_CASE("A round past a spiked spline's tightest bend is refused after one "
+          "build",
+          "[spline][fillet][fit]") {
+  nlohmann::json j;
+  std::ifstream(std::string(TestSourceDir()) +
+                "/tests/golden/v217-closed-spline-two-edges.json") >>
+      j;
+  j["features"][0]["entities"][0]["poles"][48][0] = -2.3013106768857114;
+  const fs::path path =
+      fs::temp_directory_path() /
+      ("lobole-spiked-spline-" + std::to_string(::getpid()) + ".json");
+  std::ofstream(path) << j.dump(2);
+  const std::uint64_t before = fit::CandidatesBuilt();
+  auto doc = testio::Load(path.string());
+  const std::uint64_t built = fit::CandidatesBuilt() - before;
+  fs::remove(path);
+  REQUIRE(doc != nullptr);
+  REQUIRE(doc->FeatureCount() == 3);
+  const std::string error = doc->GetFeature(2)->GetError();
+  INFO(error);
+  CHECK(error.find("bends toward face") != std::string::npos);
+  CHECK(error.find("the largest radius that fits is 0.000591 mm") !=
+        std::string::npos);
+  CHECK(built == 1);
 }
 
 TEST_CASE("A lone closed spline's pad shells", "[spline][extrude]") {

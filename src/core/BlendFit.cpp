@@ -26,9 +26,11 @@
 #include <GCE2d_MakeSegment.hxx>
 #include <GCPnts_AbscissaPoint.hxx>
 #include <Geom2dAPI_InterCurveCurve.hxx>
+#include <Geom2dAdaptor_Curve.hxx>
 #include <Geom2d_Curve.hxx>
 #include <Geom2d_TrimmedCurve.hxx>
 #include <Standard_Failure.hxx>
+#include <TColStd_Array1OfReal.hxx>
 #include <TopExp.hxx>
 #include <TopExp_Explorer.hxx>
 #include <TopTools_IndexedDataMapOfShapeListOfShape.hxx>
@@ -40,6 +42,7 @@
 #include <gp_Lin.hxx>
 #include <gp_Pln.hxx>
 #include <gp_Pnt2d.hxx>
+#include <gp_Vec2d.hxx>
 
 #include <algorithm>
 #include <array>
@@ -749,12 +752,156 @@ std::optional<Bound> MeetBound(const Body& body, const std::vector<int>& edges,
   return std::nullopt;
 }
 
+std::vector<Bound> BendBounds(const Body& body, const std::vector<int>& edges,
+                              EdgeBlendOp op) {
+  std::vector<Bound> out;
+  if (body.shape.GetShape().IsNull() || edges.empty())
+    return out;
+  Look look(body);
+  std::vector<int> blended;
+  for (const topo::BlendContour& c : ContoursOf(body.shape, edges, op))
+    blended.insert(blended.end(), c.edges.begin(), c.edges.end());
+  std::sort(blended.begin(), blended.end());
+  blended.erase(std::unique(blended.begin(), blended.end()), blended.end());
+  for (const int e : blended) {
+    if (e < 0 || e + 1 > look.EdgeCount())
+      continue;
+    const TopoDS_Edge& edge = look.Edge(e);
+    if (BRep_Tool::Degenerated(edge))
+      continue;
+    const GeomAbs_CurveType type = BRepAdaptor_Curve(edge).GetType();
+    if (type == GeomAbs_Line || type == GeomAbs_Circle)
+      continue;
+    const auto faces = look.Faces(e);
+    if (!faces)
+      continue;
+    for (int i = 0; i < 2; i++) {
+      const int f = (*faces)[i], g = (*faces)[1 - i];
+      const TopoDS_Face& face = look.Face(f);
+      const BRepAdaptor_Surface fs(face, false);
+      const BRepAdaptor_Surface gs(look.Face(g), false);
+      if (fs.GetType() != GeomAbs_Plane ||
+          gs.GetType() != GeomAbs_SurfaceOfExtrusion ||
+          !gs.Direction().IsParallel(fs.Plane().Axis().Direction(), 1e-9))
+        continue;
+      // Square to the plane all along: a round's setback on it is its
+      // radius (r tan 45 degrees), a chamfer's its distance.
+      TopoDS_Edge inFace = edge;
+      for (TopExp_Explorer x(face, TopAbs_EDGE); x.More(); x.Next())
+        if (x.Current().IsSame(edge))
+          inFace = TopoDS::Edge(x.Current());
+      double t0 = 0.0, t1 = 0.0;
+      const Handle(Geom2d_Curve) pc =
+          BRep_Tool::CurveOnSurface(inFace, face, t0, t1);
+      if (pc.IsNull() || !(t1 > t0))
+        continue;
+      // The plane's parameters are lengths, so the p-curve's curvature is
+      // the edge's. In its parameters a face lies left of its edges as the
+      // face holds them, right of them on a reversed face.
+      const double side =
+          (inFace.Orientation() == TopAbs_REVERSED ? -1.0 : 1.0) *
+          (face.Orientation() == TopAbs_REVERSED ? -1.0 : 1.0);
+      // Curvature toward the face, signed: positive where the edge turns
+      // toward it.
+      const auto toward = [&](double t) {
+        gp_Pnt2d p;
+        gp_Vec2d d1, d2;
+        pc->D2(t, p, d1, d2);
+        const double speed = d1.Magnitude();
+        if (speed < 1e-12)
+          return 0.0;
+        return side * d1.Crossed(d2) / (speed * speed * speed);
+      };
+      // The tightest bend inside the edge, sampled along every span and
+      // each local most refined by golden section: a pole thrown aside bends
+      // a spline within a fraction of one span. Not at an end: a half
+      // ellipse's ends bend tightest, and there the fold runs off the edge
+      // into the corner, which the builder rounds past it.
+      const Geom2dAdaptor_Curve adaptor(pc, t0, t1);
+      const int spans = std::max(1, adaptor.NbIntervals(GeomAbs_C2));
+      TColStd_Array1OfReal breaks(1, spans + 1);
+      adaptor.Intervals(breaks, GeomAbs_C2);
+      constexpr int kPerSpan = 32;
+      std::vector<std::pair<double, double>> samples; // (t, curvature)
+      for (int span = 1; span <= spans; span++) {
+        const double a = breaks(span), b = breaks(span + 1);
+        for (int k = span == 1 ? 0 : 1; k <= kPerSpan; k++) {
+          const double t = k == kPerSpan ? b : a + (b - a) * k / kPerSpan;
+          samples.emplace_back(t, toward(t));
+        }
+      }
+      // The most of the curvature on [lo, hi], by golden section: where,
+      // and how much.
+      const auto refine = [&](double lo, double hi) {
+        const double golden = 0.5 * (std::sqrt(5.0) - 1.0);
+        double x1 = hi - golden * (hi - lo), x2 = lo + golden * (hi - lo);
+        double k1 = toward(x1), k2 = toward(x2);
+        for (int it = 0; it < 60 && hi - lo > 1e-15 * std::max(1.0, t1 - t0);
+             it++) {
+          if (k1 > k2) {
+            hi = x2;
+            x2 = x1;
+            k2 = k1;
+            x1 = hi - golden * (hi - lo);
+            k1 = toward(x1);
+          } else {
+            lo = x1;
+            x1 = x2;
+            k1 = k2;
+            x2 = lo + golden * (hi - lo);
+            k2 = toward(x2);
+          }
+        }
+        return k1 > k2 ? std::pair{x1, k1} : std::pair{x2, k2};
+      };
+      const size_t n = samples.size();
+      const double ends = 1e-9 * (t1 - t0);
+      double best = 0.0;
+      for (size_t i = 1; i + 1 < n; i++) {
+        if (!(samples[i].second > 0.0) ||
+            samples[i].second < samples[i - 1].second ||
+            !(samples[i].second > samples[i + 1].second))
+          continue;
+        const auto [at, kappa] =
+            refine(samples[i - 1].first, samples[i + 1].first);
+        if (at - t0 <= ends || t1 - at <= ends)
+          continue; // it runs to an end
+        best = std::max({best, samples[i].second, kappa});
+      }
+      // A closed edge has no end: its two ends are one point inside it.
+      if (BRep_Tool::IsClosed(edge) && n > 2 && samples[0].second > 0.0 &&
+          samples[0].second >= samples[1].second &&
+          samples[0].second >= samples[n - 2].second)
+        best = std::max({best, samples[0].second,
+                         refine(t0, samples[1].first).second,
+                         refine(samples[n - 2].first, t1).second});
+      if (!(best > 0.0))
+        continue;
+      const double radius = 1.0 / best;
+      if (!std::isfinite(radius) || !(radius > 0.0))
+        continue;
+      const std::string name = look.EdgeName(e);
+      out.push_back(
+          Bound{radius,
+                "edge '" + name + "' bends toward face '" + look.FaceName(f) +
+                    "' with a radius of " + Mm(radius) + " mm, so " +
+                    (op == EdgeBlendOp::Chamfer ? "a chamfer's" : "a round's") +
+                    " edge on that face folds back on itself past " +
+                    Mm(radius) + " mm",
+                name, BoundKind::Bend});
+    }
+  }
+  return out;
+}
+
 std::vector<Bound> RefusingBounds(const Body& body,
                                   const std::vector<int>& edges, EdgeBlendOp op,
                                   double below) {
   std::vector<Bound> out = RimBounds(body, edges, op);
   if (auto meet = MeetBound(body, edges, op, below))
     out.push_back(std::move(*meet));
+  for (Bound& b : BendBounds(body, edges, op))
+    out.push_back(std::move(b));
   return out;
 }
 std::optional<Bound> Least(const std::vector<Bound>& bounds) {
@@ -780,10 +927,12 @@ bool Refuses(BoundKind kind) {
   // picked edges or a face's curvature OpenCASCADE built hundreds of blends,
   // many at four times the bound (a wedge whose face narrows to a point at
   // one station, a round that runs off its face); past a circle's axis or
-  // two blends meeting across a plane, none.
+  // two blends meeting across a plane, none; a tenth past an edge's bend,
+  // none.
   switch (kind) {
   case BoundKind::Rim:
   case BoundKind::Meet:
+  case BoundKind::Bend:
     return true;
   case BoundKind::Width:
   case BoundKind::Between:
@@ -794,7 +943,14 @@ bool Refuses(BoundKind kind) {
 }
 
 double RefuseMargin(BoundKind kind) {
-  return kind == BoundKind::Meet ? kMeetRefuseMargin : kRefuseMargin;
+  switch (kind) {
+  case BoundKind::Meet:
+    return kMeetRefuseMargin;
+  case BoundKind::Bend:
+    return kBendRefuseMargin;
+  default:
+    return kRefuseMargin;
+  }
 }
 
 std::optional<Bound> RefusingBound(const std::vector<Bound>& bounds,

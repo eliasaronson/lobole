@@ -24,8 +24,8 @@ namespace fit {
 // What a bound is about: the face's width from the edge, the width between
 // two picked edges, a face's curvature toward the round, a circle's axis
 // (a face of revolution leaning toward it from the rim ends there), two
-// blends meeting across a planar face.
-enum class BoundKind { Width, Between, Curvature, Rim, Meet };
+// blends meeting across a planar face, an edge bending in a planar face.
+enum class BoundKind { Width, Between, Curvature, Rim, Meet, Bend };
 
 // What cannot fit, for the cost of a look: nothing above `size` does, and
 // something below it may still fail. `why` is the geometric fact ("face
@@ -59,6 +59,10 @@ bool Refuses(BoundKind kind);
 // a concave rim's (the sweep: none at 1.01).
 inline constexpr double kRefuseMargin = 1e-3;
 inline constexpr double kMeetRefuseMargin = 1e-2;
+// An edge's bend is given a tenth: just past it the fold in the blend's edge
+// is smaller than the builder's tolerance, and it built rounds of 1.01 times
+// the bend on most of the corpus's spline and text pads (none at 1.1).
+inline constexpr double kBendRefuseMargin = 1e-1;
 double RefuseMargin(BoundKind kind);
 
 // The least bound of a refusing kind that `asked` is past, or none.
@@ -95,7 +99,19 @@ std::vector<Bound> RimBounds(const Body& body, const std::vector<int>& edges,
 std::optional<Bound> MeetBound(const Body& body, const std::vector<int>& edges,
                                EdgeBlendOp op, double below);
 
-// RimBounds and MeetBound together: what Execute asks before it builds.
+// Bend: an edge of the blend (the builder's contours) that is neither a
+// line nor a circle, on a planar face whose other face is a wall extruded
+// square to that plane (a pad's side), so a blend's setback on the plane is
+// its size all along it. The blend's edge on the plane is the edge's
+// parallel at that setback, which folds back on itself (a swallowtail)
+// where the edge bends toward the face with a radius under it: the least
+// such radius of curvature along the edge. A circle's is the Rim's or no
+// bound at all (a bore's rim bends away from its face).
+std::vector<Bound> BendBounds(const Body& body, const std::vector<int>& edges,
+                              EdgeBlendOp op);
+
+// RimBounds, MeetBound and BendBounds together: what Execute asks before it
+// builds.
 std::vector<Bound> RefusingBounds(const Body& body,
                                   const std::vector<int>& edges, EdgeBlendOp op,
                                   double below);

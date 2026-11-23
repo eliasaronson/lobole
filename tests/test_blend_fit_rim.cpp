@@ -1,8 +1,9 @@
 // SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// The refusing bounds at circular rims and where two blends meet across a
-// face (docs/modeling/README.md#bounds-that-refuse), checked against the
+// The refusing bounds at circular rims, where two blends meet across a face
+// and where an edge bends in a face
+// (docs/modeling/README.md#bounds-that-refuse), checked against the
 // builder both ways: just under the bound it builds, so the bound refuses
 // nothing that fits; just past the refusal margin it does not, so the bound
 // is the limit and not a guess above it.
@@ -17,8 +18,10 @@
 #include <BRepAdaptor_Curve.hxx>
 #include <BRepAlgoAPI_Cut.hxx>
 #include <BRepAlgoAPI_Fuse.hxx>
+#include <BRepBuilderAPI_MakeEdge.hxx>
 #include <BRepBuilderAPI_MakeFace.hxx>
 #include <BRepBuilderAPI_MakePolygon.hxx>
+#include <BRepBuilderAPI_MakeWire.hxx>
 #include <BRepPrimAPI_MakeBox.hxx>
 #include <BRepPrimAPI_MakeCone.hxx>
 #include <BRepPrimAPI_MakeCylinder.hxx>
@@ -28,6 +31,7 @@
 #include <TopTools_IndexedMapOfShape.hxx>
 #include <TopoDS.hxx>
 #include <gp_Ax2.hxx>
+#include <gp_Elips.hxx>
 
 #include <cmath>
 #include <functional>
@@ -306,5 +310,73 @@ TEST_CASE("A blend past where it meets its tangent chain names the chain",
     REQUIRE(meet.has_value());
     CHECK(meet->why.find("(tangent to a picked edge, so blended with it)") !=
           std::string::npos);
+  }
+}
+
+// A prism on an ellipse, its side extruded square to its caps: the ellipse
+// bends tightest at the ends of its major axis, with a radius of b^2 / a.
+TEST_CASE("A blend along an edge that bends in a planar face stops at its "
+          "tightest bend",
+          "[fillet][fit]") {
+  const double a = 30.0, b = 6.0, h = 10.0, rho = b * b / a;
+  const auto ellipse = [&](double z) {
+    const TopoDS_Edge e = BRepBuilderAPI_MakeEdge(
+        gp_Elips(gp_Ax2(gp_Pnt(0, 0, z), gp::DZ(), gp::DX()), a, b));
+    return BRepBuilderAPI_MakeFace(BRepBuilderAPI_MakeWire(e).Wire()).Face();
+  };
+  const auto ellipsesAt = [](const TopoDS_Shape& s, double z) {
+    return EdgesWhere(s, [&](const BRepAdaptor_Curve& c) {
+      return c.GetType() == GeomAbs_Ellipse &&
+             std::abs(c.Ellipse().Location().Z() - z) < 1e-6;
+    });
+  };
+  const TopoDS_Shape pad =
+      BRepPrimAPI_MakePrism(ellipse(0.0), gp_Vec(0, 0, h)).Shape();
+  const TopoDS_Shape plate = Plate(4.0 * a, h);
+  const TopoDS_Shape pocket = BRepAlgoAPI_Cut(
+      plate, BRepPrimAPI_MakePrism(ellipse(-h / 2), gp_Vec(0, 0, h)).Shape());
+  const TopoDS_Shape bore = BRepAlgoAPI_Cut(
+      plate,
+      BRepPrimAPI_MakePrism(ellipse(-h - 1), gp_Vec(0, 0, h + 2)).Shape());
+  for (const EdgeBlendOp op : kOps) {
+    // The pad's top: its cap lies inside the ellipse.
+    Agrees("ellipse pad top", MakeBody(pad), ellipsesAt(pad, h), op,
+           fit::BoundKind::Bend, rho);
+    // A pocket's floor, concave: the floor lies inside it too.
+    Agrees("ellipse pocket floor", MakeBody(pocket), ellipsesAt(pocket, -h / 2),
+           op, fit::BoundKind::Bend, rho);
+    // A half ellipse closed by its major axis bends tightest at its two
+    // ends, where the fold runs off the arc into the corner: no bound, and
+    // the builder rounds the arc past it.
+    {
+      INFO("half ellipse pad top " << OpName(op));
+      const gp_Elips el(gp_Ax2(gp_Pnt(0, 0, 0), gp::DZ(), gp::DX()), a, b);
+      const TopoDS_Edge arc =
+          BRepBuilderAPI_MakeEdge(el, 0.0, std::numbers::pi);
+      const TopoDS_Edge axis =
+          BRepBuilderAPI_MakeEdge(gp_Pnt(-a, 0, 0), gp_Pnt(a, 0, 0));
+      const TopoDS_Face half =
+          BRepBuilderAPI_MakeFace(BRepBuilderAPI_MakeWire(arc, axis).Wire());
+      const TopoDS_Shape s =
+          BRepPrimAPI_MakePrism(half, gp_Vec(0, 0, h)).Shape();
+      const Body hb = MakeBody(s);
+      const auto top = ellipsesAt(s, h);
+      REQUIRE(top.size() == 1);
+      CHECK(fit::BendBounds(hb, top, op).empty());
+      CHECK(Builds(hb, top, op, 1.5 * rho));
+    }
+    // A bore's rim bends away from the plate's top: no bound, and the
+    // builder builds past the bend.
+    INFO("ellipse bore top " << OpName(op));
+    const Body bb = MakeBody(bore);
+    // The cut may hand the rim back in pieces, or as another curve kind.
+    const auto rim = EdgesWhere(bore, [](const BRepAdaptor_Curve& c) {
+      return c.GetType() != GeomAbs_Line &&
+             std::abs(c.Value(c.FirstParameter()).Z()) < 1e-6 &&
+             std::abs(c.Value(c.LastParameter()).Z()) < 1e-6;
+    });
+    REQUIRE(!rim.empty());
+    CHECK(fit::BendBounds(bb, rim, op).empty());
+    CHECK(Builds(bb, rim, op, 1.5 * rho));
   }
 }
