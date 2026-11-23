@@ -312,6 +312,24 @@ the heading if it is not here yet.
   corpus entry's features, or a list kept with the corpus), so a seed names
   one case set.
 
+## Headless suite
+
+### `study_reopen_smoke` once took 13 minutes in a stock Ubuntu container
+
+- **Symptom:** one solo run of `tests/study_reopen_smoke.py` in the
+  ubuntu:26.04 container (no GPU, apt's OpenCASCADE and Netgen) took 778 s
+  of wall time for 66 s of CPU, and passed. The two runs after it took 49 s
+  and 57 s, and the nix build takes 19 s. Every wait the test then had was
+  a blocking call held to 60 s or a poll held to 240 s, so the time went to
+  many waits that each ended in time, or to one outside the RPCs.
+- **Cause:** not known. The machine was running two builds and another
+  lane's sanitizer suite at the time, which adds CPU wait but not waits ten
+  times the CPU time.
+- **Where:** unknown; the run kept no timestamps.
+- **Likely fix:** run it in that container with each RPC's wall time and
+  the app's CPU logged (a `sitecustomize` wrapping `Client.request` did
+  that) until it happens again, and find which call waited.
+
 ## GUI suite
 
 ### Viewport picks resolve nothing after some neighbours in a shuffled run
