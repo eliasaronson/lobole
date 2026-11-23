@@ -193,6 +193,8 @@ class Instance:
         self.client = Client.wait_for(self.app.port, strict=True)
         self.timeout = timeout
         self.port = self.app.port
+        # The kernel's patches: how many draws a refused Shell takes.
+        self.patches = str(self.client.call("ping").get("occ_patches", ""))
 
     def request(self, method, params=None, timeout=None):
         t = time.time()
@@ -740,12 +742,28 @@ def slow_set(baseline):
     return set(slow_times(baseline))
 
 
-def deadline_for(slow, unit, key, action):
+def shell_draws(patches):
+    """The builds a Shell makes before it refuses, as ShellFeature.cpp
+    chooses them by the kernel's patches (`ping`'s occ_patches): one where
+    the offset's faces are bound in a stable order, else two or five draws
+    of fresh copies."""
+    if "occt-offset-arc-bind-order" in patches:
+        return 1
+    return 2 if "occt-shell-cap-order" in patches else 5
+
+
+def deadline_for(slow, unit, key, action, patches=None):
     """An action the baseline timed at s seconds may take SLOW_MARGIN x s
     before it is a hang, never less than ACTION_TIMEOUT_S: a 22 s extrude on
-    a loaded machine is not a hang."""
-    return max(ACTION_TIMEOUT_S,
-               SLOW_MARGIN * slow.get((unit, key, action), 0.0))
+    a loaded machine is not a hang. Both are one build's, on the kernel the
+    baseline was measured on; a Shell on a kernel without its patches makes
+    up to five (a gear's refused shell, 8.8 s alone on apt's OpenCASCADE
+    against under 5 here, passed 60 s in a loaded suite), so its deadline is
+    that many builds'."""
+    builds = shell_draws(patches) if action == "face.shell" and \
+        patches is not None else 1
+    return builds * max(ACTION_TIMEOUT_S,
+                        SLOW_MARGIN * slow.get((unit, key, action), 0.0))
 
 
 def in_scope(unit, action, key, every, actions, slow):
@@ -1143,7 +1161,7 @@ class Worker:
             t = time.time()
             self.inst.timeout = deadline_for(
                 self.times, unit, act["family"] or act["entity"],
-                act["action"])
+                act["action"], self.inst.patches)
             result, restore = run_action(self.inst, act, ctx)
             self.inst.timeout = ACTION_TIMEOUT_S
             if restore == "restart":

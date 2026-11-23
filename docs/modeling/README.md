@@ -2679,7 +2679,12 @@ The baseline is one OpenCASCADE series' (`occ`); on another the run judges
 only crashes and hangs. An action that took more than 5 s is in its `slow`
 table with its seconds: the sample and the determinism check skip it, and
 the whole sweep gives it ten times those seconds (never under 60) before it
-is a hang, so a loaded machine does not turn a 22 s extrude into one.
+is a hang, so a loaded machine does not turn a 22 s extrude into one. Those
+are one build's seconds on the baseline's kernel; a Shell on a kernel
+without its patches (`ping`'s `occ_patches`) builds up to five draws before
+it refuses, and gets that many times the deadline (`shell_draws`): a
+gear's refused shell on stock Ubuntu's kernel passed 60 s in a loaded
+suite.
 
 **Determinism.** `--determinism` takes the sample's designs at one action in
 eight, builds each in two fresh instances and runs every action twice in
