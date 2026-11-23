@@ -1366,7 +1366,7 @@
   },
   "generator/gear_train#wheel": {
    "body:2": "!body.mirror !body.pattern_circular !body.pattern_linear body.split",
-   "edge:2/*;U*": "edge.chamfer*288 -edge.chamfer*576 edge.fillet*288 -edge.fillet*576 edge.frame*432",
+   "edge:2/*;U*": "edge.chamfer*720 -edge.chamfer*144 edge.fillet*720 -edge.fillet*144 edge.frame*432",
    "edge:2/cap0;G4": "edge.chamfer edge.fillet edge.frame",
    "edge:4/*;U*": "edge.chamfer*1 edge.fillet*1 edge.frame*1",
    "face:2/cap0;M4": "face.draft face.extrude_add face.extrude_cut face.frame face.hole face.sketch",
@@ -2859,7 +2859,7 @@
   },
   "golden/v191-g2-arc-length": {
    "body:2": "body.mirror body.pattern_circular body.pattern_linear body.split",
-   "edge:2/*;U*": "edge.chamfer*4 -edge.chamfer*7 edge.fillet*4 -edge.fillet*7 edge.frame*2",
+   "edge:2/*;U*": "edge.chamfer*4 -edge.chamfer*7 edge.fillet*10 -edge.fillet*1 edge.frame*2",
    "face:2/*;U*": "face.delete*1 -face.delete_feature*1",
    "face:2/cap0": "-face.delete -face.delete_feature !face.draft face.extrude_add face.extrude_cut face.frame face.hole -face.offset_in -face.offset_out -face.replace -face.shell face.sketch",
    "face:2/cap1": "-face.delete -face.delete_feature !face.draft face.extrude_add face.extrude_cut face.frame face.hole -face.offset_in -face.offset_out -face.replace -face.shell face.sketch",
@@ -3085,7 +3085,7 @@
   },
   "golden/v217-closed-spline-two-edges": {
    "body:2": "-body.mirror -body.pattern_circular -body.pattern_linear body.split",
-   "edge:2/*;U*": "edge.chamfer*1 -edge.chamfer*3 edge.fillet*1 -edge.fillet*3",
+   "edge:2/*;U*": "edge.chamfer*2 -edge.chamfer*2 edge.fillet*2 -edge.fillet*2",
    "face:2/*;U*": "-face.delete*4 -face.delete_feature*4",
    "face:2/cap0": "-face.delete -face.delete_feature face.extrude_add face.extrude_cut face.frame face.hole -face.offset_in -face.offset_out -face.replace face.shell face.sketch",
    "face:2/cap1;M3": "-face.delete -face.delete_feature face.extrude_add face.extrude_cut face.frame face.hole -face.offset_in -face.offset_out -face.replace -face.shell face.sketch"
@@ -4004,10 +4004,10 @@
   "reference/36-relief-on-60-fold": {
    "body:2": "-body.mirror -body.pattern_circular -body.pattern_linear body.split",
    "edge:2/*;U*": "edge.chamfer*16 -edge.chamfer*5 edge.fillet*16 -edge.fillet*5",
-   "edge:2/cap0;M3;M3;M3;M3;G4;M5;M5;M5;M5": "-edge.chamfer -edge.fillet edge.frame",
-   "edge:2/cap1;M3;M3;M3;M3;G4;M5;M5;M5;M5": "-edge.chamfer -edge.fillet edge.frame",
+   "edge:2/cap0;M3;M3;M3;M3;G4;M5;M5;M5;M5": "edge.chamfer edge.fillet edge.frame",
+   "edge:2/cap1;M3;M3;M3;M3;G4;M5;M5;M5;M5": "edge.chamfer edge.fillet edge.frame",
    "edge:3/*;U*": "edge.chamfer*28 edge.fillet*27 -edge.fillet*1 edge.frame*3",
-   "edge:5/*;U*": "edge.chamfer*10 -edge.chamfer*100 edge.fillet*10 -edge.fillet*100",
+   "edge:5/*;U*": "edge.chamfer*78 -edge.chamfer*32 edge.fillet*78 -edge.fillet*32",
    "face:2/*;U*": "curved.frame*1 face.delete*1 -face.delete*3 -face.delete_feature*4 !face.draft*3 face.extrude_add*3 face.extrude_cut*3 face.frame*3 face.hole*3 face.offset_in*3 -face.offset_in*1 face.offset_out*3 -face.offset_out*1 -face.replace*3 -face.shell*3 face.sketch*3",
    "face:2/cap0;M3;M3;M3;M3;G4,2/cap1;M3;M3;M3;M3;G4,3/f0/face0;M3;G4,3/f0/face2;G4[3/f0/face0;M3;M4],3/f0/face6;G4.0,3/f0/face7;M3;G4[2/cap0;M3;M3;M3;M3;M4],3/f1/face0;M3;G4,3/f1/face2;G4[3/f1/face0;M3;M4],3/f1/face5;M3;G4[2/cap0;M3;M3;M3;M3;M4],3/f1/face5;M3;G4[3/f1/face6;M4],3/f1/face6;G4[3/f1/face5;M3;M4],3/f1/face8;G4;L;M5;M5;M5;M5": "curved.frame -face.delete -face.delete_feature -face.offset_in -face.offset_out",
    "face:2/cap0;M3;M3;M3;M3;G4,2/cap1;M3;M3;M3;M3;G4,3/f0/face0;M3;G4,3/f0/face2;G4[3/f0/face0;M3;M4],3/f0/face6;G4.0,3/f0/face7;M3;G4[2/cap0;M3;M3;M3;M3;M4],3/f1/face0;M3;G4,3/f1/face2;G4[3/f1/face0;M3;M4],3/f1/face5;M3;G4[2/cap0;M3;M3;M3;M3;M4],3/f1/face5;M3;G4[3/f1/face6;M4],3/f1/face6;G4[3/f1/face5;M3;M4],3/f1/face8;G4;L;M5[3/f0/face2;G4,3/f0/face8;G4;L|3/f0/face2;M4|3/f0/face6;G4,3/f0/face7;M3;G4,3/f0/face8;G4;L;M5|3/f0/face6;M4];M5": "curved.frame -face.delete -face.delete_feature -face.offset_in -face.offset_out",
