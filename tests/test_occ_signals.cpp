@@ -27,13 +27,42 @@
 
 namespace {
 
-[[gnu::noinline]] void NullWrite() {
+// Not checked by UBSan's null check: the store is the point, and the
+// sanitized suite reported it as a finding in every case that makes it.
+[[gnu::noinline, gnu::no_sanitize("null")]] void NullWrite() {
   // The pointer itself volatile, so the compiler cannot assume it away.
   volatile int* volatile p = nullptr;
   *p = 1; // NOLINT: the point
 }
 
+#if defined(__SANITIZE_ADDRESS__)
+extern "C" void __lsan_disable();
+extern "C" void __lsan_enable();
+#endif
+
+// OpenCASCADE leaks the exception of every fault it converts: SegvHandler
+// makes it in a handle (OSD_SIGSEGV::NewInstance(...)->Jump()), Jump passes
+// `this` to Standard_ErrorHandler::Abort as another, and the long jump out
+// of the handler skips both handles' destructors, so 90 bytes a fault (the
+// exception and its message) are never freed, on any thread. LeakSanitizer
+// reports it when no stale pointer to the last one is left in what it scans,
+// which in the threaded case below it once was not. What this thread
+// allocates while one lives is not a leak to LeakSanitizer: only the fault
+// a case makes on purpose is held in one. See
+// docs/known-bugs.md#a-fault-opencascade-converts-leaks-its-exception
+struct DeliberateFault {
+#if defined(__SANITIZE_ADDRESS__)
+  DeliberateFault() { __lsan_disable(); }
+  ~DeliberateFault() { __lsan_enable(); }
+#else
+  DeliberateFault() = default;
+#endif
+  DeliberateFault(const DeliberateFault&) = delete;
+  DeliberateFault& operator=(const DeliberateFault&) = delete;
+};
+
 std::optional<std::string> FaultInScope() {
+  const DeliberateFault fault;
   return occsig::RunCatchingOccSignals([] { NullWrite(); });
 }
 
@@ -135,6 +164,9 @@ TEST_CASE("A fault on one thread is that thread's failure while others are "
       for (int i = 0; i < kCalls; ++i) {
         // Every other call faults; the rest open a nested scope and work.
         const bool fault = (i + t) % 2 == 0;
+        std::optional<DeliberateFault> held;
+        if (fault)
+          held.emplace();
         bool innerFailed = false;
         const auto why = occsig::RunCatchingOccSignals([&] {
           if (fault) {

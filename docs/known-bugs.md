@@ -206,6 +206,29 @@ the heading if it is not here yet.
 - **Cases:** `solidcraft/import/3845-iges-trim-pieces-miss-by-a-gap`,
   `solidcraft/import/3806-iges-revolved-arc-spherical-cap-dome`.
 
+## Kernel
+
+### A fault OpenCASCADE converts leaks its exception
+
+- **Symptom:** every fault caught inside an OCC signal scope (a kernel
+  operation that faults and fails instead of killing the app) leaves 90
+  bytes allocated for the life of the process: the `OSD_SIGSEGV` and its
+  message. LeakSanitizer reports it when nothing stale still points at the
+  last one, which in the sanitized suite was once, in the threaded case of
+  `tests/test_occ_signals.cpp`; a standalone program faulting 1000 times
+  reports all 1000.
+- **Cause:** OCC's `SegvHandler` raises `OSD_SIGSEGV::NewInstance(...)->Jump()`
+  and `Standard_Failure::Jump` passes `this` to `Standard_ErrorHandler::Abort`,
+  each a `Handle` temporary; the `longjmp` out of the handler skips both
+  destructors, so the exception's count never reaches zero. OCCT 7.9 as
+  shipped; not our scope code.
+- **Where:** `OSD_signal.cxx` and `Standard_Failure.cxx` in OpenCASCADE;
+  reached through `occsig::CallCatchingSignals` (`src/cad/OccSignals.cpp`).
+- **Likely fix:** a patch under `nix/patches/` that hands the exception to
+  the handler and drops both temporaries before the jump. 90 bytes a fault
+  does not earn one yet; the tests hold their deliberate faults in
+  `DeliberateFault`, so a leak anywhere else is still reported.
+
 ## Sketching
 
 ### A huge length edit refuses a shape that rides the line's end
