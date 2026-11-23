@@ -24,6 +24,48 @@
   <url type="homepage">https://github.com/eliasaronson/lobole</url>
   <url type="bugtracker">https://github.com/eliasaronson/lobole/issues</url>
   <releases>
+    <release version="0.3.0" date="2026-11-23">
+      <description>
+        <p>A macOS app. Simulations are documents of their own, with new supports and loads. Scans can be compared, aligned and traced into sketches. Fillets and chamfers that do not fit say the size that does.</p>
+        <ul>
+          <li>macOS: the app as a .dmg for Apple Silicon Macs on macOS 26 or newer. It is not signed with an Apple certificate, so the first start has to be allowed in System Settings, Privacy &amp; Security, Open Anyway</li>
+          <li>Simulations are documents with their own tab: a tree of what the simulation holds, the tools on the toolbar, and the mesh as a step you can look at and check before solving. Studies in older parts and assemblies move into a simulation when the file is opened</li>
+          <li>New supports: rollers, held directions and cylindrical supports. New loads: bearing loads. Free-free modal studies, study sweeps over a variable, a study's own material, result fields and VTU export</li>
+          <li>A fillet or chamfer that does not fit says the size that does, with a button under it to use that size. A Shell whose wall cannot be built says the wall that can</li>
+          <li>A fillet or chamfer beside faces that an earlier feature left split now builds</li>
+          <li>A fillet or chamfer that runs on past a crease nobody picked builds and says so, naming the edge</li>
+          <li>Sheet metal: a Fold turns the sheet on one side of a line drawn on a panel</li>
+          <li>Sketch: fillet any corner, including on ellipses and splines. Split lines, arcs, circles, ellipses and splines into pieces that stay one curve. Splines carry their own knots, and a spline cut in two stays smooth across the cut. A midpoint line is drawn from its middle. The sketch toolbar fits one row</li>
+          <li>Scans: Compare to scan shows how far a body is from a scan as a colour map, Best fit lays a scan onto a body, and a torus can be fitted and recognised</li>
+          <li>A section of a scan traces into real lines and arcs, with the relations and sizes it supports offered for you to accept</li>
+          <li>Fillet, Chamfer and Thread take their size from a scan when you pick a scanned round, chamfer or thread</li>
+          <li>Volumes and masses are computed face by face and say when they are uncertain</li>
+          <li>Assemblies: mate limits. Drags stop at them, and a motion study can prove a whole range is clear</li>
+          <li>Variables: an assembly's numbers, a CAM job's, a drawing's, and a part's rules, tolerances and gaps can be expressions</li>
+          <li>Unsaved work is found again after the app is stopped, and lists only what you worked on in a window</li>
+          <li>Every imported body is checked: one that came in open says so in the viewport and on its row</li>
+          <li>Where the graphics driver will not start and Mesa's lavapipe is installed, the app restarts on software rendering and says so. The AppImage carries a Vulkan loader for systems that have none</li>
+          <li>For agents and scripts: a batch can state what it expects to build, drawings have dry runs, help() serves the documents and worked examples, and add_feature follows a face name read before a later feature changed it</li>
+          <li>Fixed: a sweep mitres a sharp corner of its path, and three chamfers meeting at a corner are mitred</li>
+          <li>Fixed: a cut 0.001 mm deep is kept instead of dropped</li>
+          <li>Fixed: a modelled thread in a hole smaller than its minor diameter is refused</li>
+          <li>Fixed: a fillet whose result is a valid but wrong body is refused instead of accepted</li>
+          <li>Fixed: a fillet larger than the tightest bend of the edge it follows is refused without a long wait</li>
+          <li>Fixed: a dimensioned line in a held sketch can be dragged, and a drag no longer gives up a constraint</li>
+          <li>Fixed: Escape finishes a spline with the poles placed</li>
+          <li>Fixed: a constraint badge that acts at a point is drawn at that point, and a construction line on a datum axis reads as its own line</li>
+          <li>Fixed: stress where two materials meet is each material's own</li>
+          <li>Fixed: a mesh refinement no longer stops while its result is still improving, and a face takes one refinement</li>
+          <li>Fixed: duplicating a CAM job tab copies the job</li>
+          <li>Fixed: a ball-nose tool rounds an edge wider than itself</li>
+          <li>Fixed: renaming or deleting a variable reaches every simulation that uses it, and deleting one a configuration reads is refused</li>
+          <li>Fixed: a file with an expression that does not parse still opens</li>
+          <li>Fixed: a repeat mass properties call on an unchanged part is immediate instead of taking seconds</li>
+          <li>Fixed: a countersunk hole in an imported STL is recognised as a cone</li>
+          <li>Fixed: a file listing a study's load case, participant or held direction twice is refused instead of silently trimmed</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.2.1" date="2026-11-18">
       <description>
         <p>The AppImage runs on more Linux distributions, and the app starts on graphics hardware without ray tracing.</p>
