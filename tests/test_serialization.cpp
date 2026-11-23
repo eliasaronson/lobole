@@ -505,6 +505,48 @@ TEST_CASE("Two feature files claiming one id are refused", "[io][merge]") {
   fs::remove_all(dir);
 }
 
+// The reader fuzz's id_zero on the v222 golden: a feature whose id was lost
+// was given the document's next, 5 (a tolerance's 4 came first), which the
+// Box further down the file held, and the save did not load ("features[3]
+// has id 5, which features[1] has too"). It takes one no feature holds.
+TEST_CASE("A feature without an id takes one no feature of the file holds",
+          "[io]") {
+  const auto box = [](uint64_t id, const char* name) {
+    nlohmann::json f = {{"type", "Box"},         {"name", name},
+                        {"position", {0, 0, 0}}, {"width", 1},
+                        {"height", 1},           {"depth", 1}};
+    if (id != 0)
+      f["id"] = id;
+    return f;
+  };
+  for (const bool zero : {false, true}) {
+    INFO((zero ? "id 0" : "no id"));
+    nlohmann::json lost = box(0, "Lost");
+    if (zero)
+      lost["id"] = 0;
+    const nlohmann::json doc = {
+        {"format", "designer-document"},
+        {"version", 222},
+        {"features",
+         {box(1, "First"), lost, box(2, "Second"), box(3, "Third")}}};
+    const fs::path dir = fs::temp_directory_path() /
+                         ("lobole-lost-id-" + std::to_string(::getpid()));
+    fs::create_directories(dir);
+    const fs::path in = dir / "in.json", out = dir / "out.json";
+    std::ofstream(in) << doc.dump(2);
+    auto loaded = testio::Load(in.string());
+    REQUIRE(loaded != nullptr);
+    REQUIRE(loaded->FeatureCount() == 4);
+    CHECK(loaded->GetFeature(1)->GetId() == 4);
+    REQUIRE(testio::Save(*loaded, out.string()));
+    auto again = DocumentIO::Load(out.string());
+    INFO((again ? std::string() : again.error()));
+    REQUIRE(again.has_value());
+    CHECK((*again)->FeatureCount() == 4);
+    fs::remove_all(dir);
+  }
+}
+
 TEST_CASE("An index listing one id twice is refused", "[io][merge]") {
   const fs::path dir = MergeCaseProject("dupindex");
   nlohmann::json index;

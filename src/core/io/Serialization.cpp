@@ -1921,10 +1921,28 @@ static std::unique_ptr<Document> LoadImpl(const std::string& path,
           {
             Document::BulkEdit bulk(*doc); // one regeneration, not one each
             const json features = InlineList(j, "features");
+            // A feature without an id (a v1 part's, a hand-written file's,
+            // or one whose id was lost) takes the next the document has
+            // that no feature of the file holds: the next alone was one a
+            // later feature held, and the save did not load.
+            std::set<uint64_t> held;
+            for (const json& f : features)
+              if (f.is_object() && f.contains("id") &&
+                  f.at("id").is_number_unsigned())
+                held.insert(f.at("id").get<uint64_t>());
             for (size_t i = 0; i < features.size(); i++)
               doc->AddFeature(AtItem("features", i, [&] {
-                return FeatureFromJson(
-                    MigratedFeatureJson(features[i], j.value("version", 0)));
+                json fj =
+                    MigratedFeatureJson(features[i], j.value("version", 0));
+                if (fj.is_object() && (!fj.contains("id") ||
+                                       (fj.at("id").is_number_unsigned() &&
+                                        fj.at("id").get<uint64_t>() == 0))) {
+                  uint64_t id = doc->AllocateId();
+                  while (held.contains(id))
+                    id = doc->AllocateId();
+                  fj["id"] = id;
+                }
+                return FeatureFromJson(fj);
               }));
             RequireFeaturesKnownAt(*doc, j.value("version", 0));
           }
