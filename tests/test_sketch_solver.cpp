@@ -11,6 +11,7 @@
 #include "core/sketch/SketchSolver.h"
 
 #include <cmath>
+#include <type_traits>
 
 using Catch::Matchers::WithinAbs;
 using Catch::Matchers::WithinRel;
@@ -171,6 +172,37 @@ TEST_CASE("Horizontal levels a line's endpoints", "[solver]") {
   std::vector<sketch::Entity> out;
   solver.WriteBack(out);
   CHECK_THAT(LineA(out[0]).y, WithinAbs(LineB(out[0]).y, 1e-5));
+}
+
+// Loading a Solver again (AcceptCandidates and the sketch tools judge one
+// addition after another on one Solver) used to assign a fresh PlaneGCS
+// system over the solved one, which leaked every constraint and subsystem
+// it held: LeakSanitizer fails this case in a sanitized build if it does
+// again. Here it checks each reload solves the new sketch.
+static_assert(!std::is_copy_assignable_v<sketch::Solver>);
+TEST_CASE("A Solver loaded again solves the new sketch, keeping nothing of "
+          "the old",
+          "[solver]") {
+  SketchFeature s = MakeSketch();
+  uint32_t l0 = s.AddEntity(sketch::Line{{0, 0}, {4, 1.5}});
+  uint32_t l1 = s.AddEntity(sketch::Line{{4.1, 1.7}, {4, 3}});
+  s.constraints.push_back(
+      {sketch::ConstraintKind::Coincident, {l1, 0}, {l0, 1}});
+  sketch::Solver solver;
+  solver.Load(s);
+  REQUIRE(solver.Solve().ok);
+  for (int round = 0; round < 3; ++round) {
+    SketchFeature next = s;
+    next.constraints.push_back(
+        {sketch::ConstraintKind::Horizontal, {l0, 0}, {0, 0}});
+    solver.Load(next);
+    REQUIRE(solver.Solve().ok);
+    std::vector<sketch::Entity> out;
+    solver.WriteBack(out);
+    CHECK_THAT(LineA(out[0]).y, WithinAbs(LineB(out[0]).y, 1e-5));
+    CHECK_THAT(glm::length(LineB(out[0]) - LineA(out[1])),
+               WithinAbs(0.0, 1e-5));
+  }
 }
 
 TEST_CASE("A redundant constraint leaves DOF unchanged (add-then-diagnose)",

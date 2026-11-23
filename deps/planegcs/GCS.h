@@ -261,6 +261,13 @@ public:
     System();
     /*System(std::vector<Constraint *> clist_);*/
     ~System();
+    // A System owns its constraints and subsystems through raw pointers and
+    // frees them in its destructor, so the copy the compiler would write
+    // shares them between two owners and drops the target's own: assigning
+    // a fresh System over a solved one (sketch::Solver::Load's old reset)
+    // leaked every constraint and subsystem it had. Not copyable.
+    System(const System&) = delete;
+    System& operator=(const System&) = delete;
 
     void clear();
     void clearByTag(int tagId);

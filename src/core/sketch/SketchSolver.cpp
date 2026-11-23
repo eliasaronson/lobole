@@ -562,7 +562,14 @@ void Solver::Load(const SketchFeature& sketch) {
     if (r.ok && r.conflictingConstraints.empty() && r.conflicting.empty())
       pre.WriteBackTo(seed);
   }
-  *m_impl = Impl{}; // reset
+  // A fresh Impl, not one assigned over the old: GCS::System owns its
+  // constraints and subsystems by raw pointer and frees them only in its
+  // destructor, so assigning over a solved one leaked all of them each
+  // time a Solver was loaded again (AcceptCandidates' and the sketch
+  // tools' repeated JudgeAddition).
+  Impl* fresh = new Impl;
+  delete m_impl;
+  m_impl = fresh;
   m_impl->LoadFrom(sketch, seed);
 }
 

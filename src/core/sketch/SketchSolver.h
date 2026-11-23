@@ -54,6 +54,9 @@ class Solver {
 public:
   Solver();
   ~Solver();
+  // Owns its Impl (and the PlaneGCS system in it) by pointer.
+  Solver(const Solver&) = delete;
+  Solver& operator=(const Solver&) = delete;
 
   // Build solver geometry + constraints from the sketch.
   void Load(const SketchFeature& sketch);
