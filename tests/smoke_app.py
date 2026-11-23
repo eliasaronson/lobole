@@ -395,6 +395,30 @@ def _sweep_orphaned_scratch():
             shutil.rmtree(path, ignore_errors=True)
 
 
+# How many times longer than a normal build's a sanitized one takes to name
+# its port: an --offscreen start under ASan is 15 s alone against 0.6 s (a
+# Vulkan driver's initialiser grows a buffer by realloc, which ASan always
+# copies), and past the 30 s guard in a loaded sanitized suite. The build
+# tree beside the binary says which it is.
+SANITIZED_LAUNCH_SLOWDOWN = 4.0
+
+
+def _sanitized(binary):
+    d = os.path.dirname(os.path.abspath(binary))
+    for _ in range(3):
+        cache = os.path.join(d, "CMakeCache.txt")
+        if os.path.exists(cache):
+            try:
+                with open(cache) as f:
+                    text = f.read()
+            except OSError:
+                return False
+            return ("ENABLE_SANITIZERS:BOOL=ON" in text or
+                    "ENABLE_TSAN:BOOL=ON" in text)
+        d = os.path.dirname(d)
+    return False
+
+
 def _spawn(binary, extra_args, env, timeout, headless, scope=None,
            cpus=None):
     """Launch, wait for the app to name its port, return (proc, port, log, tmp).
@@ -470,6 +494,8 @@ def _spawn(binary, extra_args, env, timeout, headless, scope=None,
           file=sys.stderr)
 
     port = None
+    if _sanitized(binary):
+        timeout *= SANITIZED_LAUNCH_SLOWDOWN
     deadline = time.time() + timeout
     while time.time() < deadline:
         if proc.poll() is not None:

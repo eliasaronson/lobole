@@ -442,7 +442,10 @@ def pin_support(d):
     listed = loads()
     expect(listed[0]["type"] == "pin" and listed[0]["fix_rotation"] is False
            and "magnitude" not in listed[0], f"the pin as listed: {listed}")
-    res = d.call("run_study", id=study)
+    # Past the client's 60 s once: this one solve is 39 s alone in the
+    # sanitized (Debug) build and ran over in its loaded suite. A hang guard,
+    # so room rather than a budget.
+    res = d.request("run_study", {"id": study}, timeout=300)
     body = res["bodies"][0]
     by = {r["support"]: r for r in body["reactions"]}
     # Statics: about the first bore, R2 * 22 = 20 * 52.
