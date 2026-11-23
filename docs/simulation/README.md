@@ -3102,7 +3102,9 @@ of megabytes), and a recovery reads it back. The document itself is `DocumentIO:
 - **Refused, naming what is accepted**: an unknown key, an unknown subject
   kind or participant role, a `document` that is not an id, roles on a part
   subject, an occurrence listed twice in the roles, a mesh size below 0, a
-  study that does not read, a version before simulations.
+  study that does not read (a load case named twice, a participant listed
+  twice, a held direction named twice among them), a version before
+  simulations.
 - **Dropped and reported** (a derived file, never a reason to refuse the
   document): a result or mesh that does not read, whose halves disagree, a
   mesh whose name is not its key, a result of a study the document does not

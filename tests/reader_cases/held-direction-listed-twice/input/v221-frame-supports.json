@@ -1,0 +1,129 @@
+{
+  "features": [
+    {
+      "constraints": [],
+      "entities": [
+        {
+          "center": [
+            0,
+            0
+          ],
+          "id": 1,
+          "radius": 5,
+          "type": "circle"
+        }
+      ],
+      "id": 1,
+      "name": "Section",
+      "next_entity_id": 2,
+      "plane": {
+        "normal": [
+          0,
+          0,
+          1
+        ],
+        "origin": [
+          0,
+          0,
+          0
+        ],
+        "uAxis": [
+          1,
+          0,
+          0
+        ]
+      },
+      "type": "Sketch"
+    },
+    {
+      "distance": 100.0,
+      "id": 2,
+      "mode": "new_body",
+      "name": "Shaft",
+      "sketch_id": 1,
+      "type": "Extrude"
+    },
+    {
+      "id": 3,
+      "kind": "explicit",
+      "name": "tilted",
+      "origin": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "type": "Frame",
+      "x_axis": [
+        0.6,
+        0.8,
+        0.0
+      ],
+      "z_axis": [
+        0.0,
+        0.0,
+        1.0
+      ]
+    }
+  ],
+  "format": "designer-document",
+  "studies": [
+    {
+      "id": 4,
+      "loads": [
+        {
+          "face": {
+            "element": "2/cap0",
+            "feature_id": 2
+          },
+          "id": 5,
+          "magnitude": 0.0,
+          "type": "roller"
+        },
+        {
+          "dz_mm": 0.25,
+          "face": {
+            "element": "2/cap1",
+            "feature_id": 2
+          },
+          "frame": 3,
+          "hold": [
+            "x",
+            "z"
+          ],
+          "id": 6,
+          "magnitude": 0.0,
+          "type": "held"
+        },
+        {
+          "face": {
+            "element": "2/g1",
+            "feature_id": 2
+          },
+          "hold": [
+            "radial",
+            "radial",
+            "radial"
+          ],
+          "id": 7,
+          "magnitude": 0.0,
+          "type": "cylindrical"
+        },
+        {
+          "face": {
+            "element": "2/g1",
+            "feature_id": 2
+          },
+          "hold": [
+            "y"
+          ],
+          "id": 8,
+          "magnitude": 0.0,
+          "type": "held"
+        }
+      ],
+      "name": "Held three ways",
+      "type": "Study"
+    }
+  ],
+  "version": 221
+}

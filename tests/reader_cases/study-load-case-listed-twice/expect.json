@@ -1,0 +1,12 @@
+{
+  "expect": "refused",
+  "family": "part",
+  "id": "part/v152-topology-load-cases.json:grow_array:1",
+  "input": "v152-topology-load-cases.json",
+  "message": [
+    "v152-topology-load-cases.json",
+    "study load case 'down' is listed twice"
+  ],
+  "seed": 0,
+  "note": "the grown list cut to its first three copies"
+}

@@ -1,0 +1,12 @@
+{
+  "expect": "refused",
+  "family": "part",
+  "id": "part/v221-frame-supports.json:grow_array:1",
+  "input": "v221-frame-supports.json",
+  "message": [
+    "v221-frame-supports.json",
+    "load 7: hold names radial twice"
+  ],
+  "seed": 0,
+  "note": "the grown list cut to its first three copies"
+}

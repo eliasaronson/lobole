@@ -1,0 +1,12 @@
+{
+  "expect": "refused",
+  "family": "assembly",
+  "id": "assembly/v106-assembly-study.json:grow_array:0",
+  "input": "v106-assembly-study.json",
+  "message": [
+    "v106-assembly-study.json",
+    "study participant: occurrence 2 is listed twice"
+  ],
+  "seed": 0,
+  "note": "the grown list cut to its first three copies"
+}

@@ -18,6 +18,7 @@
 #include <cstdint>
 #include <cstring>
 #include <limits>
+#include <set>
 #include <vector>
 
 using nlohmann::json;
@@ -538,6 +539,12 @@ fem::Study StudyFromJson(const json& j) {
     c.name = cj.at("name").get<std::string>();
     c.weight = cj.value("weight", 1.0);
     c.weight.expr = ReadExprText(cj, "weight");
+    // A load names its case, so two of one name are one case listed twice
+    // (set_study refuses it too), and a save would keep neither apart.
+    for (const fem::LoadCase& have : s.loadCases)
+      if (have.name == c.name)
+        throw std::runtime_error("study load case '" + c.name +
+                                 "' is listed twice");
     s.loadCases.push_back(std::move(c));
   }
   if (j.contains("shape_from")) {
@@ -616,8 +623,17 @@ fem::Study StudyFromJson(const json& j) {
   if (j.contains("material")) // v227
     s.material = StudyMaterialFromJson(j.at("material"));
 
-  for (const json& pj : j.value("participants", json::array()))
-    s.participants.push_back(ParticipantFromJson(pj));
+  // One row per occurrence (set_study and a simulation's roles refuse a
+  // second): a study cannot hold one part two ways.
+  std::set<uint64_t> participating;
+  for (const json& pj : j.value("participants", json::array())) {
+    fem::Participant pt = ParticipantFromJson(pj);
+    if (!participating.insert(pt.occurrenceId).second)
+      throw std::runtime_error("study participant: occurrence " +
+                               std::to_string(pt.occurrenceId) +
+                               " is listed twice");
+    s.participants.push_back(std::move(pt));
+  }
 
   for (const json& rj : j.value("refinements", json::array()))
     s.refinements.push_back(RefinementFromJson(rj));
@@ -722,6 +738,10 @@ fem::Study StudyFromJson(const json& j) {
               "load " + std::to_string(l.id) + ": hold names " + d.dump() +
               "; a " + fem::LoadTypeToString(l.type) + " support holds " +
               names[0] + ", " + names[1] + " or " + names[2]);
+        // The writer names each held direction once.
+        if (l.hold[k])
+          throw std::runtime_error("load " + std::to_string(l.id) +
+                                   ": hold names " + names[k] + " twice");
         l.hold[k] = true;
       }
     }

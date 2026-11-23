@@ -1,0 +1,241 @@
+{
+  "features": [
+    {
+      "constraints": [],
+      "entities": [
+        {
+          "a": [
+            0,
+            0
+          ],
+          "b": [
+            4,
+            0
+          ],
+          "id": 1,
+          "type": "line"
+        },
+        {
+          "a": [
+            4,
+            0
+          ],
+          "b": [
+            4,
+            2
+          ],
+          "id": 2,
+          "type": "line"
+        },
+        {
+          "a": [
+            4,
+            2
+          ],
+          "b": [
+            0,
+            2
+          ],
+          "id": 3,
+          "type": "line"
+        },
+        {
+          "a": [
+            0,
+            2
+          ],
+          "b": [
+            0,
+            0
+          ],
+          "id": 4,
+          "type": "line"
+        }
+      ],
+      "id": 1,
+      "name": "Base",
+      "next_entity_id": 5,
+      "plane": {
+        "normal": [
+          0,
+          0,
+          1
+        ],
+        "origin": [
+          0,
+          0,
+          0
+        ],
+        "uAxis": [
+          1,
+          0,
+          0
+        ]
+      },
+      "type": "Sketch"
+    },
+    {
+      "distance": 5.0,
+      "id": 2,
+      "mode": "new_body",
+      "name": "Pad",
+      "sketch_id": 1,
+      "type": "Extrude"
+    }
+  ],
+  "format": "designer-document",
+  "parameters": [
+    {
+      "comment": "the sideways case's weight",
+      "expression": "2",
+      "name": "w_side"
+    }
+  ],
+  "studies": [
+    {
+      "analysis": "topology",
+      "filter_radius": 2.5,
+      "id": 3,
+      "keep_outs": [
+        {
+          "box_max": [
+            3,
+            3,
+            6
+          ],
+          "box_min": [
+            1,
+            -1,
+            3
+          ]
+        },
+        {
+          "body": "Pad"
+        }
+      ],
+      "load_cases": [
+        {
+          "name": "down",
+          "weight": 1.0
+        },
+        {
+          "name": "side",
+          "weight": 2.0,
+          "weight_expr": "w_side"
+        }
+      ],
+      "loads": [
+        {
+          "face": {
+            "element": "2/cap0",
+            "feature_id": 2
+          },
+          "id": 4,
+          "magnitude": 0.0,
+          "type": "fixed"
+        },
+        {
+          "case": "down",
+          "direction": [
+            0,
+            0,
+            -1
+          ],
+          "face": {
+            "element": "2/g1",
+            "feature_id": 2
+          },
+          "id": 5,
+          "magnitude": 500.0,
+          "type": "force"
+        },
+        {
+          "case": "side",
+          "direction": [
+            0,
+            1,
+            0
+          ],
+          "face": {
+            "element": "2/g1",
+            "feature_id": 2
+          },
+          "id": 6,
+          "magnitude": 200.0,
+          "type": "force"
+        }
+      ],
+      "max_iterations": 40,
+      "mesh_size": 1.0,
+      "name": "Generative 1",
+      "type": "Study",
+      "volume_fraction": 0.3
+    },
+    {
+      "id": 7,
+      "load_cases": [
+        {
+          "name": "down",
+          "weight": 1.0
+        },
+        {
+          "name": "down",
+          "weight": 1.0
+        },
+        {
+          "name": "down",
+          "weight": 1.0
+        }
+      ],
+      "loads": [
+        {
+          "face": {
+            "element": "2/cap0",
+            "feature_id": 2
+          },
+          "id": 8,
+          "magnitude": 0.0,
+          "type": "fixed"
+        },
+        {
+          "case": "down",
+          "direction": [
+            0,
+            0,
+            -1
+          ],
+          "face": {
+            "element": "2/g1",
+            "feature_id": 2
+          },
+          "id": 9,
+          "magnitude": 500.0,
+          "type": "force"
+        },
+        {
+          "case": "side",
+          "direction": [
+            0,
+            1,
+            0
+          ],
+          "face": {
+            "element": "2/g1",
+            "feature_id": 2
+          },
+          "id": 10,
+          "magnitude": 200.0,
+          "type": "force"
+        }
+      ],
+      "mesh_size": 0.0,
+      "name": "Generative 1: shape",
+      "shape_from": {
+        "study": 3,
+        "threshold": 0.4
+      },
+      "type": "Study"
+    }
+  ],
+  "version": 152
+}
