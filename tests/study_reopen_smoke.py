@@ -53,6 +53,22 @@ def until_ended(d, timeout=240.0, **which):
     raise AssertionError(f"{which} did not end in {timeout}s")
 
 
+def solve(d, study):
+    """A study run that computes, as a job waited on: a solve's time is the
+    machine's, and a blocking call holds to the client's 60 s however long
+    the solve takes (a static run of this bar took 23 s alone in a stock
+    Ubuntu container and past 60 s in its loaded suite). What it answers is
+    the stored result's."""
+    started = d.call("run_study", study=study, **{"async": True})
+    expect(started.get("started") and not started.get("reused"),
+           f"the run computes, as a job: {started}")
+    st = until_ended(d, job=started["job"])
+    expect(st["outcome"] == "done", f"the run ended done: {st}")
+    res = d.call("study_results", study=study)
+    expect(not res.get("stale"), f"the result is current: {res}")
+    return {"reused": False, "input_hash": res["input_hash"]}
+
+
 def face_at(faces, axis, value, sign):
     for f in faces:
         n = f.get("normal")
@@ -77,7 +93,6 @@ def main():
     app = launch_app(binary, env=env)
     try:
         d = Client.wait_for(app.port)
-        d.timeout = 300
         feats = d.call("ping").get("features", {})
         if not (feats.get("fem") and feats.get("mesher")):
             print("skip: built without FEM or its mesher")
@@ -118,7 +133,7 @@ def main():
                max_iterations=4)
         hashes = {}
         for kind in ("static", "modal"):
-            hashes[kind] = d.call("run_study", study=ids[kind])["input_hash"]
+            hashes[kind] = solve(d, ids[kind])["input_hash"]
         started = d.call("run_study", study=ids["topology"])
         expect(started.get("started"), f"topology started: {started}")
         st = until_ended(d, study=ids["topology"])
@@ -198,7 +213,7 @@ def main():
         d.call("set_material", feature_id=r["id"], material="aluminum_6061_t6")
         expect(studies(d)[ids["static"]]["stale"],
                "a moved input makes the reopened result stale")
-        moved = d.call("run_study", study=ids["static"])
+        moved = solve(d, ids["static"])
         expect(moved["reused"] is False and
                moved["input_hash"] != hashes["static"],
                f"and the next run computes: {moved}")
