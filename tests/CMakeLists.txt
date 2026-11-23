@@ -1723,8 +1723,12 @@ add_test(NAME watch_smoke
 # 73 s: the whole watch generator. It set the headless suite's floor and kept
 # tools/test-fast.sh from its figure, so it is `slow` (docs/architecture.md#the-development-loop).
 # Under ASan it runs past its 300 s even alone, so a sanitized run leaves it
-# out.
-set_tests_properties(watch_smoke PROPERTIES LABELS "slow;asan_slow" TIMEOUT 300)
+# out. Not on one core: 168 s of CPU in 92 s alone here, 200 s in 124 s on
+# stock Ubuntu 26.04's kernel, so PROCESSORS gives it that room among the
+# suite's opening FEM cases; counted as one, it ran past 300 s there while
+# a lane beside it compiled. The timeout is a hang guard.
+set_tests_properties(watch_smoke PROPERTIES LABELS "slow;asan_slow" TIMEOUT 300
+                     PROCESSORS 2)
 
 add_test(NAME generators_smoke
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/generators_smoke.py
