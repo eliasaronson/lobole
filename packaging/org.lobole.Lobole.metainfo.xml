@@ -63,6 +63,7 @@
           <li>Fixed: a repeat mass properties call on an unchanged part is immediate instead of taking seconds</li>
           <li>Fixed: a countersunk hole in an imported STL is recognised as a cone</li>
           <li>Fixed: a file listing a study's load case, participant or held direction twice is refused instead of silently trimmed</li>
+          <li>Fixed: memory is no longer lost each time a sketch is solved again or a simulation runs on the GPU</li>
         </ul>
       </description>
     </release>
