@@ -830,7 +830,7 @@ std::string FaultyContourPlaces(BRepFilletAPI_MakeFillet& mk) {
 // reads faces as tangent up to 0.1 rad (ChFi3d::IsTangentFaces,
 // LocalAnalysis_SurfaceContinuity's angular tolerance), so a crease of up
 // to 5.7 degrees is walked across, and the edge past it rounded unasked
-// (docs/modeling/README.md#a-blend-runs-only-as-far-as-it-is-tangent).
+// (docs/modeling/README.md#a-blend-that-runs-on-past-a-crease-says-so).
 constexpr double kCreaseRad = 1e-2;
 
 // The outward normal of `face` at `v`, or none where it is not defined
@@ -971,10 +971,11 @@ std::optional<RunOn> RunsOnPastCrease(Maker& mk, const TopoDS_Shape& shape,
 // went round a vertex beside a seam for ever (patched in our OCC,
 // nix/patches/occt-fillet-reorder-faces-loop.patch: it throws) -- so in the
 // signal scope too, not only the build. False with `error` set when the walk
-// failed, when an edge started no contour (its faces tangent, or a face
+// failed, or when an edge started no contour (its faces tangent, or a face
 // on one side only, and on no other edge's tangent chain -- OCC left it out
-// and built the rest, saying nothing), or when the walk ran on past a
-// crease to an edge nobody picked (RunsOnPastCrease). `edges` indexes
+// and built the rest, saying nothing). Where the walk ran on past a crease
+// to an edge nobody picked (RunsOnPastCrease) it is built, and `runOn`
+// says so. `edges` indexes
 // `shape`, the builder's input; `nameOf` names an edge of it by that index;
 // one edge picked twice is added once.
 template <typename Maker>
@@ -982,7 +983,7 @@ bool AddBlendEdges(Maker& mk, const TopoDS_Shape& shape,
                    const TopTools_IndexedMapOfShape& edges,
                    const std::vector<int>& edgeIndices, double radiusOrDistance,
                    const std::function<std::string(int)>& nameOf,
-                   std::string* error) {
+                   std::string* error, std::string* runOn = nullptr) {
   const auto why = occsig::RunCatchingOccSignals([&] {
     for (size_t k = 0; k < edgeIndices.size(); k++)
       if (std::find(edgeIndices.begin(), edgeIndices.begin() + k,
@@ -999,21 +1000,19 @@ bool AddBlendEdges(Maker& mk, const TopoDS_Shape& shape,
                  "or it has a face on one side only): leave it out";
       return false;
     }
-    if (const auto run = RunsOnPastCrease(mk, shape, edges, edgeIndices)) {
-      if (error) {
-        char buf[160];
-        std::snprintf(buf, sizeof buf,
-                      "a crease of %.3g degrees at (%.3f, %.3f, %.3f)",
-                      run->angle * 180.0 / std::numbers::pi, run->at.X(),
-                      run->at.Y(), run->at.Z());
-        *error = "the blend of edge '" + nameOf(run->from) +
-                 "' would run on across " + buf + " to edge '" +
-                 nameOf(run->beyond) +
-                 "', which is not picked: OpenCASCADE's blend builder "
-                 "takes faces meeting within 5.7 degrees for tangent and "
-                 "cannot stop there. Pick that edge too to blend both";
-      }
-      return false;
+    if (const auto run = runOn != nullptr
+                             ? RunsOnPastCrease(mk, shape, edges, edgeIndices)
+                             : std::nullopt) {
+      char buf[160];
+      std::snprintf(buf, sizeof buf,
+                    "a crease of %.3g degrees at (%.3f, %.3f, %.3f)",
+                    run->angle * 180.0 / std::numbers::pi, run->at.X(),
+                    run->at.Y(), run->at.Z());
+      *runOn = "the blend of edge '" + nameOf(run->from) + "' runs on across " +
+               buf + " to edge '" + nameOf(run->beyond) +
+               "', which is not picked: OpenCASCADE's blend builder takes "
+               "faces meeting within 5.7 degrees for tangent and blends it "
+               "too. Pick that edge as well to make it intended";
     }
     return true;
   }
@@ -1452,7 +1451,7 @@ CADShape EdgeBlendNamed(const CADShape& body, const ElementMap& bodyMap,
     const auto nameOf = EdgeNamer(shape, copy, m.history, bodyMap);
     const auto addAll = [&](auto& mk) {
       return AddBlendEdges(mk, shape, edges, m.edges, radiusOrDistance, nameOf,
-                           error);
+                           error, failure ? &failure->runOn : nullptr);
     };
 
     if (op == EdgeBlendOp::Chamfer) {

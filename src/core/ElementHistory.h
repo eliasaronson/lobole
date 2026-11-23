@@ -143,6 +143,9 @@ std::string EdgeBlendRefusal(const CADShape& body, const ElementMap& bodyMap,
 struct EdgeBlendFailure {
   bool atBuild = false;
   std::string places;
+  // Not a failure: the builder's tangent walk ran on past a crease to an
+  // edge nobody picked, and blended it (the feature's warning).
+  std::string runOn;
 };
 CADShape EdgeBlendNamed(const CADShape& body, const ElementMap& bodyMap,
                         const std::vector<int>& edgeIndices, EdgeBlendOp op,

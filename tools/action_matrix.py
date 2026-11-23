@@ -60,6 +60,9 @@ BASELINE = os.path.join(MATRIX, "baseline.json")
 
 ACTION_TIMEOUT_S = 60.0
 SAMPLE_EVERY = 32          # --sample: one (design, action, family) in 32
+# What a blend that ran on past a crease says (FilletFeature's warning).
+RUN_ON = "which is not picked: OpenCASCADE's blend builder takes faces " \
+    "meeting within 5.7 degrees for tangent and blends it too"
 DETERMINISM_EVERY = 8      # --determinism: one in 8, of the sample's designs
 MAX_FACES, MAX_EDGES = 400, 1200   # a body past either is not tried
 # A Shell offsets the whole body: on a 195-face gear one takes 30 s and more.
@@ -967,8 +970,14 @@ def judge_accepted(src, act, answer, ctx):
     # is not this action's.
     had = {(w.get("name"), w.get("warning"))
            for w in (ctx.state.get("regen", {}) or {}).get("warnings", [])}
+    # A blend that ran on past a crease nobody picked built what the
+    # builder builds there and says so; the question is whether the blend
+    # works on this edge, and it does
+    # (docs/modeling/README.md#a-blend-that-runs-on-past-a-crease-says-so).
     warned = [w for w in regen.get("warnings", [])
-              if (w.get("name"), w.get("warning")) not in had]
+              if (w.get("name"), w.get("warning")) not in had and
+              not (act["action"] in ("edge.fillet", "edge.chamfer") and
+                   RUN_ON in (w.get("warning") or ""))]
     if warned:
         return outcome("fail", "warned", "; ".join(
             f"{w.get('name')}: {w.get('warning')}" for w in warned))

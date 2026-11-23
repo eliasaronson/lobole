@@ -22,7 +22,7 @@
  "solidcore/fillets/12342-round-wall-and-ledge-edges-r5-refused": "pass",
  "solidcore/fillets/12342-round-wall-edge-r5-past-the-wall-refused": "known: refused (docs/modeling/README.md#not-built)",
  "solidcore/fillets/14755-round-between-cone-and-plane-chamfers": "untranslated: `solid.chamfer` with `distance2`",
- "solidcore/fillets/15437-fillet-round-ends-at-crease-beside-drafted-side": "known: refused (docs/modeling/README.md#not-built)",
+ "solidcore/fillets/15437-fillet-round-ends-at-crease-beside-drafted-side": "known: volume (docs/known-bugs.md#a-round-runs-on-across-a-crease-of-a-few-degrees-and-says-so)",
  "solidcore/fillets/15505-chamfer-end-cap-between-two-faces-of-one-cylinder": "known: topology (docs/modeling/README.md#known-rows-that-are-not-kernel-defects)",
  "solidcore/fillets/15505-chamfer-end-cap-on-one-cylinder-face": "known: topology (docs/modeling/README.md#known-rows-that-are-not-kernel-defects)",
  "solidcore/fillets/15768-fillet-ledge-concave-edge-beside-bore-mirror-r0-5": "pass",

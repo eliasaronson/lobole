@@ -384,6 +384,10 @@ bool FilletFeature::Execute(RegenContext& ctx) {
     } else if (cause.empty()) {
       body->shape = std::move(result);
       body->elementMap = std::move(map);
+      // Built as the builder walks it: past a crease nobody picked, said
+      // (docs/modeling/README.md#a-blend-that-runs-on-past-a-crease-says-so).
+      if (!failure.runOn.empty())
+        SetWarning(failure.runOn);
       return true;
     }
   }

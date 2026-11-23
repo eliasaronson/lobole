@@ -40,7 +40,7 @@ command or parameter Loböle has no counterpart for.
 | solidcore/fillets/10876-fillet-ledge-convex-and-concave-edges-at-bore-r0-5 | refused | [docs/modeling/README.md#not-built](README.md#not-built) |
 | solidcore/fillets/11991-chamfer-cylinder-edge-ending-on-a-round-tangent-line | volume | [docs/modeling/README.md#known-rows-that-are-not-kernel-defects](README.md#known-rows-that-are-not-kernel-defects) |
 | solidcore/fillets/12342-round-wall-edge-r5-past-the-wall-refused | refused | [docs/modeling/README.md#not-built](README.md#not-built) |
-| solidcore/fillets/15437-fillet-round-ends-at-crease-beside-drafted-side | refused | [docs/modeling/README.md#not-built](README.md#not-built) |
+| solidcore/fillets/15437-fillet-round-ends-at-crease-beside-drafted-side | volume | [docs/known-bugs.md#a-round-runs-on-across-a-crease-of-a-few-degrees-and-says-so](../known-bugs.md#a-round-runs-on-across-a-crease-of-a-few-degrees-and-says-so) |
 | solidcore/fillets/15505-chamfer-end-cap-between-two-faces-of-one-cylinder | topology | [docs/modeling/README.md#known-rows-that-are-not-kernel-defects](README.md#known-rows-that-are-not-kernel-defects) |
 | solidcore/fillets/15505-chamfer-end-cap-on-one-cylinder-face | topology | [docs/modeling/README.md#known-rows-that-are-not-kernel-defects](README.md#known-rows-that-are-not-kernel-defects) |
 | solidcore/fillets/16654-fillet-drum-rim-beside-a-boss-flush-with-its-top-r0-5 | refused | [docs/modeling/README.md#not-built](README.md#not-built) |

@@ -646,14 +646,15 @@ ElementRef ShortPiece(const Document& doc) {
 
 } // namespace
 
-TEST_CASE("A round runs on past a crease only as far as it is tangent",
+TEST_CASE("A round that runs on past a crease nobody picked says so",
           "[fillet]") {
-  // docs/modeling/README.md#a-blend-runs-only-as-far-as-it-is-tangent: the
+  // docs/modeling/README.md#a-blend-that-runs-on-past-a-crease-says-so: the
   // blend builder's tangent walk crosses a crease of up to 5.7 degrees and
-  // rounds the edge past it, which nobody picked. Under the builder's own
-  // angular tolerance (0.57 degrees) the two pieces are one smooth run and
-  // both are rounded; past it, up to where the builder stops on its own,
-  // the round is refused, naming the crease; past that it ends there.
+  // rounds the edge past it, which nobody picked, and cannot be stopped
+  // there. Under the builder's own angular tolerance (0.57 degrees) the two
+  // pieces are one smooth run; past it, up to where the builder stops on
+  // its own, the round builds as the builder walks it and the feature warns,
+  // naming the crease and the edge; past that it ends at the crease.
   const auto round = [](double deg, bool both) {
     Document doc;
     CreasedBlock(doc, deg);
@@ -666,7 +667,7 @@ TEST_CASE("A round runs on past a crease only as far as it is tangent",
     const auto* f = doc.GetFeature(doc.FeatureCount() - 1);
     struct Out {
       bool built;
-      std::string error;
+      std::string error, warning;
       double removed;
       int shortEdges;
     };
@@ -680,35 +681,41 @@ TEST_CASE("A round runs on past a crease only as far as it is tangent",
               q.x < 0.8f + 1e-3f;
       sharp += all ? 1 : 0;
     }
-    return Out{built, f->GetError(),
+    return Out{built, f->GetError(), f->GetWarning(),
                before - doc.GetBodies().at(0).shape.Volume(), sharp};
   };
   // The round's spandrel (1 - pi/4) r^2 along the long piece's 5.2 mm
   // (and its run past the end at the crease aside): what one piece removes.
   const double one = (1.0 - std::numbers::pi / 4.0) * 0.16 * 5.2;
 
-  SECTION("0.5 degrees: one smooth run, both pieces rounded") {
+  SECTION("0.5 degrees: one smooth run, both pieces rounded, no warning") {
     const auto out = round(0.5, false);
     INFO(out.error << "; removed " << out.removed << " mm3, one piece's "
                    << one);
     REQUIRE(out.built);
+    CHECK(out.warning.empty());
     CHECK(out.shortEdges == 0);
     CHECK(out.removed > one * 1.1);
   }
   for (const double deg : {1.0, 3.0}) {
-    DYNAMIC_SECTION(deg << " degrees: refused, naming the crease") {
+    DYNAMIC_SECTION(deg << " degrees: built past the crease, and said") {
       const auto out = round(deg, false);
-      CHECK_FALSE(out.built);
-      CHECK(out.error.find("would run on across a crease of " +
-                           std::format("{:.3g}", deg) +
-                           " degrees at (0.800, "
-                           "0.000, 0.000)") != std::string::npos);
-      CHECK(out.error.find("which is not picked") != std::string::npos);
-      CHECK(out.removed == 0.0);
-      // Both picked: both rounded, as asked.
+      INFO(out.error);
+      REQUIRE(out.built);
+      CHECK(out.error.empty());
+      // The short piece rounded too: more than the long piece's spandrel.
+      CHECK(out.shortEdges == 0);
+      CHECK(out.removed > one);
+      CHECK(out.warning.find("runs on across a crease of " +
+                             std::format("{:.3g}", deg) +
+                             " degrees at (0.800, "
+                             "0.000, 0.000) to edge '") != std::string::npos);
+      CHECK(out.warning.find("which is not picked") != std::string::npos);
+      // Both picked: both rounded, as asked, and nothing to say.
       const auto both = round(deg, true);
       INFO(both.error);
       CHECK(both.built);
+      CHECK(both.warning.empty());
       CHECK(both.shortEdges == 0);
     }
   }
@@ -720,6 +727,7 @@ TEST_CASE("A round runs on past a crease only as far as it is tangent",
     INFO(out.error << "; removed " << out.removed << " mm3, one piece's "
                    << one);
     REQUIRE(out.built);
+    CHECK(out.warning.empty());
     CHECK(out.removed > one);
     CHECK(out.removed < one * 6.0 / 5.2);
   }

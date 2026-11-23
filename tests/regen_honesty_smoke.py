@@ -438,6 +438,40 @@ def main():
                f"import_sketch names the extrude it broke: {reg}")
         healthy(d.call("undo"), "one undo takes the drawing back out")
 
+        # A blend that builds more than was picked says so in its own
+        # answer: a round of one piece of an edge whose bottom creases 3
+        # degrees, which OpenCASCADE's tangent walk runs on across
+        # (docs/modeling/README.md#a-blend-that-runs-on-past-a-crease-says-so).
+        d.call("new_project")
+        rise = 5.2 * math.tan(math.radians(3.0))
+        pts = [(0, 0), (0.8, 0), (6, rise), (6, 8), (0, 8)]
+        sk = d.call("add_feature", feature={
+            "type": "Sketch", "name": "Section",
+            "plane": {"origin": [0, 0, 0], "normal": [0, -1, 0],
+                      "uAxis": [1, 0, 0]},
+            "entities": [{"type": "line", "id": i + 1, "a": list(pts[i]),
+                          "b": list(pts[(i + 1) % len(pts)])}
+                         for i in range(len(pts))]})
+        healthy(d.call("add_feature", feature={
+            "type": "Extrude", "name": "Block", "sketch_id": sk["id"],
+            "distance": 12, "mode": "new_body"}), "the creased block")
+        body = d.call("list_elements")["bodies"][0]
+        long_piece = [e for e in body["edges"]
+                      if abs(e["midpoint"][1]) < 1e-6 and
+                      0.8 < e["midpoint"][0] < 6 and e["midpoint"][2] < 0.3]
+        expect(len(long_piece) == 1, f"one long piece: {long_piece}")
+        r = d.call("add_feature", feature={
+            "type": "Fillet", "name": "Round", "radius": 0.4,
+            "edges": [{"feature_id": body["created_by"],
+                       "element": long_piece[0]["name"]}]})
+        healthy(r, "the round past the crease builds")
+        said = [w for w in r["regen"].get("warnings", [])
+                if w.get("name") == "Round"]
+        expect(said and "runs on across a crease of 3 degrees" in
+               said[0].get("warning", "") and
+               "which is not picked" in said[0]["warning"],
+               f"the round's own answer warns of its run-on: {r['regen']}")
+
         print("regen_honesty_smoke: OK")
     finally:
         app.terminate()
