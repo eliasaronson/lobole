@@ -909,8 +909,16 @@ run clean; what they found is the refusals above and the cases in
 `tests/reader_cases/`, by kind: a number past an integer's range (2^64,
 2^53 + 1, -0) read into an id; a key the writer writes only beside
 another; a list longer than the app ever writes; a feature built on a
-sketch that failed, which spun a boolean for minutes. On Ubuntu 24.04 the
-sweep also found OpenCASCADE's own: its B-Rep readers take each section
+sketch that failed, which spun a boolean for minutes. The fixed seed's
+every-case run found three more: a list item a study names by its name
+or its occurrence, a held direction or a refined face, listed twice (a
+grown array, which the save did not keep, or kept as that many); a feature whose id was lost, given the document's
+next, which a later feature in the file held; and a pad on a spline whose
+pole the damage threw aside, rounded past where its edge bends (the [bend
+bound](../modeling/README.md#bounds-that-refuse)). It also found the
+harness's own: a simulation's stored mesh is derived, and the walk over a
+mesh wrapped 10 000 arrays deep that loaded (as a derived file's damage
+should) ran off its stack. On Ubuntu 24.04 the sweep also found OpenCASCADE's own: its B-Rep readers take each section
 keyword with an unbounded `IS >> char[255]` when OCC is built as C++17, so a
 derived part's snapshot with a run of bytes dropped overran the stack
 ("stack smashing detected" in `BinTools_ShapeSet::ReadGeometry`). Every
