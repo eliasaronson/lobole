@@ -1,0 +1,101 @@
+{
+  "format": "designer-document",
+  "kind": "simulation",
+  "mesh": {
+    "refinements": [
+      {
+        "face": {
+          "element": "1/face5",
+          "feature_id": 0
+        },
+        "occurrence": 2,
+        "size": 3.0
+      },
+      {
+        "face": {
+          "element": "1/face5",
+          "feature_id": 0
+        },
+        "occurrence": 2,
+        "size": 3.0
+      },
+      {
+        "face": {
+          "element": "1/face5",
+          "feature_id": 0
+        },
+        "occurrence": 2,
+        "size": 3.0
+      }
+    ],
+    "size": 12.0,
+    "size_expr": "block_mesh * 2"
+  },
+  "roles": [
+    {
+      "mesh_size": 6.0,
+      "mesh_size_expr": "block_mesh",
+      "occurrence": 2,
+      "role": "meshed"
+    },
+    {
+      "occurrence": 1,
+      "role": "bonded"
+    }
+  ],
+  "studies": [
+    {
+      "id": 3,
+      "loads": [
+        {
+          "face": {
+            "element": "1/face4",
+            "feature_id": 0
+          },
+          "id": 4,
+          "magnitude": 0.0,
+          "occurrence": 1,
+          "type": "fixed"
+        },
+        {
+          "face": {
+            "element": "1/face5",
+            "feature_id": 0
+          },
+          "id": 5,
+          "magnitude": 0.5,
+          "occurrence": 2,
+          "type": "pressure"
+        }
+      ],
+      "mesh_size": 0.0,
+      "name": "On the shared mesh",
+      "type": "Study"
+    },
+    {
+      "id": 8,
+      "loads": [
+        {
+          "face": {
+            "element": "1/face4",
+            "feature_id": 0
+          },
+          "id": 9,
+          "magnitude": 0.0,
+          "occurrence": 1,
+          "type": "fixed"
+        }
+      ],
+      "mesh_size": 4.0,
+      "name": "A mesh of its own",
+      "type": "Study"
+    }
+  ],
+  "subject": {
+    "configuration": 7,
+    "document": 4,
+    "kind": "assembly",
+    "name": "Stacked blocks"
+  },
+  "version": 236
+}

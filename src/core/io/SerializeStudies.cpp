@@ -635,8 +635,16 @@ fem::Study StudyFromJson(const json& j) {
     s.participants.push_back(std::move(pt));
   }
 
-  for (const json& rj : j.value("refinements", json::array()))
-    s.refinements.push_back(RefinementFromJson(rj));
+  for (const json& rj : j.value("refinements", json::array())) {
+    fem::Refinement r = RefinementFromJson(rj);
+    // One a face: the tool and add_refinement replace a face's own.
+    for (const fem::Refinement& have : s.refinements)
+      if (have.face.featureId == r.face.featureId &&
+          have.face.name == r.face.name && have.occurrenceId == r.occurrenceId)
+        throw std::runtime_error("study refinement: face '" + r.face.name +
+                                 "' is refined twice");
+    s.refinements.push_back(std::move(r));
+  }
 
   for (const json& lj : j.value("loads", json::array())) {
     readctx::RefuseUnknownKeys(

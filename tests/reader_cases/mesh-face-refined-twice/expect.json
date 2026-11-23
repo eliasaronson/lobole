@@ -1,0 +1,12 @@
+{
+  "expect": "refused",
+  "family": "simulation-dir",
+  "id": "simulation-dir/v225-simulation-tab/index.json:grow_array:0",
+  "input": "tree.lob",
+  "message": [
+    "index.json",
+    "mesh.refinements[1]: face '1/face5' is refined twice"
+  ],
+  "seed": 0,
+  "note": "the grown list cut to its first three copies"
+}

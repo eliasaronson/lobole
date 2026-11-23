@@ -1599,7 +1599,8 @@ static constexpr MethodDoc SimulationMethods[] = {
      "docs/scripting/rpc.md#numbers-that-take-an-expression). On `study` it "
      "is that study's own, and the study meshes apart; with no `study` it "
      "is on the simulation's mesh, which every study that sets none shares "
-     "(the toolbar's Refine). A face a feature suppressed for the analysis "
+     "(the toolbar's Refine). A face refined already takes the size given "
+     "(one refinement a face). A face a feature suppressed for the analysis "
      "made is refused, naming it.",
      "face, occurrence, size, size_expr, study, simulation"},
     {"remove_refinement",
@@ -3481,13 +3482,22 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
       refuseSuppressedFace(at);
     }
     // On a study, its own (it then meshes apart); without one, the
-    // simulation's mesh, which every study that sets none shares.
+    // simulation's mesh, which every study that sets none shares. One a
+    // face, as the toolbar's Refine keeps it: a face refined already takes
+    // the size given.
+    const auto same = [&](const fem::Refinement& x) {
+      return x.face.featureId == r.face.featureId &&
+             x.face.name == r.face.name && x.occurrenceId == r.occurrenceId;
+    };
     if (p.contains("study")) {
       const uint64_t id = p.at("study").get<uint64_t>();
-      modifyStudy(id, "Add refinement",
-                  [&](fem::Study& s) { s.refinements.push_back(r); });
+      modifyStudy(id, "Add refinement", [&](fem::Study& s) {
+        std::erase_if(s.refinements, same);
+        s.refinements.push_back(r);
+      });
     } else {
       fem::SimMesh mesh = host.sim->Mesh();
+      std::erase_if(mesh.refinements, same);
       mesh.refinements.push_back(r);
       host.sim->SetMesh(std::move(mesh));
     }

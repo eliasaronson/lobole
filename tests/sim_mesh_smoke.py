@@ -76,8 +76,14 @@ def mesh_report(d):
            direction=[0, 0, -1],
            face={"feature_id": created_by, "element": face[(1, 0, 0)]})
     # A refinement coarser than the study's own size: it can take nothing.
-    d.call("add_refinement", study=study, size=50.0,
-           face={"feature_id": created_by, "element": face[(0, 0, 1)]})
+    # Asked twice, the face keeps one, at the size given last (a file with
+    # two on one face is refused).
+    top = {"feature_id": created_by, "element": face[(0, 0, 1)]}
+    d.call("add_refinement", study=study, size=40.0, face=top)
+    d.call("add_refinement", study=study, size=50.0, face=top)
+    row = [s for s in d.call("list_studies")["studies"] if s["id"] == study]
+    expect(len(row) == 1 and row[0]["refinements"] == 1,
+           f"one refinement on the face asked twice: {row}")
     refused(d, "set_mesh_display", "no mesh to draw", study=study,
             view="edges")
     try:

@@ -357,7 +357,15 @@ std::unique_ptr<fem::SimDocument> FromBodyJson(const json& j) {
     throw std::runtime_error("mesh: `refinements` is a list");
   for (size_t i = 0; i < refinements.size(); ++i)
     mesh.refinements.push_back(AtItem("mesh.refinements", i, [&] {
-      return RefinementFromJson(refinements[i]);
+      fem::Refinement r = RefinementFromJson(refinements[i]);
+      // One a face: the tool and add_refinement replace a face's own.
+      for (const fem::Refinement& have : mesh.refinements)
+        if (have.face.featureId == r.face.featureId &&
+            have.face.name == r.face.name &&
+            have.occurrenceId == r.occurrenceId)
+          throw std::runtime_error("face '" + r.face.name +
+                                   "' is refined twice");
+      return r;
     }));
   sim->SetMesh(std::move(mesh));
   if (j.contains("geometry")) {
