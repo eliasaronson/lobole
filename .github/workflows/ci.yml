@@ -574,7 +574,7 @@ jobs:
 
       - name: Dependencies (cache)
         id: deps
-        uses: actions/cache@v6
+        uses: actions/cache/restore@v6
         with:
           path: ~/.local/share/lobole/macos-deps
           key: macos-deps-${{ steps.runner.outputs.os }}-${{ steps.runner.outputs.xcode }}-${{ hashFiles('packaging/macos/deps.sh', 'packaging/appimage/deps.sh', 'nix/patches/occt-*.patch') }}
@@ -586,6 +586,16 @@ jobs:
           else
             packaging/macos/deps.sh
           fi
+
+      # Saved here, not when the job ends: they take an hour and a half to
+      # build, and a job that then fails to compile the app would build them
+      # again on its next run.
+      - name: Dependencies (save)
+        if: steps.deps.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: ~/.local/share/lobole/macos-deps
+          key: ${{ steps.deps.outputs.cache-primary-key }}
 
       - name: ccache (restore)
         uses: actions/cache/restore@v6

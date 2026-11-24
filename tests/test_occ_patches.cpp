@@ -236,7 +236,11 @@ TEST_CASE("A shell of the clamp's screw answers alike on every copy",
                       bodies[0].shape.Volume());
         answers.insert(volume);
       } else {
-        answers.insert("refused: " + shell.GetError());
+        // What follows the semicolon is the search for a wall that does
+        // fit, which has a wall-clock share of the draw's time and says so
+        // when it runs out: on a loaded machine, not an answer of the kernel.
+        const std::string why = shell.GetError();
+        answers.insert("refused: " + why.substr(0, why.find(';')));
       }
     }
     std::string seen;
