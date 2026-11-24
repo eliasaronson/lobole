@@ -108,6 +108,7 @@ def bundle_libraries(app, executable_src, extra, search):
     macos = app / "Contents" / "MacOS"
     frameworks = app / "Contents" / "Frameworks"
     frameworks.mkdir(parents=True, exist_ok=True)
+    macos.mkdir(parents=True, exist_ok=True)
     exe = macos / "lobole"
     shutil.copy2(executable_src, exe)
     os.chmod(exe, 0o755)
