@@ -668,7 +668,7 @@ jobs:
                   print(case.get("name"))
           PY
           echo "$(wc -l < build/skipped.txt) tests skipped without a device"
-          ctest --test-dir build --tests-from-file build/skipped.txt -j1 \
+          ctest --test-dir build --tests-from-file "$PWD/build/skipped.txt" -j1 \
             --output-on-failure
 
       # continue-on-error, for the reason above. The feature-limit case is

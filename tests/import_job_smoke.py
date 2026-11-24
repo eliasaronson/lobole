@@ -127,11 +127,13 @@ def main():
                     fractions.append(jobs[0]["fraction"])
                 # The instance answers while the import runs.
                 other.call("ping")
-                time.sleep(0.1)
+                # The mid mesh reads in a quarter of a second: a 0.1 s
+                # poll saw one fraction of it on a loaded runner.
+                time.sleep(0.01)
             call.join()
             expect(call.error is None, f"mid import failed: {call.error}")
             expect(len(set(f for f in fractions if f is not None)) >= 2,
-                   f"the fraction never moved: {fractions}")
+                   f"the fraction never moved: {fractions[:8]}")
             expect(call.result["mesh"]["triangles"] == n_mid,
                    f"mid reply: {call.result}")
             other.close()
