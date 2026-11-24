@@ -7,6 +7,7 @@
 // degrees, and scanned threads of known pitch, diameter and hand, each
 // against the generator's numbers.
 
+#include "PortableNoise.h"
 #include "SectionOutlines.h"
 #include "TestIO.h"
 #include "mesh_organic.h"
@@ -53,7 +54,7 @@ mesh::TriMesh ScannedPrism(const std::vector<Prim>& prims, double height,
     }
   }
   std::mt19937 rng(seed);
-  std::normal_distribution<double> gauss(0.0, noise);
+  testnoise::Gauss gauss(noise);
   mesh::TriMesh m;
   const int levels = std::max(1, int(std::round(height / spacing)));
   const uint32_t n = static_cast<uint32_t>(ring.size());
@@ -248,7 +249,7 @@ mesh::TriMesh ScannedThread(double rMajor, double pitch, bool rightHand,
   const int nt = std::max(16, int(std::round(2 * kPi * rMajor / spacing)));
   const int nz = std::max(2, int(std::round(length / spacing)));
   std::mt19937 rng(seed);
-  std::normal_distribution<double> gauss(0.0, noise);
+  testnoise::Gauss gauss(noise);
   mesh::TriMesh m;
   const double hand = rightHand ? 1.0 : -1.0;
   for (int k = 0; k <= nz; k++)

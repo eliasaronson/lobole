@@ -368,7 +368,11 @@ def main():
         # --- contact_report async: a `contact` job -----------------------
         # LOBOLE_TEST_CONTACT_PAIR_MS (set at launch) holds every pair of
         # an ASYNC run, so it is still running when it is looked at.
-        started = d.call("contact_report", mode="mesh", **{"async": True})
+        # The hold counts against the report's own deadline (20 s), and
+        # with one worker (a three-core runner) fifteen pairs held 1.5 s
+        # each pass it, the last three left out: this run is given the room.
+        started = d.call("contact_report", mode="mesh", deadline_s=120,
+                         **{"async": True})
         expect(started["started"] and started["kind"] == "contact"
                and not started["outlives_client"],
                f"an async report is a job: {started}")

@@ -29,6 +29,23 @@ the heading if it is not here yet.
   re-run with the pose nudged by ±ε and treat a volume that vanishes as
   touching.
 
+### A loose plane on a round offers a sphere on macOS
+
+A plane asked of a scanned round, at three times the scan's own tolerance
+(0.6 mm on the boss fixture of `tests/test_mesh_fit_scan.cpp`, "A concave
+round between two faces is the generated torus"), is refused on every
+platform as a strip along the crown of a round. What the refusal then offers
+differs: the round's torus (R11.35, tube 3.44) from the Linux build, a sphere
+of R262 from the macOS one, whose strip also turns 65.3 degrees where Linux's
+turns 63.4. The fixture is the same to the printed digits, so the grown
+region differs in its last triangles, by fused multiply-adds on arm64 or by a
+container's order; neither has been looked for. At the scan's own tolerance
+both name the torus, and that is what the test holds on macOS.
+
+What would fix it: finding which comparison in `mesh::GrowFrom` turns on the
+last digit, on a Mac, and a ranking of the offered surfaces that a 65 degree
+strip cannot give to a sphere of R262.
+
 ## Modeling
 
 ### Sheet metal: 6061-T6's bend radius is unsourced

@@ -48,7 +48,12 @@ def main():
     try:
         port = m._resolve_port()
     except RuntimeError as e:
-        if "VkResult" in str(e) or "no usable Vulkan device" in str(e):
+        # Exit code 3 is the app's own "could not start a renderer"
+        # (smoke_app.EXIT_NO_RENDERER); the words of its message change
+        # with the platform and the cause, and only the last of them are
+        # quoted here.
+        if (" exited 3." in str(e) or "VkResult" in str(e)
+                or "no usable Vulkan device" in str(e)):
             print(f"SKIP: no usable Vulkan device here ({e})")
             return 77
         raise
