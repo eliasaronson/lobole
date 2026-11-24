@@ -24,7 +24,7 @@
   <url type="homepage">https://github.com/eliasaronson/lobole</url>
   <url type="bugtracker">https://github.com/eliasaronson/lobole/issues</url>
   <releases>
-    <release version="0.3.0" date="2026-11-23">
+    <release version="0.3.0" date="2026-11-24">
       <description>
         <p>A macOS app. Simulations are documents of their own, with new supports and loads. Scans can be compared, aligned and traced into sketches. Fillets and chamfers that do not fit say the size that does.</p>
         <ul>
