@@ -297,6 +297,23 @@ strip cannot give to a sphere of R262.
   validated the whole result, passed to `BooleanRefusal` to skip its
   per-face BRepCheck.
 
+### Mass properties cost three times today's rule on macOS
+
+- **Symptom:** on the macOS CI runner, `ComputeMassProps` of the tube
+  crossed by forty bars took 3.07 times the CPU time of OpenCASCADE's three
+  passes (0.135 s against 0.044 s), where the Linux build measures 2.0 and
+  the test's budget is 3.0 ("a tube trimmed by 40 intersection curves",
+  `tests/test_integrate.cpp`). Two earlier runs on the same runner were
+  under the budget, so it sits near 3 there. The answer is right: the
+  volume and its uncertainty pass. The budget is not held on macOS.
+- **Cause:** not known. The two sides are compiled by different toolchains
+  than on Linux (Apple clang, arm64, OpenCASCADE built by
+  `packaging/macos/deps.sh`), so either our integrator is slower there or
+  OpenCASCADE's is faster.
+- **Where:** `cad::Integrate`.
+- **Likely fix:** `tools/profile.sh` has no macOS mode; a sample of the test
+  under Instruments on a Mac would say which side moved.
+
 ## Rendering
 
 ### The remote is silent while a Wayland window is not on screen
