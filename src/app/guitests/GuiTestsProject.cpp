@@ -1059,7 +1059,10 @@ void RegisterProjectGuiTests(ImGuiTestEngine* engine) {
                             std::chrono::seconds(5));
     ctx->MenuClick("File/Open Recent/###recent0");
     ctx->Yield(3);
-    IM_CHECK(s_App->recoveryOffer == saved);
+    // The recent list holds the canonical spelling, which on macOS is not
+    // the temp directory's own (/private/var for /var).
+    std::error_code same;
+    IM_CHECK(fs::equivalent(s_App->recoveryOffer, saved, same));
     IM_CHECK(ctx->ItemExists("//Recover autosave?/Recover autosave"));
     ctx->ItemClick("//Recover autosave?/Open saved file");
     IM_CHECK(WaitForOpen(ctx));

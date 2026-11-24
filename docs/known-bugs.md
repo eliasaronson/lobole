@@ -319,6 +319,23 @@ strip cannot give to a sphere of R262.
   by the loop itself on Wayland, skipping the frame while the last one has
   not been shown.
 
+### GPU pass times read zero on a virtualised Mac
+
+- **Symptom:** on the macOS CI runner ("Apple Paravirtual device", through
+  MoltenVK) `frame_stats` reports `gpu.supported: true` with samples taken
+  and every pass at 0.0 ms. `offscreen_smoke` and the GUI test
+  `frametime/frame_stats_measure_hud_stays_hidden` fail there on exactly
+  that; both steps are `continue-on-error` in ci.yml. Everything else that
+  touches the device passes: the femgpu suite, the light rig, the device
+  rebuild, the baseline render.
+- **Cause:** not known. Either the device reports a `timestampPeriod` of
+  zero, or its timestamp queries all return the same value. Whether a real
+  Mac's GPU does the same has not been seen.
+- **Where:** `src/render/GpuTimer.cpp`.
+- **Likely fix:** on a Mac, print the period and two raw timestamps. If the
+  virtual device alone is at fault, report `supported: false` when a
+  frame's timestamps do not advance.
+
 ## Scripting
 
 ### A remote `item_click` does not leave a text field focused
