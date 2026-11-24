@@ -80,7 +80,8 @@ struct Plate {
                                glm::dvec3(1, 0, 0)));
     for (int i = 0; i < holes; ++i)
       centres->AddEntity(
-          sketch::Point{{static_cast<float>(25.0 + 22.0 * i), 30.0f}, i + 1});
+          sketch::Point{{static_cast<float>(25.0 + 22.0 * i), 30.0f},
+                        static_cast<uint32_t>(i + 1)});
     doc.AddFeature(std::move(centres));
     const uint64_t at = doc.GetFeature(doc.FeatureCount() - 1)->GetId();
     auto hole = std::make_unique<HoleFeature>("Fastener holes", at,
