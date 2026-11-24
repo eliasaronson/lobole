@@ -666,7 +666,9 @@ endif()
 find_package(Netgen CONFIG QUIET)
 add_library(fem_mesher STATIC src/core/fem/FemMesher.cpp)
 target_include_directories(fem_mesher PRIVATE src)
-target_link_libraries(fem_mesher PRIVATE glm::glm)
+# spdlog too, for its compile definitions: without them a Windows build
+# takes the headers as header-only and defines what the DLL already does.
+target_link_libraries(fem_mesher PRIVATE glm::glm spdlog::spdlog)
 target_compile_definitions(fem_mesher PRIVATE GLM_FORCE_DEPTH_ZERO_TO_ONE)
 if(OPENCASCADE_FOUND)
     target_link_libraries(fem_mesher PRIVATE ${OPENCASCADE_LIBS})
