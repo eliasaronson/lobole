@@ -2796,6 +2796,7 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
   t = IM_REGISTER_TEST(engine, "sim", "the_legend_holds_the_result_controls");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     using Field = ui::SimulationState::Field;
+#ifdef HAVE_NETGEN // the result needs a mesh
     BuildCantileverStudy(ctx, 10.0);
     const uint64_t sid = s_App->simulation.activeStudyId;
     ToolbarClick(ctx, "###tb_sim_run");
@@ -2921,6 +2922,7 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     SimWindowShot(ctx, "result-row-size");
     ui::ExitSimulation(*s_App);
     ctx->Yield();
+#endif             // HAVE_NETGEN
   };
 
   // The geometry step whole, in the window (docs/simulation/README.md
@@ -3219,6 +3221,7 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
                        "a_full_result_is_cut_through_its_elements");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     using Field = ui::SimulationState::Field;
+#ifdef HAVE_NETGEN // the result needs a mesh
     BuildCantileverStudy(ctx, 10.0);
     const uint64_t sid = s_App->simulation.activeStudyId;
     SimTreeClick(ctx, "###study_sel_" + std::to_string(sid));
@@ -3279,5 +3282,6 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     ui::RemoveSection(*s_App, cut);
     ui::ExitSimulation(*s_App);
     ctx->Yield();
+#endif             // HAVE_NETGEN
   };
 }

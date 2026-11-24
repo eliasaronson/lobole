@@ -602,7 +602,9 @@ jobs:
       - name: Build
         run: |
           . tools/macos-env.sh
-          cmake --build build -j"$(sysctl -n hw.ncpu)"
+          # -k 0: a round on a runner is long, so one red build names every
+          # file that does not compile here, not the first.
+          cmake --build build -j"$(sysctl -n hw.ncpu)" -- -k 0
 
       - name: ccache (save)
         if: always()

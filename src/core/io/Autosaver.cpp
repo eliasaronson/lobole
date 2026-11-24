@@ -208,8 +208,7 @@ namespace {
 
 int64_t UnixTime(fs::file_time_type t) {
   return std::chrono::duration_cast<std::chrono::seconds>(
-             std::chrono::clock_cast<std::chrono::system_clock>(t)
-                 .time_since_epoch())
+             std::chrono::file_clock::to_sys(t).time_since_epoch())
       .count();
 }
 
